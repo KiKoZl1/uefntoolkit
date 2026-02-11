@@ -72,7 +72,7 @@ export default function ProjectDetail() {
         user_id: user.id,
         status: "completed",
         parsed_data: result.datasets as any,
-        metrics: { kpis: metrics.kpis, timeseries: metrics.timeseries, rankings: metrics.rankings } as any,
+        metrics: { kpis: metrics.kpis, timeseries: metrics.timeseries, rankings: metrics.rankings, distributions: metrics.distributions } as any,
         diagnostics: metrics.diagnostics as any,
       }).select().single();
 
