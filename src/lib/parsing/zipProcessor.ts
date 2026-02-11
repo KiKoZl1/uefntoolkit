@@ -1,9 +1,10 @@
 /**
  * ZIP extraction and CSV processing pipeline.
+ * Identifies datasets by CONTENT analysis (headers + data), not filenames.
  */
 import JSZip from 'jszip';
 import Papa from 'papaparse';
-import { identifyDataset, type DatasetDef } from './datasetRegistry';
+import { identifyDatasetByContent, type IdentifiedDataset } from './datasetRegistry';
 import { normalizeRow } from './normalize';
 
 export interface ProcessingLog {
@@ -19,6 +20,7 @@ export interface ParsedDataset {
   rows: Record<string, any>[];
   columns: string[];
   rowCount: number;
+  confidence: string;
 }
 
 export interface ProcessingResult {
@@ -44,7 +46,6 @@ export async function processZipFile(
 
   onProgress?.(15, 'Extraindo CSVs...');
 
-  // Collect CSV files (skip __MACOSX, etc.)
   const csvFiles: { name: string; entry: JSZip.JSZipObject }[] = [];
   zip.forEach((path, entry) => {
     if (
@@ -68,12 +69,12 @@ export async function processZipFile(
   for (let i = 0; i < csvFiles.length; i++) {
     const { name, entry } = csvFiles[i];
     const pct = 15 + Math.round((i / csvFiles.length) * 75);
-    onProgress?.(pct, `Processando ${name}...`);
+    onProgress?.(pct, `Analisando ${name}...`);
 
     try {
       const text = await entry.async('text');
-      
-      // Detect separator: try ; first (common pt-BR), fallback to ,
+
+      // Detect separator
       const firstLine = text.split('\n')[0] || '';
       const delimiter = firstLine.includes(';') ? ';' : ',';
 
@@ -84,35 +85,50 @@ export async function processZipFile(
       });
 
       if (parsed.errors.length > 0) {
-        logs.push({
-          type: 'warning',
-          message: `${name}: ${parsed.errors.length} erro(s) de parsing.`,
-        });
+        logs.push({ type: 'warning', message: `${name}: ${parsed.errors.length} erro(s) de parsing.` });
       }
 
-      const dataset = identifyDataset(name);
-      if (!dataset) {
-        logs.push({ type: 'warning', message: `${name}: não identificado no registry. Ignorado.` });
+      const headers = parsed.meta.fields || [];
+      const rawRows = parsed.data;
+
+      // Identify by content analysis
+      const identified = identifyDatasetByContent(name, headers, rawRows);
+
+      if (!identified) {
+        logs.push({ type: 'warning', message: `${name}: não identificado (headers: ${headers.slice(0, 4).join(', ')}...). Ignorado.` });
         continue;
       }
 
-      const normalizedRows = parsed.data.map(row => normalizeRow(row));
+      // If we already have this canonical, only replace if higher confidence
+      if (datasets[identified.canonical]) {
+        const existing = datasets[identified.canonical];
+        const confOrder = { high: 3, medium: 2, low: 1 };
+        if ((confOrder[identified.confidence] || 0) <= (confOrder[existing.confidence as keyof typeof confOrder] || 0)) {
+          logs.push({ type: 'info', message: `${name}: duplicata de "${identified.label}" (mantendo versão anterior).` });
+          continue;
+        }
+      }
+
+      const normalizedRows = rawRows.map(row => normalizeRow(row));
       const columns = normalizedRows.length > 0 ? Object.keys(normalizedRows[0]) : [];
 
-      datasets[dataset.canonical] = {
-        canonical: dataset.canonical,
-        category: dataset.category,
-        label: dataset.label,
+      datasets[identified.canonical] = {
+        canonical: identified.canonical,
+        category: identified.category,
+        label: identified.label,
         fileName: name,
         rows: normalizedRows,
         columns,
         rowCount: normalizedRows.length,
+        confidence: identified.confidence,
       };
 
       totalRows += normalizedRows.length;
+
+      const confEmoji = identified.confidence === 'high' ? '✅' : identified.confidence === 'medium' ? '🟡' : '🔸';
       logs.push({
         type: 'info',
-        message: `${name} → ${dataset.label} (${normalizedRows.length} linhas).`,
+        message: `${confEmoji} ${name} → ${identified.label} (${normalizedRows.length} linhas) [${identified.reason}]`,
       });
     } catch (err) {
       logs.push({
@@ -131,6 +147,9 @@ export async function processZipFile(
       logs.push({ type: 'warning', message: `Dataset esperado não encontrado: ${key}.` });
     }
   }
+
+  const identified = Object.keys(datasets).length;
+  logs.push({ type: 'info', message: `📊 ${identified}/${csvFiles.length} CSVs identificados com sucesso.` });
 
   onProgress?.(100, 'Concluído!');
   return { datasets, logs, csvCount, totalRows };
