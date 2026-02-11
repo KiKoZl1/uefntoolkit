@@ -58,7 +58,7 @@ export default function ProjectDetail() {
         project_id: id,
         user_id: user.id,
         file_name: `upload_${new Date().toISOString().slice(0, 10)}.zip`,
-        status: "processed",
+        status: "completed",
         csv_count: result.csvCount,
         warnings: result.logs.filter(l => l.type === 'warning').map(l => l.message) as any,
       }).select().single();

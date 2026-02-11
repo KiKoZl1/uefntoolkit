@@ -96,9 +96,21 @@ export function identifyDatasetByContent(
     if (hasDateColumn(headers) && headers.length <= 4) {
       return { canonical: 'acq_impressions_total', category: 'acquisition', label: 'Impressões Totais', confidence: 'high', reason: 'Impressions timeseries (total)' };
     }
-    // Fallback: if filename hints at total
     if (fnContains(fileName, 'total')) {
       return { canonical: 'acq_impressions_total', category: 'acquisition', label: 'Impressões Totais', confidence: 'medium', reason: 'Impressions + filename hint "total"' };
+    }
+  }
+
+  // ═══ IMPRESSIONS (pivoted breakdowns — no "impression" in headers) ═══
+  if (fnContains(fileName, 'impressao', 'impression', 'impressoe')) {
+    if (fnContains(fileName, 'fonte', 'source', 'fuente')) {
+      return { canonical: 'acq_impressions_source', category: 'acquisition', label: 'Impressões por Fonte', confidence: 'high', reason: 'Filename: impressions by source (pivoted)' };
+    }
+    if (fnContains(fileName, 'pais', 'country', 'countr')) {
+      return { canonical: 'acq_impressions_country', category: 'acquisition', label: 'Impressões por País', confidence: 'high', reason: 'Filename: impressions by country (pivoted)' };
+    }
+    if (fnContains(fileName, 'plataforma', 'platform')) {
+      return { canonical: 'acq_impressions_platform', category: 'acquisition', label: 'Impressões por Plataforma', confidence: 'high', reason: 'Filename: impressions by platform (pivoted)' };
     }
   }
 
@@ -121,30 +133,24 @@ export function identifyDatasetByContent(
     }
   }
 
-  // ═══ ACTIVE PLAYTIME ═══
-  if (headersContainAny(headers, 'playtime', 'tempo de jogo', 'active play', 'tiempo de juego', 'spielzeit')) {
-    if (headersContainAny(headers, 'country', 'pais', 'paises')) {
-      return { canonical: 'eng_playtime_country', category: 'engagement', label: 'Tempo de Jogo por País', confidence: 'high', reason: 'Playtime + country' };
+  // ═══ CLICKS (pivoted breakdowns — no "click" in headers) ═══
+  if (fnContains(fileName, 'clique', 'click')) {
+    if (fnContains(fileName, 'fonte', 'source', 'fuente')) {
+      return { canonical: 'acq_clicks_source', category: 'acquisition', label: 'Cliques por Fonte', confidence: 'high', reason: 'Filename: clicks by source (pivoted)' };
     }
-    if (headersContainAny(headers, 'platform', 'plataforma')) {
-      return { canonical: 'eng_playtime_platform', category: 'engagement', label: 'Tempo de Jogo por Plataforma', confidence: 'high', reason: 'Playtime + platform' };
+    if (fnContains(fileName, 'pais', 'country', 'countr')) {
+      return { canonical: 'acq_clicks_country', category: 'acquisition', label: 'Cliques por País', confidence: 'high', reason: 'Filename: clicks by country (pivoted)' };
     }
-    return { canonical: 'eng_playtime_total', category: 'engagement', label: 'Tempo de Jogo Total', confidence: 'high', reason: 'Playtime timeseries' };
-  }
-
-  // ═══ ACTIVE PEOPLE ═══
-  if (headersContainAny(headers, 'active people', 'pessoas ativas', 'jugadores activos', 'aktive spieler')) {
-    if (headersContainAny(headers, 'country', 'pais', 'paises')) {
-      return { canonical: 'eng_active_country', category: 'engagement', label: 'Pessoas Ativas por País', confidence: 'high', reason: 'Active people + country' };
+    if (fnContains(fileName, 'plataforma', 'platform')) {
+      return { canonical: 'acq_clicks_platform', category: 'acquisition', label: 'Cliques por Plataforma', confidence: 'high', reason: 'Filename: clicks by platform (pivoted)' };
     }
-    if (headersContainAny(headers, 'platform', 'plataforma')) {
-      return { canonical: 'eng_active_platform', category: 'engagement', label: 'Pessoas Ativas por Plataforma', confidence: 'high', reason: 'Active people + platform' };
-    }
-    return { canonical: 'eng_active_total', category: 'engagement', label: 'Pessoas Ativas Total', confidence: 'high', reason: 'Active people timeseries' };
   }
 
   // ═══ QUEUE TIME ═══
-  if (headersContainAny(headers, 'queue', 'fila', 'matchmak', 'warteschlange', 'cola')) {
+  if (
+    headersContainAny(headers, 'queue', 'fila', 'matchmak', 'warteschlange', 'cola') ||
+    headersContainAny(headers, 'percentil', 'percentile', 'median', 'mediana', 'p50', 'p95')
+  ) {
     return { canonical: 'eng_queue_time', category: 'engagement', label: 'Tempo de Fila', confidence: 'high', reason: 'Queue/matchmaking data' };
   }
 
