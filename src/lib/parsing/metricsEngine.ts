@@ -57,6 +57,40 @@ function buildRanking(rows: Record<string, any>[], nameCol: string, valueCol: st
     .slice(0, top);
 }
 
+/**
+ * Unpivot a pivoted dataset where category names are column headers.
+ * E.g. columns: ["Date", "USA", "Brazil", "UK"] → ranking: [{name:"USA", value:sum}, ...]
+ */
+function buildRankingFromPivoted(rows: Record<string, any>[], columns: string[], top = 10) {
+  const dateHints = ['date', 'data', 'dia', 'day', 'semana', 'week'];
+  const valueCols = columns.filter(c => {
+    const cn = c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return !dateHints.some(h => cn.includes(h));
+  });
+  
+  const totals: { name: string; value: number }[] = valueCols.map(col => ({
+    name: col,
+    value: rows.reduce((sum, r) => {
+      const v = r[col];
+      return sum + (typeof v === 'number' ? v : 0);
+    }, 0),
+  }));
+  
+  return totals.sort((a, b) => b.value - a.value).slice(0, top);
+}
+
+/**
+ * Detect if a dataset is pivoted (date col + many numeric category columns).
+ */
+function isPivoted(ds: ParsedDataset): boolean {
+  const dateHints = ['date', 'data', 'dia', 'day'];
+  const hasDate = ds.columns.some(c => dateHints.some(h => c.toLowerCase().includes(h)));
+  // If no explicit "source"/"country"/"platform" name column, and many columns → pivoted
+  const nameHints = ['source', 'fonte', 'country', 'pais', 'país', 'platform', 'plataforma', 'name', 'nome'];
+  const hasNameCol = ds.columns.some(c => nameHints.some(h => c.toLowerCase().includes(h)));
+  return hasDate && !hasNameCol && ds.columns.length > 3;
+}
+
 function detectTrend(ts: { date: string; value: number }[]): 'up' | 'down' | 'stable' {
   if (ts.length < 4) return 'stable';
   const half = Math.floor(ts.length / 2);
@@ -123,21 +157,33 @@ export function calculateMetrics(datasets: Record<string, ParsedDataset>): Metri
   const clickPlatform = datasets['acq_clicks_platform'];
 
   if (impSource) {
-    const nameCol = impSource.columns.find(c => ['source', 'fonte'].includes(c.toLowerCase())) || impSource.columns[0];
-    const valCol = findValueCol(impSource, ['impressions', 'impressões', 'total', 'value']);
-    if (nameCol && valCol) rankings.impressions_by_source = buildRanking(impSource.rows, nameCol, valCol);
+    if (isPivoted(impSource)) {
+      rankings.impressions_by_source = buildRankingFromPivoted(impSource.rows, impSource.columns);
+    } else {
+      const nameCol = impSource.columns.find(c => ['source', 'fonte'].includes(c.toLowerCase())) || impSource.columns[0];
+      const valCol = findValueCol(impSource, ['impressions', 'impressões', 'total', 'value']);
+      if (nameCol && valCol) rankings.impressions_by_source = buildRanking(impSource.rows, nameCol, valCol);
+    }
   }
 
   if (clickCountry) {
-    const nameCol = clickCountry.columns.find(c => ['country', 'país'].includes(c.toLowerCase())) || clickCountry.columns[0];
-    const valCol = findValueCol(clickCountry, ['clicks', 'cliques', 'total', 'value']);
-    if (nameCol && valCol) rankings.clicks_by_country = buildRanking(clickCountry.rows, nameCol, valCol);
+    if (isPivoted(clickCountry)) {
+      rankings.clicks_by_country = buildRankingFromPivoted(clickCountry.rows, clickCountry.columns);
+    } else {
+      const nameCol = clickCountry.columns.find(c => ['country', 'país'].includes(c.toLowerCase())) || clickCountry.columns[0];
+      const valCol = findValueCol(clickCountry, ['clicks', 'cliques', 'total', 'value']);
+      if (nameCol && valCol) rankings.clicks_by_country = buildRanking(clickCountry.rows, nameCol, valCol);
+    }
   }
 
   if (clickPlatform) {
-    const nameCol = clickPlatform.columns.find(c => ['platform', 'plataforma'].includes(c.toLowerCase())) || clickPlatform.columns[0];
-    const valCol = findValueCol(clickPlatform, ['clicks', 'cliques', 'total', 'value']);
-    if (nameCol && valCol) rankings.clicks_by_platform = buildRanking(clickPlatform.rows, nameCol, valCol);
+    if (isPivoted(clickPlatform)) {
+      rankings.clicks_by_platform = buildRankingFromPivoted(clickPlatform.rows, clickPlatform.columns);
+    } else {
+      const nameCol = clickPlatform.columns.find(c => ['platform', 'plataforma'].includes(c.toLowerCase())) || clickPlatform.columns[0];
+      const valCol = findValueCol(clickPlatform, ['clicks', 'cliques', 'total', 'value']);
+      if (nameCol && valCol) rankings.clicks_by_platform = buildRanking(clickPlatform.rows, nameCol, valCol);
+    }
   }
 
   // ── Engagement ──
