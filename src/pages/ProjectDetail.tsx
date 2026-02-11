@@ -70,7 +70,7 @@ export default function ProjectDetail() {
         project_id: id,
         upload_id: uploadRow.id,
         user_id: user.id,
-        status: "ready",
+        status: "completed",
         parsed_data: result.datasets as any,
         metrics: { kpis: metrics.kpis, timeseries: metrics.timeseries, rankings: metrics.rankings } as any,
         diagnostics: metrics.diagnostics as any,
