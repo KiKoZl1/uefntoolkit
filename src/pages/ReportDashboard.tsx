@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,6 +11,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 interface ReportData {
   id: string;
   status: string;
+  parsed_data: Record<string, { columns: string[]; rows: Record<string, any>[] }> | null;
   metrics: {
     kpis: Record<string, number | string | null>;
     timeseries: Record<string, { date: string; value: number }[]>;
@@ -25,6 +26,49 @@ interface ReportData {
     action: string;
   }[];
   ai_summary: string | null;
+}
+
+/** Rebuild rankings from pivoted parsed_data when saved rankings have dates as names */
+function rebuildRankingsFromParsedData(
+  savedRankings: Record<string, { name: string; value: number }[]>,
+  parsedData: Record<string, { columns: string[]; rows: Record<string, any>[] }> | null
+): Record<string, { name: string; value: number }[]> {
+  if (!parsedData) return savedRankings;
+
+  const datePattern = /^\d{4}-\d{2}-\d{2}/;
+  const dateHints = ['date', 'data', 'dia', 'day', 'semana', 'week'];
+  
+  const unpivot = (datasetKey: string, rankingKey: string) => {
+    const ranking = savedRankings[rankingKey];
+    if (!ranking || ranking.length === 0) return;
+    
+    // Check if ranking names look like dates
+    const hasDateNames = ranking.some(r => datePattern.test(r.name));
+    if (!hasDateNames) return;
+    
+    const ds = parsedData[datasetKey];
+    if (!ds) return;
+    
+    const valueCols = ds.columns.filter(c => {
+      const cn = c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return !dateHints.some(h => cn === h);
+    });
+    
+    if (valueCols.length <= 1) return;
+    
+    const totals = valueCols.map(col => ({
+      name: col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      value: ds.rows.reduce((sum, r) => sum + (typeof r[col] === 'number' ? r[col] : 0), 0),
+    }));
+    
+    savedRankings[rankingKey] = totals.sort((a, b) => b.value - a.value).slice(0, 10);
+  };
+
+  unpivot('acq_impressions_source', 'impressions_by_source');
+  unpivot('acq_clicks_country', 'clicks_by_country');
+  unpivot('acq_clicks_platform', 'clicks_by_platform');
+  
+  return savedRankings;
 }
 
 function KpiCard({ label, value, unit }: { label: string; value: any; unit?: string }) {
@@ -94,7 +138,7 @@ export default function ReportDashboard() {
     if (!reportId) return;
     supabase
       .from("reports")
-      .select("id, status, metrics, diagnostics, ai_summary")
+      .select("id, status, metrics, diagnostics, ai_summary, parsed_data")
       .eq("id", reportId)
       .single()
       .then(({ data }) => {
@@ -102,6 +146,15 @@ export default function ReportDashboard() {
         setLoading(false);
       });
   }, [reportId]);
+
+  const { kpis, timeseries, rankings } = useMemo(() => {
+    if (!report?.metrics) return { kpis: {}, timeseries: {}, rankings: {} };
+    const { kpis, timeseries, rankings: savedRankings } = report.metrics;
+    const rankings = rebuildRankingsFromParsedData({ ...savedRankings }, report.parsed_data);
+    return { kpis: kpis || {}, timeseries: timeseries || {}, rankings };
+  }, [report]);
+
+  const diagnostics = useMemo(() => (report?.diagnostics as any[]) || [], [report]);
 
   if (loading) {
     return (
@@ -118,9 +171,6 @@ export default function ReportDashboard() {
       </div>
     );
   }
-
-  const { kpis, timeseries, rankings } = report.metrics || { kpis: {}, timeseries: {}, rankings: {} };
-  const diagnostics = (report.diagnostics as any[]) || [];
 
   return (
     <div className="min-h-screen bg-background">
