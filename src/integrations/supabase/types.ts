@@ -49,6 +49,90 @@ export type Database = {
           },
         ]
       }
+      discover_islands: {
+        Row: {
+          category: string | null
+          created_in: string | null
+          creator_code: string | null
+          id: string
+          island_code: string
+          last_metrics: Json | null
+          tags: Json | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          id?: string
+          island_code: string
+          last_metrics?: Json | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          id?: string
+          island_code?: string
+          last_metrics?: Json | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      discover_reports: {
+        Row: {
+          ai_narratives: Json | null
+          computed_rankings: Json | null
+          created_at: string
+          id: string
+          island_count: number | null
+          platform_kpis: Json | null
+          raw_metrics: Json | null
+          status: string
+          updated_at: string
+          week_end: string
+          week_number: number
+          week_start: string
+          year: number
+        }
+        Insert: {
+          ai_narratives?: Json | null
+          computed_rankings?: Json | null
+          created_at?: string
+          id?: string
+          island_count?: number | null
+          platform_kpis?: Json | null
+          raw_metrics?: Json | null
+          status?: string
+          updated_at?: string
+          week_end: string
+          week_number: number
+          week_start: string
+          year: number
+        }
+        Update: {
+          ai_narratives?: Json | null
+          computed_rankings?: Json | null
+          created_at?: string
+          id?: string
+          island_count?: number | null
+          platform_kpis?: Json | null
+          raw_metrics?: Json | null
+          status?: string
+          updated_at?: string
+          week_end?: string
+          week_number?: number
+          week_start?: string
+          year?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null

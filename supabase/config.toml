@@ -2,3 +2,12 @@ project_id = "turezrchetxoluznjtdi"
 
 [functions.ai-analyst]
 verify_jwt = false
+
+[functions.discover-collector]
+verify_jwt = false
+
+[functions.discover-island-lookup]
+verify_jwt = false
+
+[functions.discover-report-ai]
+verify_jwt = false
