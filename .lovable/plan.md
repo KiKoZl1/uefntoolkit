@@ -1,206 +1,187 @@
 
 
-# 🎮 Fortnite Island Analytics Platform + AI Game Design Analyst
+# Discover Trends -- Relatorios Semanais Automaticos do Ecossistema Fortnite
 
-Plataforma SaaS que transforma exports do painel da Epic em relatórios analíticos completos com diagnóstico de game design, plano de ação priorizado, e um **analista de IA especializado** que conversa com o usuário sobre seus dados.
+## Resumo
 
----
-
-## 🏗️ Fase 1 — Fundação (Auth + DB + Estrutura)
-
-### Autenticação via Supabase
-- Login/signup com email e senha
-- Perfis de usuário com nome e avatar
-- Proteção de rotas — apenas logados acessam `/app`
-
-### Banco de Dados (Supabase Postgres)
-- Tabelas: `profiles`, `projects`, `uploads`, `reports`, `chat_messages`
-- RLS para isolamento por usuário
-- Storage bucket para ZIPs originais e PDFs
-
-### Estrutura de Páginas
-- **/** — Landing page com CTA
-- **/auth** — Login/Signup
-- **/app** — Lista de projetos
-- **/app/projects/:id** — Projeto + histórico de uploads
-- **/app/projects/:id/reports/:reportId** — Dashboard do relatório
+Criar uma nova ferramenta **Discover Trends** integrada a plataforma, que gera relatorios semanais automaticos sobre o ecossistema inteiro do Fortnite Discovery usando a API publica da Epic Games. O usuario entra na pagina, ve os ultimos 4 relatorios, escolhe um, e navega por secoes visuais ricas (graficos, rankings, infograficos) -- similar ao PDF de referencia. Tambem pode pesquisar uma ilha especifica por codigo para analise detalhada.
 
 ---
 
-## 🏗️ Fase 2 — Upload & Motor de Processamento (Client-Side)
+## Como vai funcionar
 
-### Upload
-- Drag & drop do .zip com progresso
-- Extração no browser via JSZip
-- Parsing dos CSVs via PapaParse
+1. **Coleta automatica**: Uma Edge Function (`discover-collector`) e acionada via cron toda segunda-feira. Ela busca dados das top ~500 ilhas da API publica da Epic (`api.fortnite.com/ecosystem/v1`), calcula rankings e metricas derivadas, e salva no banco.
 
-### Dataset Registry (mapeado do export real da Epic)
+2. **Analise por IA**: Uma segunda Edge Function (`discover-report-ai`) gera narrativas para cada secao do relatorio usando Lovable AI (Gemini), baseada nos dados coletados.
 
-**Aquisição (7 CSVs)**
-- CTR diário, impressões totais, por fontes, por países
-- Cliques totais, por fontes, por países, por plataformas
+3. **Visualizacao**: O usuario acessa `/app/discover-trends`, ve os ultimos 4 relatorios como cards, clica em um, e entra em uma pagina de scroll continuo com 8 secoes visuais (graficos de barras, rankings, KPIs com variacao %, pie charts de categorias, e narrativa IA ao lado de cada grafico).
 
-**Engajamento (8+ CSVs)**
-- Tempo de jogo ativo (total, por país, por plataforma)
-- Pessoas ativas (total, por país, por plataforma)
-- Tempo de fila com percentis (p5/p25/média/p75/p95)
-- Eventos custom com hash IDs
-- Novos vs retornando ao Fortnite
+4. **Pesquisa de ilha**: No painel, o usuario pode digitar um codigo de ilha (ex: `1234-5678-9012`) e o sistema busca os dados da API em tempo real, gerando uma pagina de analytics daquela ilha especifica -- complementando os dados de CSV.
 
-**Retenção (1 CSV)**
-- D1 e D7 com % em pt-BR
-
-**Surveys (9 CSVs)**
-- Avaliação 1-10 (resumo, trend, detalhado, benchmark)
-- Diversão sim/não (resumo, trend, benchmark)
-- Dificuldade 1-5 (resumo, trend, benchmark)
-
-**Versões (1 CSV)**
-- Releases com timestamps e notas
-
-### Normalização Automática
-- `Data`/`Date` → `YYYY-MM-DD`
-- Números pt-BR: `191.916` → `191916`, `7,8` → `7.8`
-- Percentuais: `14,44%` → `0.1444`
-- Colunas localizadas: `Diagnósticos` → `impressions`, etc.
-- Eventos: extrair nome limpo do hash
-- Log completo + warnings para CSVs ausentes
+5. **Modo teste**: Alem do cron semanal, havera um botao admin para gerar relatorio sob demanda (para testes).
 
 ---
 
-## 🏗️ Fase 3 — Métricas Derivadas & Motor de Diagnóstico
+## Secoes do Relatorio (8 secoes visuais, inspiradas no PDF)
 
-### Métricas Calculadas
-- **Funil**: CTR por fonte/país/plataforma
-- **Rankings**: Top fontes/países/plataformas
-- **Engajamento**: tempo médio por jogo, percentis de sessão
-- **Eventos**: conversão entre eventos
-- **Retenção**: tendência D1/D7, detecção de queda
-- **Trends**: pico do período, queda mês a mês, anomalias
+Cada secao tera: KPI cards com variacao % vs semana anterior, graficos (barras horizontais, pie, timeseries), tabelas de ranking top 10, e texto narrativo da IA ao lado.
 
-### Motor de Heurísticas (regras base)
-- CTR quente vs frio → A/B thumbnail
-- Sessão longa + D7 baixo → daily quest, streak
-- Dificuldade polarizada → onboarding guiado
-- Fila P95 alta → otimizar matchmaking
-- D1 em queda → melhorar first-time experience
-- Output: lista P0/P1/P2 com evidências
+### 1. Core Activity Metrics
+- KPIs: Total Creators, New Creators, Active Maps, Inactive Maps, New Maps, Avg Maps/Creator
+- Graficos: Barras de ativos vs inativos, tendencia semanal
 
----
+### 2. Player Engagement Metrics
+- KPIs: Avg Players/Day, Total Plays, Avg CCU/Map, Avg Play Duration, Total Minutes
+- Rankings: Top 10 Peak CCU (Global), Top 10 Peak CCU (UGC), Top 10 Avg Peak CCU
+- Graficos: Barras horizontais para cada ranking
 
-## 🏗️ Fase 4 — Dashboard de Relatório (7 Tabs)
+### 3. Retention & Loyalty Metrics
+- KPIs: Platform Avg D1, Avg D7, Fav-to-Play Ratio, Recommend-to-Play Ratio
+- Rankings: Top 10 D1 Maps, Top 10 D7 Maps, Top 10 D1 UGC, Top 10 D7 UGC
+- Graficos: Barras com % de retencao
 
-### Executive Summary
-- KPIs grandes: impressões, cliques, CTR, jogos, tempo/jogo, D1/D7, fila
-- Nota executiva por área (Aquisição 7/10, etc.)
-- Insights automáticos em bullets
-- Action Plan resumido
+### 4. Creator Performance Metrics
+- Rankings: Top 10 Creators por Total Plays, Unique Players, Minutes, Peak CCU, D1, D7
+- Graficos: Barras horizontais por criador
 
-### Acquisition Tab
-- Timeseries impressões e cliques
-- CTR ao longo do tempo
-- Rankings por fonte, país, plataforma
+### 5. Map-Level Quality Metrics
+- Rankings: Top 10 Avg Minutes/Player, Top Favorites, Top Recommendations, Highest Weekly Growth
+- Rankings: Top 10 D1/D7 Stickiest Maps (Global e UGC)
 
-### Engagement Tab
-- Jogos e tempo ativo no tempo
-- Breakdown por país e plataforma
-- Fila com percentis
-- Eventos custom com conversão
+### 6. Ratios & Derived Metrics
+- Rankings: Plays/Unique Player, Minutes/Favorite, Favorites/100 Players, Recommendations/100 Players
+- Retention-Adjusted Engagement (avgMinutes x D1 e D7)
 
-### Retention Tab
-- D1/D7 ao longo do tempo com alertas
-- Novos vs recorrentes
-- Ativos vs retidos
+### 7. Category & Tag Analytics
+- Pie chart: Category Popularity Share
+- Rankings: Avg Plays/Category, Avg CCU/Category
+- Top Tags trending
 
-### Surveys Tab
-- Nota 1-10 com distribuição, trend e benchmark
-- Diversão com trend e benchmark
-- Dificuldade com polarização e benchmark
-
-### Changelog Impact Tab
-- Timeline de versões
-- Métricas antes vs depois de cada update
-
-### Action Plan Tab
-- "O que está forte" / "O que está fraco" / "O que fazer agora"
-- Lista priorizada com evidências e impacto
+### 8. Efficiency / Conversion Metrics
+- Rankings: Favorites/Play, Recommends/Play, Minutes/Play eficiencia
 
 ---
 
-## 🏗️ Fase 5 — 🤖 AI Game Design Analyst (Lovable AI)
+## Pesquisa de Ilha Individual
 
-### Analista de IA Especializado
-Uma IA que recebe **todos os dados parseados do relatório** como contexto e atua como um **analista de game design + dados especializado em ilhas Fortnite**.
-
-### Diagnóstico Gerado por IA
-- Ao gerar o relatório, a IA analisa todos os dados e escreve:
-  - **Executive Summary narrativo** em linguagem natural (como o exemplo que você mostrou)
-  - **Diagnóstico estratégico** contextualizado (não só regras fixas)
-  - **Plano de ação detalhado** com prioridades e justificativas baseadas nos dados reais
-  - **Notas executivas** com tom de consultor de game design
-
-### Chat Interativo com a IA
-- Dentro de cada relatório, um **chat ao vivo** onde o usuário pode perguntar:
-  - "Por que meu D7 está caindo?"
-  - "O que posso fazer para melhorar CTR no PC?"
-  - "Como melhorar meu onboarding?"
-  - "Quais métricas devo priorizar agora?"
-  - "Compare minha retenção com benchmarks"
-- A IA responde com base nos **dados reais do relatório**, não genéricos
-- Respostas em markdown com formatação rica
-- Histórico de chat salvo por relatório
-
-### Implementação Técnica
-- **Lovable AI Gateway** via Supabase Edge Function (backend seguro)
-- System prompt especializado com conhecimento de:
-  - Métricas de jogos Fortnite Creative
-  - Benchmarks típicos do ecossistema
-  - Estratégias de game design (meta loops, retention hooks, UX patterns)
-  - Análise de funil e diagnóstico de gargalos
-- Dados do relatório injetados como contexto a cada chamada
-- Streaming de respostas token por token para UX fluida
+O usuario digita o codigo da ilha e ve:
+- Metadados (titulo, criador, tags, categoria)
+- Metricas dos ultimos 7 dias: unique players, plays, minutes played, peak CCU, avg minutes/player, favorites, recommendations, D1, D7
+- Graficos timeseries (dia a dia) para cada metrica
+- Comparacao com medias da plataforma (dos dados do relatorio semanal)
+- Complementa os dados do CSV upload quando a ilha ja tem um projeto
 
 ---
 
-## 🏗️ Fase 6 — Comparações & Export
+## Detalhes Tecnicos
 
-### Comparação entre Uploads
-- Selecionar dois uploads do mesmo projeto
-- Dashboard comparativo lado a lado
-- Indicadores de melhoria/piora com %
-- Verde = melhorou, Vermelho = piorou
-- IA pode comentar as diferenças automaticamente
+### Novas Tabelas no Banco
 
-### Export PDF
-- Geração client-side do relatório completo (incluindo diagnóstico da IA)
-- Download direto do dashboard
+**`discover_reports`**
+- `id` (uuid PK)
+- `week_start` (date)
+- `week_end` (date)
+- `week_number` (int)
+- `year` (int)
+- `status` (text: 'collecting' | 'analyzing' | 'completed' | 'error')
+- `raw_metrics` (jsonb) -- dados agregados das ilhas
+- `computed_rankings` (jsonb) -- rankings top 10 por secao
+- `platform_kpis` (jsonb) -- KPIs da plataforma
+- `ai_narratives` (jsonb) -- texto IA por secao
+- `island_count` (int)
+- `created_at`, `updated_at`
 
-### Share Link
-- Link público para visualizar relatório sem login
-- Toggle de visibilidade
+RLS: SELECT para usuarios autenticados (dados publicos). INSERT/UPDATE somente via service_role (edge function).
+
+**`discover_islands`** (cache de metadados)
+- `id` (uuid PK)
+- `island_code` (text, unique index)
+- `title`, `creator_code`, `category`, `tags` (jsonb), `created_in`
+- `last_metrics` (jsonb) -- ultima coleta de metricas
+- `updated_at`
+
+RLS: SELECT para autenticados.
+
+### Novas Edge Functions
+
+**`discover-collector`** (complexa, ~300 linhas)
+- Busca `/islands` paginado (ate 1000 ilhas)
+- Para cada ilha busca `/islands/{code}/metrics/day` com from/to dos ultimos 7 dias
+- Calcula: rankings top 10 para cada secao, KPIs da plataforma, ratios derivados
+- Agrupa por criador para Creator Performance
+- Agrupa por categoria para Category Analytics
+- Salva em `discover_reports` e atualiza `discover_islands`
+- Rate limiting: delay entre requests, retry no 429
+
+**`discover-report-ai`**
+- Recebe `report_id`
+- Carrega `computed_rankings` e `platform_kpis`
+- Envia para Lovable AI com prompt especializado
+- Gera narrativa para cada uma das 8 secoes
+- Salva em `ai_narratives`
+
+**`discover-island-lookup`**
+- Recebe `island_code`
+- Busca metadados + metricas diarias da API da Epic em tempo real
+- Retorna dados formatados para o frontend
+
+### Cron Job (coleta automatica)
+- `pg_cron` + `pg_net` para chamar `discover-collector` toda segunda 06:00 UTC
+- SQL via insert tool (nao migration)
+
+### Novas Paginas
+
+**`/app/discover-trends`** -- Lista de relatorios
+- Cards dos ultimos 4 relatorios com preview de KPIs
+- Status badges (coletando / analisando / pronto)
+- Botao "Gerar Report" (admin/teste)
+
+**`/app/discover-trends/:reportId`** -- Report completo
+- Pagina de scroll continuo (nao tabs)
+- 8 secoes com separadores visuais (titulo grande + icone, como no PDF)
+- Cada secao: KPI cards em grid, graficos Recharts, tabelas de ranking, texto IA em destaque
+- Variacao % vs semana anterior (verde/vermelho com setas)
+
+**`/app/island-lookup`** -- Pesquisa de ilha
+- Input para codigo da ilha
+- Dashboard de metricas com graficos timeseries
+- Comparacao com medias da plataforma
+
+### Reestruturacao da Navegacao
+
+- `/app` vira layout com sidebar (Island Analytics, Discover Trends, Pesquisar Ilha)
+- Landing page atualizada com as 3 ferramentas
+- Rotas existentes de Island Analytics movidas para sub-rotas
 
 ---
 
-## 🏗️ Fase 7 — Polish & Qualidade
+## Sequencia de Implementacao
 
-### Data Quality
-- Seção mostrando CSVs encontrados, datasets identificados, warnings
-- Botão "Rebuild Report"
-- Log detalhado por upload
+### Etapa 1: Banco de Dados
+Criar tabelas `discover_reports` e `discover_islands` com RLS adequado. Habilitar `pg_cron` e `pg_net`.
 
-### UX
-- Design responsivo e dark mode
-- Loading states e animações
-- Empty states informativos
-- Toasts de feedback
+### Etapa 2: Edge Function `discover-collector`
+Implementar coleta paginada, calculo de rankings e KPIs, salvamento no banco.
 
----
+### Etapa 3: Edge Function `discover-report-ai`
+Gerar narrativas por secao via Lovable AI.
 
-## 📊 Stack
-- **Frontend**: React + TypeScript + Tailwind + Recharts
-- **Processamento**: Client-side (JSZip + PapaParse)
-- **Backend**: Supabase (Auth, Database, Storage, Edge Functions)
-- **IA**: Lovable AI Gateway (Gemini) via Edge Function com streaming
-- **PDF**: Geração client-side
-- **Charts**: Recharts
+### Etapa 4: Edge Function `discover-island-lookup`
+Busca de ilha individual em tempo real.
+
+### Etapa 5: Frontend -- Novas Paginas
+- Pagina de lista de relatorios
+- Pagina de report com scroll e 8 secoes visuais
+- Pagina de pesquisa de ilha
+
+### Etapa 6: Reestruturacao
+- Sidebar de navegacao no `/app`
+- Landing page atualizada
+- Cron job configurado
+
+### Etapa 7: Polish
+- Loading states com skeleton
+- Empty states
+- Responsividade
+- Variacao % com cores e setas
 
