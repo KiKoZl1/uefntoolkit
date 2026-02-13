@@ -27,15 +27,19 @@ const PIE_COLORS = [
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
-  if (Number.isInteger(n)) return n.toLocaleString("pt-BR");
-  return n.toFixed(2);
+  const num = Number(n);
+  if (isNaN(num)) return "—";
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
+  if (Number.isInteger(num)) return num.toLocaleString("pt-BR");
+  return num.toFixed(2);
 }
 
 function pct(n: number | null | undefined): string {
   if (n == null) return "—";
-  return (n * 100).toFixed(1) + "%";
+  const num = Number(n);
+  if (isNaN(num)) return "—";
+  return (num * 100).toFixed(1) + "%";
 }
 
 interface Report {
