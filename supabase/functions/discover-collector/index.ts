@@ -7,8 +7,8 @@ const corsHeaders = {
 };
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
-const BATCH_SIZE = 500;
-const DELAY_MS = 100; // delay between API calls to respect rate limits
+const PARALLEL_BATCH = 20; // fetch 20 islands' metrics at once
+const DEFAULT_MAX_ISLANDS = 1000;
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -16,16 +16,21 @@ function delay(ms: number) {
 
 async function fetchWithRetry(url: string, retries = 3): Promise<any> {
   for (let i = 0; i < retries; i++) {
-    const res = await fetch(url);
-    if (res.ok) return res.json();
-    if (res.status === 429) {
-      console.log(`Rate limited on ${url}, waiting ${(i + 1) * 2}s...`);
-      await delay((i + 1) * 2000);
-      continue;
+    try {
+      const res = await fetch(url);
+      if (res.ok) return res.json();
+      if (res.status === 429) {
+        console.log(`Rate limited, waiting ${(i + 1) * 3}s...`);
+        await delay((i + 1) * 3000);
+        continue;
+      }
+      if (res.status === 404) return null;
+      console.error(`Error ${res.status} fetching ${url}`);
+      return null;
+    } catch (e) {
+      console.error(`Fetch error for ${url}:`, e);
+      if (i < retries - 1) await delay(1000);
     }
-    if (res.status === 404) return null;
-    console.error(`Error ${res.status} fetching ${url}`);
-    return null;
   }
   return null;
 }
@@ -43,17 +48,13 @@ async function fetchIslandList(maxIslands: number): Promise<any[]> {
     if (!data?.data?.length) break;
 
     islands.push(...data.data);
+    console.log(`Island list: fetched ${islands.length} so far...`);
     cursor = data.meta?.page?.nextCursor;
     if (!cursor) break;
-    await delay(DELAY_MS);
+    await delay(200);
   }
 
   return islands.slice(0, maxIslands);
-}
-
-async function fetchIslandMetrics(code: string, from: string, to: string): Promise<any> {
-  const url = `${EPIC_API}/islands/${code}/metrics/day?from=${from}&to=${to}`;
-  return fetchWithRetry(url);
 }
 
 function sumMetric(arr: any[] | undefined): number {
@@ -80,12 +81,50 @@ function avgRetention(retArr: any[] | undefined, key: string): number {
   return valid.reduce((s: number, r: any) => s + r[key], 0) / valid.length;
 }
 
-function topN(arr: any[], key: string, n: number, ascending = false) {
+function topN(arr: any[], key: string, n: number) {
   return [...arr]
     .filter((i) => i[key] != null && i[key] !== 0)
-    .sort((a, b) => ascending ? a[key] - b[key] : b[key] - a[key])
+    .sort((a, b) => b[key] - a[key])
     .slice(0, n)
-    .map((i) => ({ code: i.code, title: i.title, creator: i.creator, category: i.category, value: i[key] }));
+    .map((i) => ({
+      code: i.code,
+      title: i.title,
+      creator: i.creator,
+      category: i.category,
+      value: i[key],
+      name: i.title || i.creator || i.code,
+    }));
+}
+
+async function fetchMetricsBatch(
+  islands: any[],
+  fromISO: string,
+  toISO: string,
+): Promise<Map<string, any>> {
+  const results = new Map<string, any>();
+
+  // Process in parallel batches
+  for (let i = 0; i < islands.length; i += PARALLEL_BATCH) {
+    const batch = islands.slice(i, i + PARALLEL_BATCH);
+
+    const promises = batch.map(async (island: any) => {
+      const url = `${EPIC_API}/islands/${island.code}/metrics/day?from=${fromISO}&to=${toISO}`;
+      const metrics = await fetchWithRetry(url);
+      return { code: island.code, metrics };
+    });
+
+    const batchResults = await Promise.all(promises);
+    for (const { code, metrics } of batchResults) {
+      if (metrics) results.set(code, metrics);
+    }
+
+    if (i + PARALLEL_BATCH < islands.length) {
+      console.log(`Metrics: ${results.size}/${islands.length} fetched...`);
+      await delay(300); // small pause between batches to respect rate limits
+    }
+  }
+
+  return results;
 }
 
 serve(async (req) => {
@@ -97,10 +136,9 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Parse optional params
     let body: any = {};
     try { body = await req.json(); } catch { /* empty body ok */ }
-    const maxIslands = body.maxIslands ?? BATCH_SIZE;
+    const maxIslands = body.maxIslands ?? DEFAULT_MAX_ISLANDS;
 
     // Calculate week range (last 7 days)
     const now = new Date();
@@ -128,34 +166,27 @@ serve(async (req) => {
 
     if (reportErr) throw new Error(`Failed to create report: ${reportErr.message}`);
     const reportId = report.id;
-
-    console.log(`Report ${reportId}: Fetching islands...`);
+    console.log(`Report ${reportId}: Fetching island list (max ${maxIslands})...`);
 
     // 1. Fetch island list
     const islands = await fetchIslandList(maxIslands);
-    console.log(`Fetched ${islands.length} islands`);
+    console.log(`Fetched ${islands.length} islands from Epic API`);
 
-    // 2. Fetch metrics for each island
+    // 2. Fetch metrics for all islands in parallel batches
     const fromISO = from.toISOString();
     const toISO = to.toISOString();
+    const metricsMap = await fetchMetricsBatch(islands, fromISO, toISO);
+    console.log(`Got metrics for ${metricsMap.size} islands`);
 
+    // 3. Process all island data
     const islandData: any[] = [];
     const creatorsMap: Record<string, any> = {};
     const categoriesMap: Record<string, any> = {};
     const tagsMap: Record<string, number> = {};
 
-    for (let i = 0; i < islands.length; i++) {
-      const island = islands[i];
+    for (const island of islands) {
       const code = island.code;
-
-      if (i > 0 && i % 50 === 0) {
-        console.log(`Processing island ${i}/${islands.length}...`);
-        await delay(DELAY_MS * 2);
-      }
-
-      const metrics = await fetchIslandMetrics(code, fromISO, toISO);
-      await delay(DELAY_MS);
-
+      const metrics = metricsMap.get(code);
       if (!metrics) continue;
 
       const uniquePlayers = sumMetric(metrics.uniquePlayers);
@@ -186,7 +217,6 @@ serve(async (req) => {
         recommendations,
         d1,
         d7,
-        // Derived ratios
         playsPerPlayer: uniquePlayers > 0 ? totalPlays / uniquePlayers : 0,
         favPer100: uniquePlayers > 0 ? (favorites / uniquePlayers) * 100 : 0,
         recPer100: uniquePlayers > 0 ? (recommendations / uniquePlayers) * 100 : 0,
@@ -203,7 +233,7 @@ serve(async (req) => {
       // Aggregate by creator
       const cKey = entry.creator;
       if (!creatorsMap[cKey]) {
-        creatorsMap[cKey] = { creator: cKey, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, sumD1: 0, sumD7: 0, countD1: 0, countD7: 0 };
+        creatorsMap[cKey] = { name: cKey, creator: cKey, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, sumD1: 0, sumD7: 0, countD1: 0, countD7: 0 };
       }
       const c = creatorsMap[cKey];
       c.totalPlays += totalPlays;
@@ -217,7 +247,7 @@ serve(async (req) => {
       // Aggregate by category
       const cat = entry.category;
       if (!categoriesMap[cat]) {
-        categoriesMap[cat] = { category: cat, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0 };
+        categoriesMap[cat] = { name: cat, category: cat, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0 };
       }
       const cm = categoriesMap[cat];
       cm.totalPlays += totalPlays;
@@ -230,102 +260,114 @@ serve(async (req) => {
       for (const tag of entry.tags) {
         tagsMap[tag] = (tagsMap[tag] || 0) + 1;
       }
+    }
 
-      // Upsert island cache
-      await supabase.from("discover_islands").upsert({
-        island_code: code,
+    // 4. Upsert islands to cache in batches
+    const islandUpserts = islands.map((island: any) => {
+      const m = metricsMap.get(island.code);
+      const entry = islandData.find((e) => e.code === island.code);
+      return {
+        island_code: island.code,
         title: island.title,
         creator_code: island.creatorCode,
         category: island.category,
         tags: island.tags,
         created_in: island.createdIn,
-        last_metrics: { uniquePlayers, totalPlays, minutesPlayed, peakCCU, avgMinPerPlayer, favorites, recommendations, d1, d7 },
-      }, { onConflict: "island_code" });
+        last_metrics: entry
+          ? { uniquePlayers: entry.uniquePlayers, totalPlays: entry.totalPlays, minutesPlayed: entry.minutesPlayed, peakCCU: entry.peakCCU, avgMinPerPlayer: entry.avgMinPerPlayer, favorites: entry.favorites, recommendations: entry.recommendations, d1: entry.d1, d7: entry.d7 }
+          : {},
+      };
+    });
+
+    // Upsert in batches of 100
+    for (let i = 0; i < islandUpserts.length; i += 100) {
+      const batch = islandUpserts.slice(i, i + 100);
+      await supabase.from("discover_islands").upsert(batch, { onConflict: "island_code" });
     }
 
-    // 3. Compute platform KPIs
+    // 5. Compute platform KPIs
     const activeIslands = islandData.filter((i) => i.isActive);
     const ugcIslands = islandData.filter((i) => i.isUGC);
     const uniqueCreators = new Set(islandData.map((i) => i.creator));
+
+    const safeDiv = (num: number, den: number) => den > 0 ? num / den : 0;
 
     const platformKPIs = {
       totalIslands: islandData.length,
       activeIslands: activeIslands.length,
       inactiveIslands: islandData.length - activeIslands.length,
       totalCreators: uniqueCreators.size,
-      avgMapsPerCreator: uniqueCreators.size > 0 ? (islandData.length / uniqueCreators.size).toFixed(1) : 0,
+      avgMapsPerCreator: safeDiv(islandData.length, uniqueCreators.size),
       totalPlays: islandData.reduce((s, i) => s + i.totalPlays, 0),
       totalUniquePlayers: islandData.reduce((s, i) => s + i.uniquePlayers, 0),
       totalMinutesPlayed: islandData.reduce((s, i) => s + i.minutesPlayed, 0),
-      avgPlayDuration: activeIslands.length > 0 ? (activeIslands.reduce((s, i) => s + i.avgMinPerPlayer, 0) / activeIslands.length).toFixed(1) : 0,
-      avgCCUPerMap: activeIslands.length > 0 ? Math.round(activeIslands.reduce((s, i) => s + i.avgPeakCCU, 0) / activeIslands.length) : 0,
-      platformAvgD1: activeIslands.length > 0 ? (activeIslands.reduce((s, i) => s + i.d1, 0) / activeIslands.length).toFixed(2) : 0,
-      platformAvgD7: activeIslands.length > 0 ? (activeIslands.reduce((s, i) => s + i.d7, 0) / activeIslands.length).toFixed(2) : 0,
-      avgFavToPlayRatio: activeIslands.length > 0 ? (activeIslands.reduce((s, i) => s + i.favToPlayRatio, 0) / activeIslands.length).toFixed(4) : 0,
-      avgRecToPlayRatio: activeIslands.length > 0 ? (activeIslands.reduce((s, i) => s + i.recToPlayRatio, 0) / activeIslands.length).toFixed(4) : 0,
+      avgPlayDuration: safeDiv(activeIslands.reduce((s, i) => s + i.avgMinPerPlayer, 0), activeIslands.length),
+      avgCCUPerMap: safeDiv(activeIslands.reduce((s, i) => s + i.avgPeakCCU, 0), activeIslands.length),
+      avgPlayersPerDay: safeDiv(islandData.reduce((s, i) => s + i.uniquePlayers, 0), 7),
+      platformAvgD1: safeDiv(activeIslands.reduce((s, i) => s + i.d1, 0), activeIslands.length),
+      platformAvgD7: safeDiv(activeIslands.reduce((s, i) => s + i.d7, 0), activeIslands.length),
+      avgFavToPlayRatio: safeDiv(activeIslands.reduce((s, i) => s + i.favToPlayRatio, 0), activeIslands.length),
+      avgRecToPlayRatio: safeDiv(activeIslands.reduce((s, i) => s + i.recToPlayRatio, 0), activeIslands.length),
     };
 
-    // 4. Compute rankings
+    // 6. Compute rankings
     const creators = Object.values(creatorsMap).map((c: any) => ({
       ...c,
       avgD1: c.countD1 > 0 ? c.sumD1 / c.countD1 : 0,
       avgD7: c.countD7 > 0 ? c.sumD7 / c.countD7 : 0,
+      value: c.totalPlays, // default sort value
     }));
     const categories = Object.values(categoriesMap).map((c: any) => ({
       ...c,
       avgPlays: c.maps > 0 ? Math.round(c.totalPlays / c.maps) : 0,
       avgCCU: c.maps > 0 ? Math.round(c.peakCCU / c.maps) : 0,
+      value: c.totalPlays,
     }));
 
     const topTags = Object.entries(tagsMap)
       .sort((a, b) => (b[1] as number) - (a[1] as number))
       .slice(0, 20)
-      .map(([tag, count]) => ({ tag, count }));
+      .map(([tag, count]) => ({ name: tag, tag, value: count, count }));
 
     const computedRankings = {
-      // Section 2: Engagement
       topPeakCCU: topN(islandData, "peakCCU", 10),
       topPeakCCU_UGC: topN(ugcIslands, "peakCCU", 10),
       topAvgPeakCCU: topN(islandData, "avgPeakCCU", 10),
       topUniquePlayers: topN(islandData, "uniquePlayers", 10),
       topTotalPlays: topN(islandData, "totalPlays", 10),
       topMinutesPlayed: topN(islandData, "minutesPlayed", 10),
-      // Section 3: Retention
-      topD1: topN(islandData, "d1", 10),
-      topD7: topN(islandData, "d7", 10),
+      topRetentionD1: topN(islandData, "d1", 10),
+      topRetentionD7: topN(islandData, "d7", 10),
       topD1_UGC: topN(ugcIslands, "d1", 10),
       topD7_UGC: topN(ugcIslands, "d7", 10),
-      // Section 4: Creator Performance
       topCreatorsByPlays: topN(creators, "totalPlays", 10),
       topCreatorsByPlayers: topN(creators, "uniquePlayers", 10),
       topCreatorsByMinutes: topN(creators, "minutesPlayed", 10),
       topCreatorsByCCU: topN(creators, "peakCCU", 10),
       topCreatorsByD1: topN(creators, "avgD1", 10),
       topCreatorsByD7: topN(creators, "avgD7", 10),
-      // Section 5: Quality
       topAvgMinPerPlayer: topN(islandData, "avgMinPerPlayer", 10),
       topFavorites: topN(islandData, "favorites", 10),
       topRecommendations: topN(islandData, "recommendations", 10),
-      // Section 6: Ratios
       topPlaysPerPlayer: topN(islandData, "playsPerPlayer", 10),
       topFavPer100: topN(islandData, "favPer100", 10),
       topRecPer100: topN(islandData, "recPer100", 10),
       topRetentionAdjD1: topN(islandData, "retentionAdjD1", 10),
       topRetentionAdjD7: topN(islandData, "retentionAdjD7", 10),
-      // Section 7: Categories
       categoryShare: categories.sort((a: any, b: any) => b.totalPlays - a.totalPlays).slice(0, 15),
+      categoryPopularity: Object.fromEntries(categories.slice(0, 10).map((c: any) => [c.category, c.maps])),
+      topCategoriesByPlays: topN(categories, "totalPlays", 10),
       topTags,
-      // Section 8: Efficiency
-      topFavToPlay: topN(islandData, "favToPlayRatio", 10),
-      topRecToPlay: topN(islandData, "recToPlayRatio", 10),
+      topFavsPerPlay: topN(islandData, "favToPlayRatio", 10),
+      topRecsPerPlay: topN(islandData, "recToPlayRatio", 10),
     };
 
-    // 5. Save to DB
+    // 7. Save to DB
     const { error: updateErr } = await supabase
       .from("discover_reports")
       .update({
         status: "completed",
-        raw_metrics: { islandSummaries: islandData.slice(0, 100) }, // store top 100 for reference
+        raw_metrics: { islandSummaries: islandData.slice(0, 200) },
         computed_rankings: computedRankings,
         platform_kpis: platformKPIs,
         island_count: islandData.length,
@@ -334,10 +376,10 @@ serve(async (req) => {
 
     if (updateErr) throw new Error(`Failed to update report: ${updateErr.message}`);
 
-    console.log(`Report ${reportId} completed with ${islandData.length} islands`);
+    console.log(`Report ${reportId} completed: ${islandData.length} islands, ${activeIslands.length} active`);
 
     return new Response(
-      JSON.stringify({ success: true, reportId, islandCount: islandData.length }),
+      JSON.stringify({ success: true, reportId, islandCount: islandData.length, activeCount: activeIslands.length }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
