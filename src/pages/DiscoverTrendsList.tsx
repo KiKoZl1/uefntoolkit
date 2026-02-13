@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles } from "lucide-react";
+import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
 
 interface DiscoverReport {
   id: string;
@@ -94,9 +95,7 @@ export default function DiscoverTrendsList() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <ReportListSkeleton />
       ) : reports.length === 0 ? (
         <Card className="text-center py-16">
           <CardContent>

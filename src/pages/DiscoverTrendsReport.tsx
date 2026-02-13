@@ -12,6 +12,7 @@ import {
   ArrowLeft, Loader2, Activity, Users, Play, Clock, TrendingUp, Star, ThumbsUp,
   BarChart3, Crown, Map, Layers, Zap, Target, PieChart, Tags,
 } from "lucide-react";
+import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart as RPieChart, Pie, Cell, Legend,
@@ -69,11 +70,7 @@ export default function DiscoverTrendsReport() {
   }, [reportId]);
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <ReportPageSkeleton />;
   }
 
   if (!report) {
@@ -90,6 +87,12 @@ export default function DiscoverTrendsReport() {
   const kpis = report.platform_kpis || {};
   const rankings = report.computed_rankings || {};
   const ai = report.ai_narratives || {};
+
+  // AI narratives come as section1..section8 with { title, narrative }
+  const getNarrative = (sectionNum: number): string | null => {
+    const section = ai[`section${sectionNum}`];
+    return section?.narrative || null;
+  };
 
   // Prepare category pie data
   const categoryData = rankings.categoryPopularity
@@ -133,7 +136,7 @@ export default function DiscoverTrendsReport() {
         <KpiCard icon={Map} label="Ilhas Ativas" value={fmt(kpis.activeIslands)} />
         <KpiCard icon={Map} label="Avg Maps/Creator" value={fmt(kpis.avgMapsPerCreator)} />
       </div>
-      <AiNarrative text={ai.coreActivity} />
+      <AiNarrative text={getNarrative(1)} />
 
       <div className="border-t border-border my-8" />
 
@@ -155,7 +158,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top 10 Peak CCU" icon={BarChart3} items={rankings.topPeakCCU || []} />
         <RankingTable title="Top 10 Unique Players" icon={Users} items={rankings.topUniquePlayers || []} />
       </div>
-      <AiNarrative text={ai.engagement} />
+      <AiNarrative text={getNarrative(2)} />
 
       <div className="border-t border-border my-8" />
 
@@ -176,7 +179,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top 10 D1 Retention" icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(v)} />
         <RankingTable title="Top 10 D7 Retention" icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(v)} />
       </div>
-      <AiNarrative text={ai.retention} />
+      <AiNarrative text={getNarrative(3)} />
 
       <div className="border-t border-border my-8" />
 
@@ -191,7 +194,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top Creators por Plays" icon={Play} items={rankings.topCreatorsByPlays || []} />
         <RankingTable title="Top Creators por Minutes" icon={Clock} items={rankings.topCreatorsByMinutes || []} />
       </div>
-      <AiNarrative text={ai.creatorPerformance} />
+      <AiNarrative text={getNarrative(4)} />
 
       <div className="border-t border-border my-8" />
 
@@ -208,7 +211,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top Recomendações" icon={ThumbsUp} items={rankings.topRecommendations || []} />
         <RankingTable title="Top Minutes Played" icon={Clock} items={rankings.topMinutesPlayed || []} />
       </div>
-      <AiNarrative text={ai.mapQuality} />
+      <AiNarrative text={getNarrative(5)} />
 
       <div className="border-t border-border my-8" />
 
@@ -223,7 +226,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Plays / Unique Player" icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => v.toFixed(2)} />
         <RankingTable title="Favorites / 100 Players" icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => v.toFixed(2)} />
       </div>
-      <AiNarrative text={ai.ratios} />
+      <AiNarrative text={getNarrative(6)} />
 
       <div className="border-t border-border my-8" />
 
@@ -268,7 +271,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top Categories por Plays" icon={Tags} items={rankings.topCategoriesByPlays || []} />
         <RankingTable title="Top Tags" icon={Tags} items={rankings.topTags || []} />
       </div>
-      <AiNarrative text={ai.categoryAnalytics} />
+      <AiNarrative text={getNarrative(7)} />
 
       <div className="border-t border-border my-8" />
 
@@ -283,7 +286,7 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top Favorites/Play" icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => v.toFixed(4)} />
         <RankingTable title="Top Recommends/Play" icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => v.toFixed(4)} />
       </div>
-      <AiNarrative text={ai.efficiency} />
+      <AiNarrative text={getNarrative(8)} />
     </div>
   );
 }
