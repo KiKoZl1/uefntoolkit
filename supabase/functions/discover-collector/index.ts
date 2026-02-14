@@ -116,7 +116,7 @@ function processIslandMetrics(island: any, metrics: any) {
     code: island.code,
     title: island.title || island.code,
     creator: island.creatorCode || "unknown",
-    category: island.category || "None",
+    category: island.category || "Fortnite UGC",
     createdIn: island.createdIn || "Unknown",
     tags: island.tags || [],
     uniquePlayers,
@@ -236,6 +236,7 @@ function computeReportData(islandData: any[]) {
   }));
   const categories = Object.values(categoriesMap).map((c: any) => ({
     ...c,
+    title: c.category === "None" ? "Fortnite UGC" : c.category,
     avgPlays: c.maps > 0 ? Math.round(c.totalPlays / c.maps) : 0,
     avgCCU: c.maps > 0 ? Math.round(c.peakCCU / c.maps) : 0,
     value: c.totalPlays,

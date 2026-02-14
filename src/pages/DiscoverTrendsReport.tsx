@@ -101,7 +101,7 @@ export default function DiscoverTrendsReport() {
   // Prepare category pie data
   const categoryData = rankings.categoryPopularity
     ? Object.entries(rankings.categoryPopularity).map(([name, value]) => ({
-        name: name || "Sem categoria",
+        name: (!name || name === "None") ? "Fortnite UGC" : name,
         value: value as number,
       }))
     : [];

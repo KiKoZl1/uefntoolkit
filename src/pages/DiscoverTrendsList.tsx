@@ -6,8 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle } from "lucide-react";
+import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle, Trash2 } from "lucide-react";
 import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface DiscoverReport {
   id: string;
@@ -44,7 +49,7 @@ function timeNow() {
   return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const TARGET_ISLANDS = 2000;
+const TARGET_ISLANDS = 3000;
 
 export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
@@ -212,6 +217,18 @@ export default function DiscoverTrendsList() {
     addLog("Cancelando...");
   };
 
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { error } = await supabase.from("discover_reports").delete().eq("id", id);
+    if (error) {
+      toast({ title: "Erro", description: "Falha ao deletar relatório", variant: "destructive" });
+    } else {
+      toast({ title: "Deletado", description: "Relatório removido com sucesso." });
+      setReports((prev) => prev.filter((r) => r.id !== id));
+    }
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-8">
@@ -326,7 +343,28 @@ export default function DiscoverTrendsList() {
                       <CardTitle className="font-display text-base">
                         Semana {r.week_number}/{r.year}
                       </CardTitle>
-                      <Badge variant={status.variant}>{status.label}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.preventDefault()}>
+                              <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Deletar relatório?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Essa ação não pode ser desfeita. O relatório da Semana {r.week_number}/{r.year} será removido permanentemente.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={(e) => handleDelete(r.id, e)}>Deletar</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
