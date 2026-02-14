@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle, Trash2 } from "lucide-react";
+import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle, Trash2, Search } from "lucide-react";
 import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -49,8 +49,6 @@ function timeNow() {
   return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const TARGET_ISLANDS = 10000;
-
 export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +58,7 @@ export default function DiscoverTrendsList() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [liveIslands, setLiveIslands] = useState(0);
   const [liveStatus, setLiveStatus] = useState("");
+  const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
   const abortRef = useRef(false);
   const reportIdRef = useRef<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,12 +81,10 @@ export default function DiscoverTrendsList() {
 
   useEffect(() => { fetchReports(); }, []);
 
-  // Auto-scroll logs
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  // Polling: check report progress from DB every 3s
   const startPolling = useCallback((reportId: string) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
@@ -100,9 +97,6 @@ export default function DiscoverTrendsList() {
         const count = data.island_count || 0;
         setLiveIslands(count);
         setLiveStatus(data.status);
-        const pct = Math.min(95, Math.round((count / TARGET_ISLANDS) * 100));
-        setProgress(pct);
-        setProgressLabel(`${count} ilhas coletadas de ${TARGET_ISLANDS} (${pct}%)`);
         if (data.status === "completed" || data.status === "error") {
           stopPolling();
         }
@@ -124,29 +118,64 @@ export default function DiscoverTrendsList() {
     setProgress(0);
     setLogs([]);
     setLiveIslands(0);
-    setLiveStatus("collecting");
-    setProgressLabel("Iniciando coleta de ilhas...");
+    setLiveStatus("discovering");
+    setTotalAvailable(null);
+    setProgressLabel("Descobrindo total de ilhas na API...");
     abortRef.current = false;
     reportIdRef.current = null;
-    addLog("Iniciando geração do relatório...");
+    addLog("🔍 Fase 1: Descobrindo quantas ilhas existem na API da Epic...");
 
     try {
+      // ============ PHASE 1: DISCOVERY — count total islands available ============
+      let discoveredTotal = 0;
+      let discoverCursor: string | null = null;
+      let discoveryExhausted = false;
+
+      while (!discoveryExhausted && !abortRef.current) {
+        const res = await supabase.functions.invoke("discover-collector", {
+          body: { mode: "discover", discoverCursor, previousCount: discoveredTotal },
+        });
+
+        if (res.error || !res.data?.success) {
+          addLog(`⚠️ Erro na descoberta: ${res.data?.error || res.error?.message}`);
+          break;
+        }
+
+        discoveredTotal = res.data.totalDiscovered;
+        discoverCursor = res.data.discoverCursor;
+        discoveryExhausted = res.data.exhausted;
+        setProgressLabel(`Descobrindo ilhas... ${formatNumber(discoveredTotal)} encontradas`);
+        addLog(`🔍 Descobertas até agora: ${formatNumber(discoveredTotal)} ilhas`);
+      }
+
+      if (abortRef.current) {
+        addLog("⚠️ Geração cancelada pelo usuário");
+        setGenerating(false);
+        return;
+      }
+
+      setTotalAvailable(discoveredTotal);
+      addLog(`✅ Fase 1 concluída: ${formatNumber(discoveredTotal)} ilhas disponíveis na API`);
+      addLog("📊 Fase 2: Coletando métricas de cada ilha (ignorando ilhas sem dados)...");
+      setLiveStatus("collecting");
+
+      // ============ PHASE 2: COLLECT — fetch metrics for all islands ============
       let reportId: string | null = null;
       let cursor: string | null = null;
       let done = false;
       let passCount = 0;
+      let totalSkippedNull = 0;
 
       while (!done && !abortRef.current) {
         passCount++;
-        addLog(`Lote ${passCount}: enviando requisição para coletor...`);
+        addLog(`Lote ${passCount}: coletando métricas...`);
 
         let res: any = null;
         let lastError: any = null;
-        // Retry up to 3 times per batch
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
             res = await supabase.functions.invoke("discover-collector", {
-              body: { reportId, cursor, targetIslands: TARGET_ISLANDS, mode: "collect" },
+              body: { reportId, cursor, mode: "collect" },
             });
             if (!res.error) break;
             lastError = res.error;
@@ -169,29 +198,31 @@ export default function DiscoverTrendsList() {
         reportIdRef.current = reportId;
         cursor = data.cursor;
         done = data.done;
+        totalSkippedNull += data.skippedNull || 0;
 
-        // Start polling after first successful call
         if (passCount === 1 && reportId) {
           startPolling(reportId);
         }
 
         const collected = data.totalCollected || 0;
         const batchNew = data.batchCollected || 0;
-        const pct = data.progress || 0;
-        setProgress(Math.min(pct, 95));
         setLiveIslands(collected);
-        setProgressLabel(`${collected} ilhas coletadas de ${TARGET_ISLANDS} (${pct}%)`);
-        addLog(`Lote ${passCount} concluído: +${batchNew} novas ilhas | Total: ${collected} | ${pct}%`);
+
+        // Dynamic progress: collected / total discovered
+        const pct = discoveredTotal > 0
+          ? Math.min(95, Math.round((collected / discoveredTotal) * 100))
+          : 0;
+        setProgress(pct);
+        setProgressLabel(`${formatNumber(collected)} ilhas com dados / ${formatNumber(discoveredTotal)} total (${pct}%)`);
+        addLog(`Lote ${passCount}: +${batchNew} novas | ${totalSkippedNull} sem dados | Total: ${formatNumber(collected)} | ${pct}%`);
 
         if (!done) {
-          addLog(`Aguardando próximo lote... (cursor: ${cursor?.slice(0, 12)}...)`);
           await new Promise((r) => setTimeout(r, 1000));
         }
       }
 
       if (abortRef.current) {
         addLog("⚠️ Geração cancelada pelo usuário");
-        setProgressLabel("Cancelado");
         stopPolling();
         setGenerating(false);
         return;
@@ -209,7 +240,7 @@ export default function DiscoverTrendsList() {
 
       setProgress(100);
       setProgressLabel("✅ Relatório completo!");
-      addLog("✅ Relatório gerado com sucesso!");
+      addLog(`✅ Relatório gerado! ${formatNumber(liveIslands)} ilhas com dados (${totalSkippedNull} sem dados ignoradas)`);
       toast({ title: "Relatório gerado!", description: `Coleta finalizada com sucesso.` });
 
       fetchReports();
@@ -218,46 +249,45 @@ export default function DiscoverTrendsList() {
         setProgress(0);
         setProgressLabel("");
         setLogs([]);
+        setTotalAvailable(null);
       }, 4000);
     } catch (e: any) {
       stopPolling();
       addLog(`⚠️ Erro na coleta: ${e.message || "Falha desconhecida"}`);
-      
-      // Try to finalize with whatever data was collected
+
       const savedReportId = reportIdRef.current;
       if (savedReportId) {
         addLog(`Finalizando com os dados já coletados...`);
         setProgressLabel("Finalizando com dados parciais...");
         setProgress(96);
         try {
-          // Call finalize mode to compute rankings from partial data
           await supabase.functions.invoke("discover-collector", {
             body: { reportId: savedReportId, mode: "finalize" },
           });
-          
-          // Trigger AI analysis on partial data
+
           setProgress(98);
           setProgressLabel("Gerando análise com IA (dados parciais)...");
           addLog("Gerando narrativas com IA sobre dados parciais...");
           await supabase.functions.invoke("discover-report-ai", { body: { reportId: savedReportId } });
-          
+
           setProgress(100);
           setProgressLabel("✅ Relatório parcial gerado!");
-          addLog(`✅ Relatório gerado com dados parciais (${liveIslands} ilhas)`);
-          toast({ title: "Relatório parcial gerado", description: `Coleta parou mas o relatório foi salvo com ${liveIslands} ilhas.` });
+          addLog(`✅ Relatório gerado com dados parciais`);
+          toast({ title: "Relatório parcial gerado", description: `Coleta parou mas o relatório foi salvo.` });
           fetchReports();
           setTimeout(() => {
             setGenerating(false);
             setProgress(0);
             setProgressLabel("");
             setLogs([]);
+            setTotalAvailable(null);
           }, 4000);
           return;
         } catch (finalizeErr: any) {
           addLog(`❌ Falha ao finalizar dados parciais: ${finalizeErr.message}`);
         }
       }
-      
+
       toast({ title: "Erro", description: e.message || "Falha ao gerar relatório", variant: "destructive" });
       setGenerating(false);
       setProgress(0);
@@ -314,11 +344,12 @@ export default function DiscoverTrendsList() {
       {generating && (
         <Card className="mb-6 border-primary/30">
           <CardContent className="pt-4 pb-4 space-y-4">
-            {/* Status header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {progress >= 100 ? (
                   <CheckCircle2 className="h-5 w-5 text-primary" />
+                ) : liveStatus === "discovering" ? (
+                  <Search className="h-5 w-5 animate-pulse text-primary" />
                 ) : (
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 )}
@@ -327,18 +358,18 @@ export default function DiscoverTrendsList() {
               <span className="text-xs text-muted-foreground font-mono">{progress}%</span>
             </div>
 
-            {/* Progress bar */}
             <Progress value={progress} className="h-3" />
 
-            {/* Live stats */}
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
-                <p className="text-xs text-muted-foreground">Ilhas Coletadas</p>
+                <p className="text-xs text-muted-foreground">Ilhas com Dados</p>
                 <p className="font-display font-bold text-lg text-primary">{formatNumber(liveIslands)}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Alvo</p>
-                <p className="font-display font-bold text-lg">{formatNumber(TARGET_ISLANDS)}</p>
+                <p className="text-xs text-muted-foreground">Total na API</p>
+                <p className="font-display font-bold text-lg">
+                  {totalAvailable != null ? formatNumber(totalAvailable) : "Descobrindo..."}
+                </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Status</p>
@@ -346,7 +377,6 @@ export default function DiscoverTrendsList() {
               </div>
             </div>
 
-            {/* Live logs */}
             <div className="bg-muted/50 rounded-md border max-h-40 overflow-y-auto p-3 font-mono text-xs space-y-1">
               {logs.length === 0 ? (
                 <p className="text-muted-foreground">Aguardando logs...</p>
@@ -362,7 +392,7 @@ export default function DiscoverTrendsList() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              A coleta pode levar alguns minutos. A API da Epic é consultada em lotes para respeitar os limites de taxa.
+              Sem limite fixo — o sistema coleta todas as ilhas disponíveis na API da Epic, ignorando ilhas sem dados.
             </p>
           </CardContent>
         </Card>
