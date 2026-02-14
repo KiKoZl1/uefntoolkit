@@ -221,7 +221,43 @@ export default function DiscoverTrendsList() {
       }, 4000);
     } catch (e: any) {
       stopPolling();
-      addLog(`❌ Erro: ${e.message || "Falha desconhecida"}`);
+      addLog(`⚠️ Erro na coleta: ${e.message || "Falha desconhecida"}`);
+      
+      // Try to finalize with whatever data was collected
+      const savedReportId = reportIdRef.current;
+      if (savedReportId) {
+        addLog(`Finalizando com os dados já coletados...`);
+        setProgressLabel("Finalizando com dados parciais...");
+        setProgress(96);
+        try {
+          // Call finalize mode to compute rankings from partial data
+          await supabase.functions.invoke("discover-collector", {
+            body: { reportId: savedReportId, mode: "finalize" },
+          });
+          
+          // Trigger AI analysis on partial data
+          setProgress(98);
+          setProgressLabel("Gerando análise com IA (dados parciais)...");
+          addLog("Gerando narrativas com IA sobre dados parciais...");
+          await supabase.functions.invoke("discover-report-ai", { body: { reportId: savedReportId } });
+          
+          setProgress(100);
+          setProgressLabel("✅ Relatório parcial gerado!");
+          addLog(`✅ Relatório gerado com dados parciais (${liveIslands} ilhas)`);
+          toast({ title: "Relatório parcial gerado", description: `Coleta parou mas o relatório foi salvo com ${liveIslands} ilhas.` });
+          fetchReports();
+          setTimeout(() => {
+            setGenerating(false);
+            setProgress(0);
+            setProgressLabel("");
+            setLogs([]);
+          }, 4000);
+          return;
+        } catch (finalizeErr: any) {
+          addLog(`❌ Falha ao finalizar dados parciais: ${finalizeErr.message}`);
+        }
+      }
+      
       toast({ title: "Erro", description: e.message || "Falha ao gerar relatório", variant: "destructive" });
       setGenerating(false);
       setProgress(0);
