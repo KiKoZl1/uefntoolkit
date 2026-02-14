@@ -67,7 +67,7 @@ export default function DiscoverTrendsList() {
       let cursor: string | null = null;
       let done = false;
       let passCount = 0;
-      const TARGET_ISLANDS = 1000;
+      const TARGET_ISLANDS = 2000;
 
       while (!done && !abortRef.current) {
         passCount++;

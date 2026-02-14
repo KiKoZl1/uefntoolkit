@@ -7,10 +7,10 @@ const corsHeaders = {
 };
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
-const PARALLEL_BATCH = 5; // Conservative to avoid 429s
-const PAGE_SIZE = 100;
-const ISLANDS_PER_PASS = 200; // How many islands to fetch metrics for per call
-const TIME_LIMIT_MS = 50000; // Stop fetching metrics at 50s to leave time for DB save
+const PARALLEL_BATCH = 5; // Keep low to avoid 429 rate limits from Epic
+const PAGE_SIZE = 500; // Epic API supports up to 1000
+const ISLANDS_PER_PASS = 400; // Islands to process per invocation
+const TIME_LIMIT_MS = 50000; // Stop at 50s to save progress
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -390,7 +390,7 @@ serve(async (req) => {
     let apiExhausted = false;
 
     while (newIslandsToProcess.length < ISLANDS_PER_PASS) {
-      if (Date.now() - startTime > 15000) {
+      if (Date.now() - startTime > 25000) {
         console.log(`Time limit for island listing: stopping at ${newIslandsToProcess.length} new islands`);
         break;
       }
@@ -448,7 +448,7 @@ serve(async (req) => {
       if (i % 50 === 0 && i > 0) {
         console.log(`Metrics progress: ${newIslandData.length}/${batch.length} (${((Date.now() - startTime) / 1000).toFixed(1)}s)`);
       }
-      await delay(200);
+      await delay(500);
     }
 
     // Merge with existing
