@@ -7,42 +7,36 @@ const corsHeaders = {
 };
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
-const PARALLEL_BATCH = 20;
 const PAGE_SIZE = 1000;
-const ISLANDS_PER_PASS = 1000;
-const TIME_LIMIT_MS = 50000;
+
+// ========== Helpers ==========
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function fetchWithRetry(url: string, retries = 3): Promise<any> {
+async function fetchWithRetry(url: string, retries = 3): Promise<{ data: any; status: number }> {
   for (let i = 0; i < retries; i++) {
     try {
       const res = await fetch(url);
-      if (res.ok) return res.json();
-      if (res.status === 429) {
-        const wait = (i + 1) * 3000;
-        console.log(`Rate limited on ${url}, waiting ${wait / 1000}s...`);
-        await delay(wait);
-        continue;
-      }
-      if (res.status === 404) return null;
+      if (res.ok) return { data: await res.json(), status: res.status };
+      if (res.status === 429) return { data: null, status: 429 };
+      if (res.status === 404) return { data: null, status: 404 };
       console.error(`Error ${res.status} for ${url}`);
-      return null;
+      return { data: null, status: res.status };
     } catch (e) {
-      console.error(`Fetch error:`, e);
-      if (i < retries - 1) await delay(1000);
+      console.error(`Fetch error attempt ${i + 1}:`, e);
+      if (i < retries - 1) await delay(1000 * (i + 1));
     }
   }
-  return null;
+  return { data: null, status: 0 };
 }
 
 async function fetchIslandPage(cursor: string | null): Promise<{ islands: any[]; nextCursor: string | null }> {
   let url = `${EPIC_API}/islands?size=${PAGE_SIZE}`;
   if (cursor) url += `&after=${encodeURIComponent(cursor)}`;
 
-  const data = await fetchWithRetry(url);
+  const { data } = await fetchWithRetry(url);
   if (!data?.data?.length) return { islands: [], nextCursor: null };
 
   let nextCursor: string | null = null;
@@ -84,305 +78,19 @@ function avgRetentionCalc(retArr: any[] | undefined, key: string): number {
   return valid.reduce((s: number, r: any) => s + r[key], 0) / valid.length;
 }
 
-function topN(arr: any[], key: string, n: number) {
-  return [...arr]
-    .filter((i) => i[key] != null && Number(i[key]) > 0)
-    .sort((a, b) => Number(b[key]) - Number(a[key]))
-    .slice(0, n)
-    .map((i) => ({
-      code: i.code,
-      title: i.title,
-      creator: i.creator,
-      category: i.category,
-      value: Number(i[key]),
-      name: i.title || i.creator || i.code,
-    }));
-}
+const TREND_KEYWORDS = [
+  "squid game", "zombie", "1v1", "tycoon", "survival", "horror", "deathrun",
+  "box fight", "zone wars", "gun game", "hide and seek", "prop hunt",
+  "roleplay", "rp", "parkour", "obby", "simulator", "battle royale",
+  "build fight", "free build", "ffa", "pvp", "pve", "escape room",
+  "murder mystery", "race", "dropper", "red vs blue", "capture the flag",
+  "bed wars", "sky wars", "prison", "cops", "heist", "fashion show",
+  "quiz", "trivia", "music", "concert", "dance", "among us",
+  "sniper", "aim trainer", "warmup", "practice", "edit course",
+  "lego", "rocket racing", "fall guys", "tmnt", "walking dead",
+];
 
-function processIslandMetrics(island: any, metrics: any) {
-  const uniquePlayers = sumMetric(metrics.uniquePlayers);
-  const totalPlays = sumMetric(metrics.plays);
-  const minutesPlayed = sumMetric(metrics.minutesPlayed);
-  const avgMinPerPlayer = avgMetric(metrics.averageMinutesPerPlayer);
-  const peakCCU = maxMetric(metrics.peakCCU);
-  const avgPeakCCU = avgMetric(metrics.peakCCU);
-  const favorites = sumMetric(metrics.favorites);
-  const recommendations = sumMetric(metrics.recommendations);
-  const d1 = avgRetentionCalc(metrics.retention, "d1");
-  const d7 = avgRetentionCalc(metrics.retention, "d7");
-
-  return {
-    code: island.code,
-    title: island.title || island.code,
-    creator: island.creatorCode || "unknown",
-    category: island.category || "Fortnite UGC",
-    createdIn: island.createdIn || "Unknown",
-    tags: island.tags || [],
-    uniquePlayers,
-    totalPlays,
-    minutesPlayed,
-    avgMinPerPlayer,
-    peakCCU,
-    avgPeakCCU,
-    favorites,
-    recommendations,
-    d1,
-    d7,
-    playsPerPlayer: uniquePlayers > 0 ? totalPlays / uniquePlayers : 0,
-    favPer100: uniquePlayers > 0 ? (favorites / uniquePlayers) * 100 : 0,
-    recPer100: uniquePlayers > 0 ? (recommendations / uniquePlayers) * 100 : 0,
-    favToPlayRatio: totalPlays > 0 ? favorites / totalPlays : 0,
-    recToPlayRatio: totalPlays > 0 ? recommendations / totalPlays : 0,
-    retentionAdjD1: avgMinPerPlayer * d1,
-    retentionAdjD7: avgMinPerPlayer * d7,
-    isUGC: island.creatorCode !== "fortnite" && island.creatorCode !== "epic",
-    isActive: uniquePlayers >= 5,
-  };
-}
-
-function detectTrends(islandData: any[]) {
-  const TREND_KEYWORDS = [
-    "squid game", "zombie", "1v1", "tycoon", "survival", "horror", "deathrun",
-    "box fight", "zone wars", "gun game", "hide and seek", "prop hunt",
-    "roleplay", "rp", "parkour", "obby", "simulator", "battle royale",
-    "build fight", "free build", "ffa", "pvp", "pve", "escape room",
-    "murder mystery", "race", "dropper", "red vs blue", "capture the flag",
-    "bed wars", "sky wars", "prison", "cops", "heist", "fashion show",
-    "quiz", "trivia", "music", "concert", "dance", "among us",
-    "sniper", "aim trainer", "warmup", "practice", "edit course",
-    "lego", "rocket racing", "fall guys", "tmnt", "walking dead",
-  ];
-
-  const trendMap: Record<string, { keyword: string; islands: number; totalPlays: number; totalPlayers: number; peakCCU: number; avgD1: number; d1Count: number }> = {};
-
-  for (const island of islandData) {
-    const titleLower = (island.title || "").toLowerCase();
-    for (const kw of TREND_KEYWORDS) {
-      if (titleLower.includes(kw)) {
-        if (!trendMap[kw]) {
-          trendMap[kw] = { keyword: kw, islands: 0, totalPlays: 0, totalPlayers: 0, peakCCU: 0, avgD1: 0, d1Count: 0 };
-        }
-        const t = trendMap[kw];
-        t.islands++;
-        t.totalPlays += island.totalPlays;
-        t.totalPlayers += island.uniquePlayers;
-        t.peakCCU = Math.max(t.peakCCU, island.peakCCU);
-        if (island.d1 > 0) { t.avgD1 += island.d1; t.d1Count++; }
-      }
-    }
-  }
-
-  return Object.values(trendMap)
-    .map((t) => ({
-      name: t.keyword.charAt(0).toUpperCase() + t.keyword.slice(1),
-      keyword: t.keyword,
-      islands: t.islands,
-      totalPlays: t.totalPlays,
-      totalPlayers: t.totalPlayers,
-      peakCCU: t.peakCCU,
-      avgD1: t.d1Count > 0 ? t.avgD1 / t.d1Count : 0,
-      value: t.totalPlays,
-    }))
-    .filter((t) => t.islands >= 3)
-    .sort((a, b) => b.totalPlays - a.totalPlays)
-    .slice(0, 20);
-}
-
-function computeReportData(islandData: any[], existingIslandCodes: Set<string>) {
-  const creatorsMap: Record<string, any> = {};
-  const categoriesMap: Record<string, any> = {};
-  const tagsMap: Record<string, number> = {};
-
-  for (const entry of islandData) {
-    const cKey = entry.creator;
-    if (!creatorsMap[cKey]) {
-      creatorsMap[cKey] = { name: cKey, creator: cKey, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, favorites: 0, recommendations: 0, sumD1: 0, sumD7: 0, countD1: 0, countD7: 0 };
-    }
-    const c = creatorsMap[cKey];
-    c.totalPlays += entry.totalPlays;
-    c.uniquePlayers += entry.uniquePlayers;
-    c.minutesPlayed += entry.minutesPlayed;
-    c.peakCCU = Math.max(c.peakCCU, entry.peakCCU);
-    c.favorites += entry.favorites;
-    c.recommendations += entry.recommendations;
-    c.maps++;
-    if (entry.d1 > 0) { c.sumD1 += entry.d1; c.countD1++; }
-    if (entry.d7 > 0) { c.sumD7 += entry.d7; c.countD7++; }
-
-    const cat = entry.category;
-    if (!categoriesMap[cat]) {
-      categoriesMap[cat] = { name: cat, category: cat, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, favorites: 0, recommendations: 0 };
-    }
-    const cm = categoriesMap[cat];
-    cm.totalPlays += entry.totalPlays;
-    cm.uniquePlayers += entry.uniquePlayers;
-    cm.minutesPlayed += entry.minutesPlayed;
-    cm.peakCCU = Math.max(cm.peakCCU, entry.peakCCU);
-    cm.favorites += entry.favorites;
-    cm.recommendations += entry.recommendations;
-    cm.maps++;
-
-    if (Array.isArray(entry.tags)) {
-      for (const tag of entry.tags) {
-        if (typeof tag === "string") tagsMap[tag] = (tagsMap[tag] || 0) + 1;
-      }
-    }
-  }
-
-  const activeIslands = islandData.filter((i) => i.isActive);
-  const ugcIslands = islandData.filter((i) => i.isUGC);
-  const uniqueCreators = new Set(islandData.map((i) => i.creator));
-  const safeDiv = (num: number, den: number) => den > 0 ? num / den : 0;
-
-  const totalPlaysAll = islandData.reduce((s, i) => s + i.totalPlays, 0);
-  const totalPlayersAll = islandData.reduce((s, i) => s + i.uniquePlayers, 0);
-  const totalMinutesAll = islandData.reduce((s, i) => s + i.minutesPlayed, 0);
-  const totalFavoritesAll = islandData.reduce((s, i) => s + i.favorites, 0);
-  const totalRecommendationsAll = islandData.reduce((s, i) => s + i.recommendations, 0);
-
-  const newIslands = islandData.filter((i) => !existingIslandCodes.has(i.code));
-  const newCreatorCodes = new Set(newIslands.map((i) => i.creator));
-  const existingCreatorCodes = new Set(
-    islandData.filter((i) => existingIslandCodes.has(i.code)).map((i) => i.creator)
-  );
-  const trulyNewCreators = [...newCreatorCodes].filter((c) => !existingCreatorCodes.has(c));
-
-  const failedIslands = islandData.filter((i) => i.uniquePlayers < 500 && i.uniquePlayers > 0);
-
-  const trendingTopics = detectTrends(islandData);
-
-  const platformKPIs = {
-    totalIslands: islandData.length,
-    activeIslands: activeIslands.length,
-    inactiveIslands: islandData.length - activeIslands.length,
-    totalCreators: uniqueCreators.size,
-    avgMapsPerCreator: safeDiv(islandData.length, uniqueCreators.size),
-    totalPlays: totalPlaysAll,
-    totalUniquePlayers: totalPlayersAll,
-    totalMinutesPlayed: totalMinutesAll,
-    totalFavorites: totalFavoritesAll,
-    totalRecommendations: totalRecommendationsAll,
-    avgPlayDuration: safeDiv(
-      activeIslands.reduce((s, i) => s + i.avgMinPerPlayer, 0),
-      activeIslands.length
-    ),
-    avgCCUPerMap: safeDiv(
-      activeIslands.reduce((s, i) => s + i.avgPeakCCU, 0),
-      activeIslands.length
-    ),
-    avgPlayersPerDay: safeDiv(totalPlayersAll, 7),
-    avgRetentionD1: safeDiv(
-      activeIslands.reduce((s, i) => s + i.d1, 0),
-      activeIslands.length
-    ),
-    avgRetentionD7: safeDiv(
-      activeIslands.reduce((s, i) => s + i.d7, 0),
-      activeIslands.length
-    ),
-    favToPlayRatio: safeDiv(totalFavoritesAll, totalPlaysAll),
-    recToPlayRatio: safeDiv(totalRecommendationsAll, totalPlaysAll),
-    newMapsThisWeek: newIslands.length,
-    newCreatorsThisWeek: trulyNewCreators.length,
-    avgMapsPerCreatorThisWeek: safeDiv(newIslands.length, newCreatorCodes.size || 1),
-    failedIslands: failedIslands.length,
-  };
-
-  const creators = Object.values(creatorsMap).map((c: any) => ({
-    ...c,
-    avgD1: c.countD1 > 0 ? c.sumD1 / c.countD1 : 0,
-    avgD7: c.countD7 > 0 ? c.sumD7 / c.countD7 : 0,
-    value: c.totalPlays,
-  }));
-  const categories = Object.values(categoriesMap).map((c: any) => ({
-    ...c,
-    title: c.category === "None" ? "Fortnite UGC" : c.category,
-    avgPlays: c.maps > 0 ? Math.round(c.totalPlays / c.maps) : 0,
-    avgCCU: c.maps > 0 ? Math.round(c.peakCCU / c.maps) : 0,
-    value: c.totalPlays,
-  }));
-  const topTags = Object.entries(tagsMap)
-    .sort((a, b) => (b[1] as number) - (a[1] as number))
-    .slice(0, 20)
-    .map(([tag, count]) => ({ name: tag, tag, value: count, count }));
-
-  const computedRankings = {
-    topPeakCCU: topN(islandData, "peakCCU", 10),
-    topPeakCCU_UGC: topN(ugcIslands, "peakCCU", 10),
-    topAvgPeakCCU: topN(islandData, "avgPeakCCU", 10),
-    topUniquePlayers: topN(islandData, "uniquePlayers", 10),
-    topTotalPlays: topN(islandData, "totalPlays", 10),
-    topMinutesPlayed: topN(islandData, "minutesPlayed", 10),
-    topRetentionD1: topN(islandData, "d1", 10),
-    topRetentionD7: topN(islandData, "d7", 10),
-    topD1_UGC: topN(ugcIslands, "d1", 10),
-    topD7_UGC: topN(ugcIslands, "d7", 10),
-    topCreatorsByPlays: topN(creators, "totalPlays", 10),
-    topCreatorsByPlayers: topN(creators, "uniquePlayers", 10),
-    topCreatorsByMinutes: topN(creators, "minutesPlayed", 10),
-    topCreatorsByCCU: topN(creators, "peakCCU", 10),
-    topCreatorsByD1: topN(creators, "avgD1", 10),
-    topCreatorsByD7: topN(creators, "avgD7", 10),
-    topAvgMinutesPerPlayer: topN(islandData, "avgMinPerPlayer", 10),
-    topFavorites: topN(islandData, "favorites", 10),
-    topRecommendations: topN(islandData, "recommendations", 10),
-    topPlaysPerPlayer: topN(islandData, "playsPerPlayer", 10),
-    topFavsPer100: topN(islandData, "favPer100", 10),
-    topRecPer100: topN(islandData, "recPer100", 10),
-    topRetentionAdjD1: topN(islandData, "retentionAdjD1", 10),
-    topRetentionAdjD7: topN(islandData, "retentionAdjD7", 10),
-    categoryShare: categories.sort((a: any, b: any) => b.totalPlays - a.totalPlays).slice(0, 15),
-    categoryPopularity: Object.fromEntries(
-      categories.sort((a: any, b: any) => b.maps - a.maps).slice(0, 10).map((c: any) => [c.title || c.category, c.maps])
-    ),
-    topCategoriesByPlays: topN(categories, "totalPlays", 10),
-    topCategoriesByPlayers: topN(categories, "uniquePlayers", 10),
-    topTags,
-    topFavsPerPlay: topN(islandData, "favToPlayRatio", 10),
-    topRecsPerPlay: topN(islandData, "recToPlayRatio", 10),
-    trendingTopics,
-    topNewIslandsByPlays: topN(newIslands, "totalPlays", 10),
-    topNewIslandsByPlayers: topN(newIslands, "uniquePlayers", 10),
-    topNewIslandsByCCU: topN(newIslands, "peakCCU", 10),
-    failedIslandsList: failedIslands
-      .sort((a, b) => a.uniquePlayers - b.uniquePlayers)
-      .slice(0, 10)
-      .map((i) => ({
-        code: i.code,
-        title: i.title,
-        creator: i.creator,
-        category: i.category,
-        value: i.uniquePlayers,
-        name: i.title || i.code,
-        tags: i.tags?.length || 0,
-      })),
-  };
-
-  return { platformKPIs, computedRankings, activeCount: activeIslands.length, totalPlaysAll, totalPlayersAll };
-}
-
-// ============ DISCOVERY MODE: fast scan to count total islands without fetching metrics ============
-async function discoverTotalIslands(startCursor: string | null): Promise<{ totalDiscovered: number; lastCursor: string | null; exhausted: boolean }> {
-  let cursor = startCursor;
-  let total = 0;
-  const startTime = Date.now();
-
-  while (true) {
-    // Use 30s budget for discovery phase
-    if (Date.now() - startTime > 30000) {
-      return { totalDiscovered: total, lastCursor: cursor, exhausted: false };
-    }
-
-    const { islands, nextCursor } = await fetchIslandPage(cursor);
-    if (!islands.length) return { totalDiscovered: total, lastCursor: null, exhausted: true };
-
-    total += islands.length;
-    console.log(`Discovery: ${total} islands found so far...`);
-
-    cursor = nextCursor;
-    if (!cursor) return { totalDiscovered: total, lastCursor: null, exhausted: true };
-    await delay(50);
-  }
-}
+// ========== Main Handler ==========
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -396,227 +104,700 @@ serve(async (req) => {
     let body: any = {};
     try { body = await req.json(); } catch { /* empty body ok */ }
 
-    const mode = body.mode || "collect";
+    const mode = body.mode || "start";
     const reportId = body.reportId || null;
-    const islandCursor = body.cursor || null;
 
-    const now = new Date();
-    const to = new Date(now);
-    to.setUTCHours(0, 0, 0, 0);
-    const from = new Date(to);
-    from.setUTCDate(from.getUTCDate() - 7);
-    const fromISO = from.toISOString();
-    const toISO = to.toISOString();
+    // ======================== MODE: START ========================
+    if (mode === "start") {
+      const now = new Date();
+      const to = new Date(now);
+      to.setUTCHours(0, 0, 0, 0);
+      const from = new Date(to);
+      from.setUTCDate(from.getUTCDate() - 7);
 
-    const weekEnd = to.toISOString().split("T")[0];
-    const weekStart = from.toISOString().split("T")[0];
-    const d = new Date(from);
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNumber = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-    const year = d.getUTCFullYear();
+      const weekEnd = to.toISOString().split("T")[0];
+      const weekStart = from.toISOString().split("T")[0];
+      const d = new Date(from);
+      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNumber = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+      const year = d.getUTCFullYear();
 
-    let existingIslandCodes: Set<string> = new Set();
+      // Get estimated_total from last completed report
+      const { data: lastReport } = await supabase
+        .from("discover_reports")
+        .select("queue_total")
+        .eq("phase", "done")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
 
-    // ============ DISCOVER MODE: count total available islands ============
-    if (mode === "discover") {
-      const discoverCursor = body.discoverCursor || null;
-      const previousCount = body.previousCount || 0;
-      
-      const { totalDiscovered, lastCursor, exhausted } = await discoverTotalIslands(discoverCursor);
-      const grandTotal = previousCount + totalDiscovered;
-      
-      console.log(`Discovery pass: +${totalDiscovered}, grand total: ${grandTotal}, exhausted: ${exhausted}`);
-      
+      const estimatedTotal = lastReport?.queue_total || null;
+
+      const { data: report, error: reportErr } = await supabase
+        .from("discover_reports")
+        .insert({
+          week_start: weekStart,
+          week_end: weekEnd,
+          week_number: weekNumber,
+          year,
+          status: "collecting",
+          phase: "catalog",
+          estimated_total: estimatedTotal,
+          started_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (reportErr) throw new Error(`Failed to create report: ${reportErr.message}`);
+
+      console.log(`[start] Created report ${report.id}, estimated_total=${estimatedTotal}`);
+
       return new Response(JSON.stringify({
-        success: true,
-        mode: "discover",
-        totalDiscovered: grandTotal,
-        discoverCursor: lastCursor,
-        exhausted,
+        success: true, reportId: report.id, estimated_total: estimatedTotal, phase: "catalog",
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ============ FINALIZE MODE ============
-    if (mode === "finalize" && reportId) {
-      console.log(`Finalizing report ${reportId}...`);
+    // All subsequent modes need reportId
+    if (!reportId) throw new Error("reportId is required");
 
-      const { data: cachedIslands } = await supabase
-        .from("discover_islands")
-        .select("island_code")
-        .limit(50000);
-      existingIslandCodes = new Set((cachedIslands || []).map((i: any) => i.island_code));
-
-      const { data: existingReport } = await supabase
+    // ======================== MODE: CATALOG ========================
+    if (mode === "catalog") {
+      const { data: report } = await supabase
         .from("discover_reports")
-        .select("raw_metrics")
+        .select("catalog_cursor, catalog_discovered_count, estimated_total")
         .eq("id", reportId)
         .single();
 
-      const allIslands = existingReport?.raw_metrics?.islandSummaries || [];
-      console.log(`Finalizing with ${allIslands.length} islands`);
+      if (!report) throw new Error("Report not found");
 
-      const { platformKPIs, computedRankings, activeCount, totalPlaysAll, totalPlayersAll } = computeReportData(allIslands, existingIslandCodes);
+      const startTime = Date.now();
+      let cursor = report.catalog_cursor;
+      let discovered = report.catalog_discovered_count || 0;
+      let exhausted = false;
+      let pagesThisRun = 0;
 
-      await supabase.from("discover_reports").update({
-        status: "completed",
-        computed_rankings: computedRankings,
-        platform_kpis: platformKPIs,
-        island_count: allIslands.length,
-      }).eq("id", reportId);
+      // Paginate as much as possible within 40s budget
+      while (Date.now() - startTime < 40000) {
+        const { islands, nextCursor } = await fetchIslandPage(cursor);
+        if (!islands.length) { exhausted = true; break; }
+
+        pagesThisRun++;
+        
+        // Bulk insert into queue
+        const queueRows = islands.map((isl: any) => ({
+          report_id: reportId,
+          island_code: isl.code,
+        }));
+
+        // Insert in chunks of 500
+        for (let i = 0; i < queueRows.length; i += 500) {
+          const chunk = queueRows.slice(i, i + 500);
+          await supabase.from("discover_report_queue").upsert(chunk, {
+            onConflict: "report_id,island_code",
+            ignoreDuplicates: true,
+          });
+        }
+
+        discovered += islands.length;
+        cursor = nextCursor;
+        if (!cursor) { exhausted = true; break; }
+      }
+
+      // Update report state
+      const progressPct = report.estimated_total
+        ? Math.min(10, Math.floor((discovered / report.estimated_total) * 10))
+        : 0;
+
+      const updateFields: any = {
+        catalog_discovered_count: discovered,
+        catalog_cursor: cursor,
+        progress_pct: progressPct,
+      };
+
+      if (exhausted) {
+        // Count total queue items
+        const { count } = await supabase
+          .from("discover_report_queue")
+          .select("*", { count: "exact", head: true })
+          .eq("report_id", reportId);
+
+        updateFields.catalog_done = true;
+        updateFields.queue_total = count || discovered;
+        updateFields.phase = "metrics";
+        updateFields.progress_pct = 10;
+      }
+
+      await supabase.from("discover_reports").update(updateFields).eq("id", reportId);
+
+      console.log(`[catalog] pages=${pagesThisRun}, discovered=${discovered}, exhausted=${exhausted}`);
 
       return new Response(JSON.stringify({
-        success: true, reportId, done: true,
-        islandCount: allIslands.length, activeCount,
-        totalPlays: totalPlaysAll, totalPlayers: totalPlayersAll,
+        success: true,
+        phase: exhausted ? "metrics" : "catalog",
+        catalog_discovered_count: discovered,
+        catalog_done: exhausted,
+        queue_total: updateFields.queue_total || null,
+        progress_pct: updateFields.progress_pct,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ============ COLLECT MODE (no fixed target — runs until API is exhausted) ============
-    const startTime = Date.now();
-    let currentReportId = reportId;
-
-    if (!currentReportId) {
-      const { data: report, error: reportErr } = await supabase
+    // ======================== MODE: METRICS ========================
+    if (mode === "metrics") {
+      const { data: report } = await supabase
         .from("discover_reports")
-        .insert({ week_start: weekStart, week_end: weekEnd, week_number: weekNumber, year, status: "collecting" })
-        .select("id")
+        .select("queue_total, metrics_done_count, reported_count, suppressed_count, error_count")
+        .eq("id", reportId)
         .single();
-      if (reportErr) throw new Error(`Failed to create report: ${reportErr.message}`);
-      currentReportId = report.id;
-      console.log(`Created report ${currentReportId}`);
-    }
 
-    const { data: existingReport } = await supabase
-      .from("discover_reports")
-      .select("raw_metrics")
-      .eq("id", currentReportId)
-      .single();
+      if (!report) throw new Error("Report not found");
 
-    const existingIslands: any[] = existingReport?.raw_metrics?.islandSummaries || [];
-    const existingCodes = new Set(existingIslands.map((i: any) => i.code));
-    console.log(`Report ${currentReportId}: ${existingIslands.length} already collected`);
+      const BATCH_SIZE = 500;
+      const startTime = Date.now();
 
-    let cursor = islandCursor;
-    const newIslandsToProcess: any[] = [];
-    let pagesScanned = 0;
-    let apiExhausted = false;
+      // Fetch pending items from queue
+      const { data: pendingItems, error: fetchErr } = await supabase
+        .from("discover_report_queue")
+        .select("id, island_code")
+        .eq("report_id", reportId)
+        .eq("status", "pending")
+        .limit(BATCH_SIZE);
 
-    while (newIslandsToProcess.length < ISLANDS_PER_PASS) {
-      if (Date.now() - startTime > 25000) break;
+      if (fetchErr) throw new Error(`Queue fetch error: ${fetchErr.message}`);
+      if (!pendingItems?.length) {
+        // All done
+        await supabase.from("discover_reports").update({
+          phase: "finalize",
+          progress_pct: 95,
+        }).eq("id", reportId);
 
-      const { islands: pageIslands, nextCursor } = await fetchIslandPage(cursor);
-      if (!pageIslands.length) { apiExhausted = true; break; }
-
-      pagesScanned++;
-      for (const island of pageIslands) {
-        if (!existingCodes.has(island.code)) newIslandsToProcess.push(island);
+        return new Response(JSON.stringify({
+          success: true, phase: "finalize",
+          metrics_done_count: report.metrics_done_count,
+          queue_total: report.queue_total,
+          reported_count: report.reported_count,
+          suppressed_count: report.suppressed_count,
+          error_count: report.error_count,
+          progress_pct: 95,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      console.log(`Page ${pagesScanned}: +${pageIslands.length} islands, ${newIslandsToProcess.length} new`);
 
-      cursor = nextCursor;
-      if (!cursor) { apiExhausted = true; break; }
-      await delay(50);
-    }
+      // Lock items: set status to processing
+      const itemIds = pendingItems.map((i: any) => i.id);
+      await supabase.from("discover_report_queue")
+        .update({ status: "processing", locked_at: new Date().toISOString() })
+        .in("id", itemIds);
 
-    const batch = newIslandsToProcess.slice(0, ISLANDS_PER_PASS);
-    console.log(`Fetching metrics for ${batch.length} islands...`);
+      // Date calculations
+      const now = new Date();
+      const todayMidnight = new Date(now);
+      todayMidnight.setUTCHours(0, 0, 0, 0);
+      const yesterday = new Date(todayMidnight);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const sevenDaysAgo = new Date(todayMidnight);
+      sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
 
-    const newIslandData: any[] = [];
-    let skippedNull = 0;
-    for (let i = 0; i < batch.length; i += PARALLEL_BATCH) {
-      if (Date.now() - startTime > TIME_LIMIT_MS) break;
+      const probeFrom = yesterday.toISOString();
+      const probeTo = todayMidnight.toISOString();
+      const weekFrom = sevenDaysAgo.toISOString();
+      const weekTo = todayMidnight.toISOString();
 
-      const chunk = batch.slice(i, i + PARALLEL_BATCH);
-      const promises = chunk.map(async (island: any) => {
-        const url = `${EPIC_API}/islands/${island.code}/metrics/day?from=${fromISO}&to=${toISO}`;
-        const metrics = await fetchWithRetry(url);
-        return { island, metrics };
-      });
+      // Adaptive concurrency
+      let concurrency = 15;
+      let consecutiveOk = 0;
+      let reported = 0;
+      let suppressed = 0;
+      let errors = 0;
+      let processed = 0;
 
-      const results = await Promise.all(promises);
-      for (const { island, metrics } of results) {
-        if (!metrics) {
-          skippedNull++;
-          continue;
+      const islandQueue = [...pendingItems];
+      const islandUpserts: any[] = [];
+      const queueUpdates: { id: string; status: string; last_error?: string }[] = [];
+
+      while (islandQueue.length > 0 && Date.now() - startTime < 45000) {
+        const batch = islandQueue.splice(0, concurrency);
+
+        const results = await Promise.all(batch.map(async (item: any) => {
+          try {
+            // PROBE: 1-day metrics
+            const probeUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${probeFrom}&to=${probeTo}`;
+            const probeRes = await fetchWithRetry(probeUrl);
+
+            if (probeRes.status === 429) return { item, rateLimited: true };
+            if (!probeRes.data) {
+              return { item, error: true, errorMsg: `Probe failed: status ${probeRes.status}` };
+            }
+
+            const metrics = probeRes.data;
+            const probeUnique = sumMetric(metrics.uniquePlayers);
+            const probePlays = sumMetric(metrics.plays);
+            const probeMinutes = sumMetric(metrics.minutesPlayed);
+            const probePeakCcu = maxMetric(metrics.peakCCU);
+
+            const hasData = probeUnique > 0 || probePlays > 0;
+
+            if (!hasData) {
+              // SUPPRESSED — no 7d fetch needed
+              return {
+                item,
+                suppressed: true,
+                islandData: {
+                  report_id: reportId,
+                  island_code: item.island_code,
+                  status: "suppressed",
+                  probe_unique: probeUnique,
+                  probe_plays: probePlays,
+                  probe_minutes: probeMinutes,
+                  probe_peak_ccu: probePeakCcu,
+                  probe_date: yesterday.toISOString().split("T")[0],
+                },
+              };
+            }
+
+            // REPORTED — fetch 7d data
+            const weekUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${weekFrom}&to=${weekTo}`;
+            const weekRes = await fetchWithRetry(weekUrl);
+
+            if (weekRes.status === 429) return { item, rateLimited: true };
+
+            const weekMetrics = weekRes.data || metrics; // fallback to probe data
+            const weekUnique = sumMetric(weekMetrics.uniquePlayers);
+            const weekPlays = sumMetric(weekMetrics.plays);
+            const weekMinutes = sumMetric(weekMetrics.minutesPlayed);
+            const weekMpp = avgMetric(weekMetrics.averageMinutesPerPlayer);
+            const weekPeakCcu = maxMetric(weekMetrics.peakCCU);
+            const weekFavorites = sumMetric(weekMetrics.favorites);
+            const weekRecommends = sumMetric(weekMetrics.recommendations);
+            const weekD1 = avgRetentionCalc(weekMetrics.retention, "d1");
+            const weekD7 = avgRetentionCalc(weekMetrics.retention, "d7");
+
+            // Fetch island metadata
+            const metaUrl = `${EPIC_API}/islands/${item.island_code}`;
+            const metaRes = await fetchWithRetry(metaUrl);
+            const meta = metaRes.data || {};
+
+            return {
+              item,
+              reported: true,
+              islandData: {
+                report_id: reportId,
+                island_code: item.island_code,
+                title: meta.title || null,
+                creator_code: meta.creatorCode || null,
+                category: meta.category || null,
+                created_in: meta.createdIn || null,
+                tags: meta.tags || [],
+                status: "reported",
+                probe_unique: probeUnique,
+                probe_plays: probePlays,
+                probe_minutes: probeMinutes,
+                probe_peak_ccu: probePeakCcu,
+                probe_date: yesterday.toISOString().split("T")[0],
+                week_unique: weekUnique,
+                week_plays: weekPlays,
+                week_minutes: weekMinutes,
+                week_minutes_per_player_avg: weekMpp,
+                week_peak_ccu_max: weekPeakCcu,
+                week_favorites: weekFavorites,
+                week_recommends: weekRecommends,
+                week_d1_avg: weekD1,
+                week_d7_avg: weekD7,
+              },
+            };
+          } catch (e) {
+            return { item, error: true, errorMsg: e instanceof Error ? e.message : "Unknown" };
+          }
+        }));
+
+        // Check for rate limits
+        const hasRateLimit = results.some((r: any) => r.rateLimited);
+        if (hasRateLimit) {
+          // Put rate-limited items back
+          for (const r of results) {
+            if (r.rateLimited) islandQueue.unshift(r.item);
+          }
+          concurrency = Math.max(3, Math.floor(concurrency / 2));
+          consecutiveOk = 0;
+          const backoffMs = 3000 * (1 + Math.random());
+          console.log(`[metrics] 429 hit, concurrency -> ${concurrency}, backoff ${Math.round(backoffMs)}ms`);
+          await delay(backoffMs);
+        } else {
+          consecutiveOk++;
+          if (consecutiveOk >= 5 && concurrency < 30) {
+            concurrency += 2;
+            consecutiveOk = 0;
+          }
         }
-        // Check if all metric arrays are empty/null — skip truly inactive islands
-        const hasData = metrics.uniquePlayers?.some((v: any) => v?.value != null && v.value > 0) ||
-                        metrics.plays?.some((v: any) => v?.value != null && v.value > 0);
-        if (!hasData) {
-          skippedNull++;
-          continue;
+
+        // Process results
+        for (const r of results) {
+          if (r.rateLimited) continue;
+          processed++;
+
+          if (r.error) {
+            errors++;
+            queueUpdates.push({ id: r.item.id, status: "error", last_error: r.errorMsg });
+          } else if (r.suppressed) {
+            suppressed++;
+            islandUpserts.push(r.islandData);
+            queueUpdates.push({ id: r.item.id, status: "done" });
+          } else if (r.reported) {
+            reported++;
+            islandUpserts.push(r.islandData);
+            queueUpdates.push({ id: r.item.id, status: "done" });
+          }
         }
-        newIslandData.push(processIslandMetrics(island, metrics));
       }
 
-      if (i % 50 === 0 && i > 0) {
-        console.log(`Metrics progress: ${newIslandData.length}/${batch.length} (skipped ${skippedNull} null)`);
+      // Batch upsert island data
+      for (let i = 0; i < islandUpserts.length; i += 100) {
+        const chunk = islandUpserts.slice(i, i + 100);
+        await supabase.from("discover_report_islands").upsert(chunk, {
+          onConflict: "report_id,island_code",
+        });
       }
-      await delay(100);
+
+      // Batch update queue statuses
+      for (const upd of queueUpdates) {
+        await supabase.from("discover_report_queue")
+          .update({ status: upd.status, last_error: upd.last_error || null })
+          .eq("id", upd.id);
+      }
+
+      // Update report counters
+      const newMetricsDone = (report.metrics_done_count || 0) + processed;
+      const newReported = (report.reported_count || 0) + reported;
+      const newSuppressed = (report.suppressed_count || 0) + suppressed;
+      const newErrors = (report.error_count || 0) + errors;
+      const queueTotal = report.queue_total || 1;
+      const progressPct = Math.min(95, 10 + Math.floor((newMetricsDone / queueTotal) * 85));
+
+      const isDone = newMetricsDone >= queueTotal;
+
+      await supabase.from("discover_reports").update({
+        metrics_done_count: newMetricsDone,
+        reported_count: newReported,
+        suppressed_count: newSuppressed,
+        error_count: newErrors,
+        progress_pct: isDone ? 95 : progressPct,
+        phase: isDone ? "finalize" : "metrics",
+      }).eq("id", reportId);
+
+      console.log(`[metrics] processed=${processed}, reported=${reported}, suppressed=${suppressed}, errors=${errors}, total=${newMetricsDone}/${queueTotal}, concurrency=${concurrency}`);
+
+      return new Response(JSON.stringify({
+        success: true,
+        phase: isDone ? "finalize" : "metrics",
+        metrics_done_count: newMetricsDone,
+        queue_total: queueTotal,
+        reported_count: newReported,
+        suppressed_count: newSuppressed,
+        error_count: newErrors,
+        progress_pct: isDone ? 95 : progressPct,
+        batch_processed: processed,
+        concurrency,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const allIslands = [...existingIslands, ...newIslandData];
-    const totalCollected = allIslands.length;
-    // No fixed target — done only when API cursor is exhausted
-    const done = apiExhausted;
+    // ======================== MODE: FINALIZE ========================
+    if (mode === "finalize") {
+      console.log(`[finalize] Starting for report ${reportId}`);
 
-    console.log(`Batch complete: +${newIslandData.length} new (${skippedNull} skipped null), ${totalCollected} total, done=${done}`);
-
-    // Upsert island cache
-    const islandUpserts = batch.slice(0, newIslandData.length).map((island: any, idx: number) => ({
-      island_code: island.code,
-      title: island.title,
-      creator_code: island.creatorCode,
-      category: island.category,
-      tags: island.tags,
-      created_in: island.createdIn,
-      last_metrics: {
-        uniquePlayers: newIslandData[idx]?.uniquePlayers || 0,
-        totalPlays: newIslandData[idx]?.totalPlays || 0,
-        minutesPlayed: newIslandData[idx]?.minutesPlayed || 0,
-        peakCCU: newIslandData[idx]?.peakCCU || 0,
-      },
-    }));
-
-    for (let i = 0; i < islandUpserts.length; i += 100) {
-      await supabase.from("discover_islands").upsert(islandUpserts.slice(i, i + 100), { onConflict: "island_code" });
-    }
-
-    await supabase.from("discover_reports").update({
-      status: done ? "analyzing" : "collecting",
-      raw_metrics: { islandSummaries: allIslands },
-      island_count: totalCollected,
-    }).eq("id", currentReportId);
-
-    if (done) {
+      // Get existing island codes for "new island" detection
       const { data: cachedIslands } = await supabase
         .from("discover_islands")
         .select("island_code")
         .limit(50000);
-      existingIslandCodes = new Set((cachedIslands || []).map((i: any) => i.island_code));
+      const existingIslandCodes = new Set((cachedIslands || []).map((i: any) => i.island_code));
 
-      const { platformKPIs, computedRankings } = computeReportData(allIslands, existingIslandCodes);
+      // Fetch all reported islands for this report (for rankings and KPIs)
+      const { data: reportedIslands, error: riError } = await supabase
+        .from("discover_report_islands")
+        .select("*")
+        .eq("report_id", reportId)
+        .eq("status", "reported");
+
+      if (riError) throw new Error(`Failed to fetch report islands: ${riError.message}`);
+
+      const islands = reportedIslands || [];
+      console.log(`[finalize] ${islands.length} reported islands`);
+
+      // Get counts
+      const { count: totalQueued } = await supabase
+        .from("discover_report_queue")
+        .select("*", { count: "exact", head: true })
+        .eq("report_id", reportId);
+
+      const { count: suppressedCount } = await supabase
+        .from("discover_report_islands")
+        .select("*", { count: "exact", head: true })
+        .eq("report_id", reportId)
+        .eq("status", "suppressed");
+
+      // Compute KPIs
+      const activeIslands = islands.filter((i: any) => (i.week_unique || 0) >= 5);
+      const uniqueCreators = new Set(islands.map((i: any) => i.creator_code).filter(Boolean));
+      const safeDiv = (n: number, d: number) => d > 0 ? n / d : 0;
+
+      const totalPlays = islands.reduce((s: number, i: any) => s + (i.week_plays || 0), 0);
+      const totalPlayers = islands.reduce((s: number, i: any) => s + (i.week_unique || 0), 0);
+      const totalMinutes = islands.reduce((s: number, i: any) => s + (i.week_minutes || 0), 0);
+      const totalFavorites = islands.reduce((s: number, i: any) => s + (i.week_favorites || 0), 0);
+      const totalRecommends = islands.reduce((s: number, i: any) => s + (i.week_recommends || 0), 0);
+
+      const newIslands = islands.filter((i: any) => !existingIslandCodes.has(i.island_code));
+      const newCreatorCodes = new Set(newIslands.map((i: any) => i.creator_code).filter(Boolean));
+      const existingCreatorCodes = new Set(
+        islands.filter((i: any) => existingIslandCodes.has(i.island_code)).map((i: any) => i.creator_code).filter(Boolean)
+      );
+      const trulyNewCreators = [...newCreatorCodes].filter((c) => !existingCreatorCodes.has(c));
+      const failedIslands = islands.filter((i: any) => (i.week_unique || 0) > 0 && (i.week_unique || 0) < 500);
+
+      const platformKPIs = {
+        totalIslands: totalQueued || islands.length,
+        activeIslands: activeIslands.length,
+        inactiveIslands: (totalQueued || 0) - activeIslands.length,
+        suppressedIslands: suppressedCount || 0,
+        totalCreators: uniqueCreators.size,
+        avgMapsPerCreator: safeDiv(islands.length, uniqueCreators.size),
+        totalPlays,
+        totalUniquePlayers: totalPlayers,
+        totalMinutesPlayed: totalMinutes,
+        totalFavorites,
+        totalRecommendations: totalRecommends,
+        avgPlayDuration: safeDiv(
+          activeIslands.reduce((s: number, i: any) => s + (i.week_minutes_per_player_avg || 0), 0),
+          activeIslands.length
+        ),
+        avgCCUPerMap: safeDiv(
+          activeIslands.reduce((s: number, i: any) => s + (i.week_peak_ccu_max || 0), 0),
+          activeIslands.length
+        ),
+        avgPlayersPerDay: safeDiv(totalPlayers, 7),
+        avgRetentionD1: safeDiv(
+          activeIslands.reduce((s: number, i: any) => s + (i.week_d1_avg || 0), 0),
+          activeIslands.length
+        ),
+        avgRetentionD7: safeDiv(
+          activeIslands.reduce((s: number, i: any) => s + (i.week_d7_avg || 0), 0),
+          activeIslands.length
+        ),
+        favToPlayRatio: safeDiv(totalFavorites, totalPlays),
+        recToPlayRatio: safeDiv(totalRecommends, totalPlays),
+        newMapsThisWeek: newIslands.length,
+        newCreatorsThisWeek: trulyNewCreators.length,
+        failedIslands: failedIslands.length,
+      };
+
+      // Rankings helper
+      const topN = (arr: any[], key: string, n: number) =>
+        [...arr]
+          .filter((i) => i[key] != null && Number(i[key]) > 0)
+          .sort((a, b) => Number(b[key]) - Number(a[key]))
+          .slice(0, n)
+          .map((i) => ({
+            code: i.island_code,
+            title: i.title || i.island_code,
+            creator: i.creator_code || "unknown",
+            category: i.category || "Fortnite UGC",
+            value: Number(i[key]),
+            name: i.title || i.creator_code || i.island_code,
+          }));
+
+      // UGC filter
+      const ugcIslands = islands.filter((i: any) => i.creator_code !== "fortnite" && i.creator_code !== "epic");
+
+      // Creator aggregation
+      const creatorsMap: Record<string, any> = {};
+      for (const isl of islands) {
+        const ck = isl.creator_code || "unknown";
+        if (!creatorsMap[ck]) {
+          creatorsMap[ck] = { name: ck, creator: ck, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, favorites: 0, recommendations: 0, sumD1: 0, sumD7: 0, countD1: 0, countD7: 0 };
+        }
+        const c = creatorsMap[ck];
+        c.totalPlays += isl.week_plays || 0;
+        c.uniquePlayers += isl.week_unique || 0;
+        c.minutesPlayed += isl.week_minutes || 0;
+        c.peakCCU = Math.max(c.peakCCU, isl.week_peak_ccu_max || 0);
+        c.favorites += isl.week_favorites || 0;
+        c.recommendations += isl.week_recommends || 0;
+        c.maps++;
+        if ((isl.week_d1_avg || 0) > 0) { c.sumD1 += isl.week_d1_avg; c.countD1++; }
+        if ((isl.week_d7_avg || 0) > 0) { c.sumD7 += isl.week_d7_avg; c.countD7++; }
+      }
+      const creators = Object.values(creatorsMap).map((c: any) => ({
+        ...c,
+        avgD1: c.countD1 > 0 ? c.sumD1 / c.countD1 : 0,
+        avgD7: c.countD7 > 0 ? c.sumD7 / c.countD7 : 0,
+        value: c.totalPlays,
+      }));
+
+      // Category aggregation
+      const categoriesMap: Record<string, any> = {};
+      const tagsMap: Record<string, number> = {};
+      for (const isl of islands) {
+        const cat = isl.category || "Fortnite UGC";
+        if (!categoriesMap[cat]) {
+          categoriesMap[cat] = { name: cat, category: cat, totalPlays: 0, uniquePlayers: 0, minutesPlayed: 0, peakCCU: 0, maps: 0, favorites: 0, recommendations: 0 };
+        }
+        const cm = categoriesMap[cat];
+        cm.totalPlays += isl.week_plays || 0;
+        cm.uniquePlayers += isl.week_unique || 0;
+        cm.minutesPlayed += isl.week_minutes || 0;
+        cm.peakCCU = Math.max(cm.peakCCU, isl.week_peak_ccu_max || 0);
+        cm.favorites += isl.week_favorites || 0;
+        cm.recommendations += isl.week_recommends || 0;
+        cm.maps++;
+
+        if (Array.isArray(isl.tags)) {
+          for (const tag of isl.tags) {
+            if (typeof tag === "string") tagsMap[tag] = (tagsMap[tag] || 0) + 1;
+          }
+        }
+      }
+      const categories = Object.values(categoriesMap).map((c: any) => ({
+        ...c,
+        title: c.category === "None" ? "Fortnite UGC" : c.category,
+        avgPlays: c.maps > 0 ? Math.round(c.totalPlays / c.maps) : 0,
+        value: c.totalPlays,
+      }));
+      const topTags = Object.entries(tagsMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([tag, count]) => ({ name: tag, tag, value: count, count }));
+
+      // Derived metrics for islands
+      const enriched = islands.map((i: any) => ({
+        ...i,
+        island_code: i.island_code,
+        playsPerPlayer: (i.week_unique || 0) > 0 ? (i.week_plays || 0) / i.week_unique : 0,
+        favPer100: (i.week_unique || 0) > 0 ? ((i.week_favorites || 0) / i.week_unique) * 100 : 0,
+        recPer100: (i.week_unique || 0) > 0 ? ((i.week_recommends || 0) / i.week_unique) * 100 : 0,
+        favToPlayRatio: (i.week_plays || 0) > 0 ? (i.week_favorites || 0) / i.week_plays : 0,
+        recToPlayRatio: (i.week_plays || 0) > 0 ? (i.week_recommends || 0) / i.week_plays : 0,
+        retentionAdjD1: (i.week_minutes_per_player_avg || 0) * (i.week_d1_avg || 0),
+        retentionAdjD7: (i.week_minutes_per_player_avg || 0) * (i.week_d7_avg || 0),
+      }));
+
+      // Trend detection
+      const trendMap: Record<string, any> = {};
+      for (const isl of enriched) {
+        const titleLower = (isl.title || "").toLowerCase();
+        for (const kw of TREND_KEYWORDS) {
+          if (titleLower.includes(kw)) {
+            if (!trendMap[kw]) trendMap[kw] = { keyword: kw, islands: 0, totalPlays: 0, totalPlayers: 0, peakCCU: 0, avgD1: 0, d1Count: 0 };
+            const t = trendMap[kw];
+            t.islands++;
+            t.totalPlays += isl.week_plays || 0;
+            t.totalPlayers += isl.week_unique || 0;
+            t.peakCCU = Math.max(t.peakCCU, isl.week_peak_ccu_max || 0);
+            if ((isl.week_d1_avg || 0) > 0) { t.avgD1 += isl.week_d1_avg; t.d1Count++; }
+          }
+        }
+      }
+      const trendingTopics = Object.values(trendMap)
+        .map((t: any) => ({
+          name: t.keyword.charAt(0).toUpperCase() + t.keyword.slice(1),
+          keyword: t.keyword,
+          islands: t.islands,
+          totalPlays: t.totalPlays,
+          totalPlayers: t.totalPlayers,
+          peakCCU: t.peakCCU,
+          avgD1: t.d1Count > 0 ? t.avgD1 / t.d1Count : 0,
+          value: t.totalPlays,
+        }))
+        .filter((t: any) => t.islands >= 3)
+        .sort((a: any, b: any) => b.totalPlays - a.totalPlays)
+        .slice(0, 20);
+
+      const computedRankings = {
+        topPeakCCU: topN(enriched, "week_peak_ccu_max", 10),
+        topPeakCCU_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "week_peak_ccu_max", 10),
+        topUniquePlayers: topN(enriched, "week_unique", 10),
+        topTotalPlays: topN(enriched, "week_plays", 10),
+        topMinutesPlayed: topN(enriched, "week_minutes", 10),
+        topRetentionD1: topN(enriched, "week_d1_avg", 10),
+        topRetentionD7: topN(enriched, "week_d7_avg", 10),
+        topD1_UGC: topN(ugcIslands, "week_d1_avg", 10),
+        topD7_UGC: topN(ugcIslands, "week_d7_avg", 10),
+        topCreatorsByPlays: topN(creators, "totalPlays", 10),
+        topCreatorsByPlayers: topN(creators, "uniquePlayers", 10),
+        topCreatorsByMinutes: topN(creators, "minutesPlayed", 10),
+        topCreatorsByCCU: topN(creators, "peakCCU", 10),
+        topCreatorsByD1: topN(creators, "avgD1", 10),
+        topCreatorsByD7: topN(creators, "avgD7", 10),
+        topAvgMinutesPerPlayer: topN(enriched, "week_minutes_per_player_avg", 10),
+        topFavorites: topN(enriched, "week_favorites", 10),
+        topRecommendations: topN(enriched, "week_recommends", 10),
+        topPlaysPerPlayer: topN(enriched, "playsPerPlayer", 10),
+        topFavsPer100: topN(enriched, "favPer100", 10),
+        topRecPer100: topN(enriched, "recPer100", 10),
+        topRetentionAdjD1: topN(enriched, "retentionAdjD1", 10),
+        topRetentionAdjD7: topN(enriched, "retentionAdjD7", 10),
+        categoryShare: categories.sort((a: any, b: any) => b.totalPlays - a.totalPlays).slice(0, 15),
+        categoryPopularity: Object.fromEntries(
+          categories.sort((a: any, b: any) => b.maps - a.maps).slice(0, 10).map((c: any) => [c.title || c.category, c.maps])
+        ),
+        topCategoriesByPlays: topN(categories, "totalPlays", 10),
+        topCategoriesByPlayers: topN(categories, "uniquePlayers", 10),
+        topTags,
+        topFavsPerPlay: topN(enriched, "favToPlayRatio", 10),
+        topRecsPerPlay: topN(enriched, "recToPlayRatio", 10),
+        trendingTopics,
+        topNewIslandsByPlays: topN(newIslands, "week_plays", 10),
+        topNewIslandsByPlayers: topN(newIslands, "week_unique", 10),
+        topNewIslandsByCCU: topN(newIslands, "week_peak_ccu_max", 10),
+        failedIslandsList: failedIslands
+          .sort((a: any, b: any) => (a.week_unique || 0) - (b.week_unique || 0))
+          .slice(0, 10)
+          .map((i: any) => ({
+            code: i.island_code,
+            title: i.title,
+            creator: i.creator_code,
+            category: i.category,
+            value: i.week_unique || 0,
+            name: i.title || i.island_code,
+          })),
+      };
+
+      // Update discover_islands cache with reported islands
+      const cacheUpserts = islands.map((i: any) => ({
+        island_code: i.island_code,
+        title: i.title,
+        creator_code: i.creator_code,
+        category: i.category,
+        tags: i.tags,
+        created_in: i.created_in,
+        last_metrics: {
+          uniquePlayers: i.week_unique || 0,
+          totalPlays: i.week_plays || 0,
+          minutesPlayed: i.week_minutes || 0,
+          peakCCU: i.week_peak_ccu_max || 0,
+        },
+      }));
+      for (let i = 0; i < cacheUpserts.length; i += 100) {
+        await supabase.from("discover_islands").upsert(cacheUpserts.slice(i, i + 100), { onConflict: "island_code" });
+      }
+
       await supabase.from("discover_reports").update({
-        status: "completed",
+        phase: "ai",
+        progress_pct: 95,
         computed_rankings: computedRankings,
         platform_kpis: platformKPIs,
-      }).eq("id", currentReportId);
-      console.log(`Report ${currentReportId} completed: ${totalCollected} islands`);
+        island_count: islands.length,
+        status: "analyzing",
+      }).eq("id", reportId);
+
+      console.log(`[finalize] Done. ${islands.length} reported islands, ${suppressedCount} suppressed`);
+
+      return new Response(JSON.stringify({
+        success: true, phase: "ai", progress_pct: 95,
+        reported_count: islands.length,
+        suppressed_count: suppressedCount,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    return new Response(JSON.stringify({
-      success: true,
-      reportId: currentReportId,
-      cursor: done ? null : cursor,
-      done,
-      totalCollected,
-      batchCollected: newIslandData.length,
-      skippedNull,
-      // No fixed target — progress is relative to totalAvailable sent by frontend
-      progress: null,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
+    throw new Error(`Unknown mode: ${mode}`);
   } catch (e) {
     console.error("Collector error:", e);
     return new Response(

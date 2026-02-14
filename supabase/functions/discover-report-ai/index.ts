@@ -30,7 +30,7 @@ serve(async (req) => {
     const rankings = report.computed_rankings;
 
     // Build a rich data summary for the AI
-    const rankingsSummary = JSON.stringify(rankings, null, 0).slice(0, 10000);
+    const rankingsSummary = JSON.stringify(rankings, null, 0);
 
     const prompt = `You are a senior Fortnite Discovery ecosystem analyst writing a comprehensive weekly trends report (Week ${report.week_number}, ${report.year}). You are writing for island creators and game developers who want actionable insights.
 
@@ -127,7 +127,7 @@ Sections:
 
     await supabase
       .from("discover_reports")
-      .update({ ai_narratives: narratives, status: "completed" })
+      .update({ ai_narratives: narratives, status: "completed", phase: "done", progress_pct: 100 })
       .eq("id", reportId);
 
     return new Response(JSON.stringify({ success: true, narratives }), {

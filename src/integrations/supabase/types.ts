@@ -85,16 +85,161 @@ export type Database = {
         }
         Relationships: []
       }
+      discover_report_islands: {
+        Row: {
+          category: string | null
+          created_in: string | null
+          creator_code: string | null
+          id: string
+          island_code: string
+          probe_date: string | null
+          probe_minutes: number | null
+          probe_peak_ccu: number | null
+          probe_plays: number | null
+          probe_unique: number | null
+          report_id: string
+          status: string | null
+          tags: Json | null
+          title: string | null
+          updated_at: string | null
+          week_d1_avg: number | null
+          week_d7_avg: number | null
+          week_favorites: number | null
+          week_minutes: number | null
+          week_minutes_per_player_avg: number | null
+          week_peak_ccu_max: number | null
+          week_plays: number | null
+          week_recommends: number | null
+          week_unique: number | null
+        }
+        Insert: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          id?: string
+          island_code: string
+          probe_date?: string | null
+          probe_minutes?: number | null
+          probe_peak_ccu?: number | null
+          probe_plays?: number | null
+          probe_unique?: number | null
+          report_id: string
+          status?: string | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string | null
+          week_d1_avg?: number | null
+          week_d7_avg?: number | null
+          week_favorites?: number | null
+          week_minutes?: number | null
+          week_minutes_per_player_avg?: number | null
+          week_peak_ccu_max?: number | null
+          week_plays?: number | null
+          week_recommends?: number | null
+          week_unique?: number | null
+        }
+        Update: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          id?: string
+          island_code?: string
+          probe_date?: string | null
+          probe_minutes?: number | null
+          probe_peak_ccu?: number | null
+          probe_plays?: number | null
+          probe_unique?: number | null
+          report_id?: string
+          status?: string | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string | null
+          week_d1_avg?: number | null
+          week_d7_avg?: number | null
+          week_favorites?: number | null
+          week_minutes?: number | null
+          week_minutes_per_player_avg?: number | null
+          week_peak_ccu_max?: number | null
+          week_plays?: number | null
+          week_recommends?: number | null
+          week_unique?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discover_report_islands_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "discover_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      discover_report_queue: {
+        Row: {
+          attempts: number | null
+          created_at: string | null
+          id: string
+          island_code: string
+          last_error: string | null
+          locked_at: string | null
+          report_id: string
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string | null
+          id?: string
+          island_code: string
+          last_error?: string | null
+          locked_at?: string | null
+          report_id: string
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string | null
+          id?: string
+          island_code?: string
+          last_error?: string | null
+          locked_at?: string | null
+          report_id?: string
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discover_report_queue_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "discover_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       discover_reports: {
         Row: {
           ai_narratives: Json | null
+          catalog_cursor: string | null
+          catalog_discovered_count: number | null
+          catalog_done: boolean | null
           computed_rankings: Json | null
           created_at: string
+          error_count: number | null
+          estimated_total: number | null
           id: string
           island_count: number | null
+          metrics_done_count: number | null
+          phase: string | null
           platform_kpis: Json | null
+          progress_pct: number | null
+          queue_total: number | null
           raw_metrics: Json | null
+          reported_count: number | null
+          started_at: string | null
           status: string
+          suppressed_count: number | null
           updated_at: string
           week_end: string
           week_number: number
@@ -103,13 +248,25 @@ export type Database = {
         }
         Insert: {
           ai_narratives?: Json | null
+          catalog_cursor?: string | null
+          catalog_discovered_count?: number | null
+          catalog_done?: boolean | null
           computed_rankings?: Json | null
           created_at?: string
+          error_count?: number | null
+          estimated_total?: number | null
           id?: string
           island_count?: number | null
+          metrics_done_count?: number | null
+          phase?: string | null
           platform_kpis?: Json | null
+          progress_pct?: number | null
+          queue_total?: number | null
           raw_metrics?: Json | null
+          reported_count?: number | null
+          started_at?: string | null
           status?: string
+          suppressed_count?: number | null
           updated_at?: string
           week_end: string
           week_number: number
@@ -118,13 +275,25 @@ export type Database = {
         }
         Update: {
           ai_narratives?: Json | null
+          catalog_cursor?: string | null
+          catalog_discovered_count?: number | null
+          catalog_done?: boolean | null
           computed_rankings?: Json | null
           created_at?: string
+          error_count?: number | null
+          estimated_total?: number | null
           id?: string
           island_count?: number | null
+          metrics_done_count?: number | null
+          phase?: string | null
           platform_kpis?: Json | null
+          progress_pct?: number | null
+          queue_total?: number | null
           raw_metrics?: Json | null
+          reported_count?: number | null
+          started_at?: string | null
           status?: string
+          suppressed_count?: number | null
           updated_at?: string
           week_end?: string
           week_number?: number

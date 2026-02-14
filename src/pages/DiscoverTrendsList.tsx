@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle, Trash2, Search } from "lucide-react";
+import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle, Trash2, Search, Database, AlertTriangle } from "lucide-react";
 import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -31,6 +31,19 @@ interface LogEntry {
   message: string;
 }
 
+interface GenerationState {
+  phase: "idle" | "catalog" | "metrics" | "finalize" | "ai" | "done";
+  reportId: string | null;
+  catalogDiscovered: number;
+  estimatedTotal: number | null;
+  queueTotal: number | null;
+  metricsDone: number;
+  reported: number;
+  suppressed: number;
+  errors: number;
+  progressPct: number;
+}
+
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   collecting: { label: "Coletando...", variant: "secondary" },
   analyzing: { label: "Analisando...", variant: "secondary" },
@@ -53,15 +66,12 @@ export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [progressLabel, setProgressLabel] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [liveIslands, setLiveIslands] = useState(0);
-  const [liveStatus, setLiveStatus] = useState("");
-  const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
+  const [genState, setGenState] = useState<GenerationState>({
+    phase: "idle", reportId: null, catalogDiscovered: 0, estimatedTotal: null,
+    queueTotal: null, metricsDone: 0, reported: 0, suppressed: 0, errors: 0, progressPct: 0,
+  });
   const abortRef = useRef(false);
-  const reportIdRef = useRef<string | null>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -85,213 +95,164 @@ export default function DiscoverTrendsList() {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  const startPolling = useCallback((reportId: string) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      const { data } = await supabase
-        .from("discover_reports")
-        .select("island_count, status, platform_kpis")
-        .eq("id", reportId)
-        .single();
-      if (data) {
-        const count = data.island_count || 0;
-        setLiveIslands(count);
-        setLiveStatus(data.status);
-        if (data.status === "completed" || data.status === "error") {
-          stopPolling();
-        }
-      }
-    }, 3000);
-  }, []);
-
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => stopPolling(), [stopPolling]);
-
   const handleGenerate = async () => {
     setGenerating(true);
-    setProgress(0);
     setLogs([]);
-    setLiveIslands(0);
-    setLiveStatus("discovering");
-    setTotalAvailable(null);
-    setProgressLabel("Descobrindo total de ilhas na API...");
     abortRef.current = false;
-    reportIdRef.current = null;
-    addLog("🔍 Fase 1: Descobrindo quantas ilhas existem na API da Epic...");
+    setGenState({
+      phase: "catalog", reportId: null, catalogDiscovered: 0, estimatedTotal: null,
+      queueTotal: null, metricsDone: 0, reported: 0, suppressed: 0, errors: 0, progressPct: 0,
+    });
 
     try {
-      // ============ PHASE 1: DISCOVERY — count total islands available ============
-      let discoveredTotal = 0;
-      let discoverCursor: string | null = null;
-      let discoveryExhausted = false;
+      // ===== START =====
+      addLog("🚀 Iniciando novo relatório...");
+      const startRes = await supabase.functions.invoke("discover-collector", {
+        body: { mode: "start" },
+      });
+      if (startRes.error || !startRes.data?.success) {
+        throw new Error(startRes.data?.error || startRes.error?.message || "Failed to start");
+      }
 
-      while (!discoveryExhausted && !abortRef.current) {
+      const reportId = startRes.data.reportId;
+      const estimatedTotal = startRes.data.estimated_total;
+      setGenState(s => ({ ...s, reportId, estimatedTotal }));
+      addLog(`📋 Report criado. Estimativa: ${estimatedTotal ? formatNumber(estimatedTotal) : "desconhecida"}`);
+
+      // ===== CATALOG LOOP =====
+      addLog("📂 Fase Catálogo: Indexando ilhas da API...");
+      let catalogPhase = true;
+
+      while (catalogPhase && !abortRef.current) {
         const res = await supabase.functions.invoke("discover-collector", {
-          body: { mode: "discover", discoverCursor, previousCount: discoveredTotal },
+          body: { mode: "catalog", reportId },
         });
 
         if (res.error || !res.data?.success) {
-          addLog(`⚠️ Erro na descoberta: ${res.data?.error || res.error?.message}`);
-          break;
+          throw new Error(res.data?.error || res.error?.message || "Catalog failed");
         }
 
-        discoveredTotal = res.data.totalDiscovered;
-        discoverCursor = res.data.discoverCursor;
-        discoveryExhausted = res.data.exhausted;
-        setProgressLabel(`Descobrindo ilhas... ${formatNumber(discoveredTotal)} encontradas`);
-        addLog(`🔍 Descobertas até agora: ${formatNumber(discoveredTotal)} ilhas`);
+        const d = res.data;
+        setGenState(s => ({
+          ...s,
+          phase: "catalog",
+          catalogDiscovered: d.catalog_discovered_count,
+          queueTotal: d.queue_total,
+          progressPct: d.progress_pct,
+        }));
+
+        addLog(`📂 Indexadas: ${formatNumber(d.catalog_discovered_count)} ilhas`);
+
+        if (d.catalog_done || d.phase === "metrics") {
+          catalogPhase = false;
+          addLog(`✅ Catálogo completo: ${formatNumber(d.queue_total || d.catalog_discovered_count)} ilhas na fila`);
+        }
+
+        await new Promise(r => setTimeout(r, 500));
       }
 
-      if (abortRef.current) {
-        addLog("⚠️ Geração cancelada pelo usuário");
-        setGenerating(false);
-        return;
-      }
+      if (abortRef.current) { addLog("⚠️ Cancelado"); setGenerating(false); return; }
 
-      setTotalAvailable(discoveredTotal);
-      addLog(`✅ Fase 1 concluída: ${formatNumber(discoveredTotal)} ilhas disponíveis na API`);
-      addLog("📊 Fase 2: Coletando métricas de cada ilha (ignorando ilhas sem dados)...");
-      setLiveStatus("collecting");
+      // ===== METRICS LOOP =====
+      addLog("📊 Fase Métricas: Coletando dados de cada ilha...");
+      let metricsPhase = true;
 
-      // ============ PHASE 2: COLLECT — fetch metrics for all islands ============
-      let reportId: string | null = null;
-      let cursor: string | null = null;
-      let done = false;
-      let passCount = 0;
-      let totalSkippedNull = 0;
-
-      while (!done && !abortRef.current) {
-        passCount++;
-        addLog(`Lote ${passCount}: coletando métricas...`);
-
-        let res: any = null;
-        let lastError: any = null;
+      while (metricsPhase && !abortRef.current) {
+        let res: any;
         for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            res = await supabase.functions.invoke("discover-collector", {
-              body: { reportId, cursor, mode: "collect" },
-            });
-            if (!res.error) break;
-            lastError = res.error;
-          } catch (e) {
-            lastError = e;
-          }
+          res = await supabase.functions.invoke("discover-collector", {
+            body: { mode: "metrics", reportId },
+          });
+          if (!res.error) break;
           if (attempt < 3) {
-            addLog(`⚠️ Tentativa ${attempt} falhou, retentando em 3s...`);
-            await new Promise((r) => setTimeout(r, 3000));
+            addLog(`⚠️ Tentativa ${attempt} falhou, retentando...`);
+            await new Promise(r => setTimeout(r, 3000));
           }
         }
 
-        if (res?.error || !res?.data?.success) {
-          const errMsg = res?.data?.error || lastError?.message || "Falha na coleta";
-          throw new Error(errMsg);
+        if (res.error || !res.data?.success) {
+          throw new Error(res.data?.error || res.error?.message || "Metrics failed");
         }
 
-        const data = res.data;
-        reportId = data.reportId;
-        reportIdRef.current = reportId;
-        cursor = data.cursor;
-        done = data.done;
-        totalSkippedNull += data.skippedNull || 0;
+        const d = res.data;
+        setGenState(s => ({
+          ...s,
+          phase: "metrics",
+          metricsDone: d.metrics_done_count,
+          queueTotal: d.queue_total,
+          reported: d.reported_count,
+          suppressed: d.suppressed_count,
+          errors: d.error_count,
+          progressPct: d.progress_pct,
+        }));
 
-        if (passCount === 1 && reportId) {
-          startPolling(reportId);
+        addLog(`📊 Processadas: ${formatNumber(d.metrics_done_count)}/${formatNumber(d.queue_total)} | ✅${d.reported_count} 🚫${d.suppressed_count} ❌${d.error_count} | Concurrency: ${d.concurrency || "?"}`);
+
+        if (d.phase === "finalize") {
+          metricsPhase = false;
+          addLog(`✅ Métricas completas!`);
         }
 
-        const collected = data.totalCollected || 0;
-        const batchNew = data.batchCollected || 0;
-        setLiveIslands(collected);
-
-        // Dynamic progress: collected / total discovered
-        const pct = discoveredTotal > 0
-          ? Math.min(95, Math.round((collected / discoveredTotal) * 100))
-          : 0;
-        setProgress(pct);
-        setProgressLabel(`${formatNumber(collected)} ilhas com dados / ${formatNumber(discoveredTotal)} total (${pct}%)`);
-        addLog(`Lote ${passCount}: +${batchNew} novas | ${totalSkippedNull} sem dados | Total: ${formatNumber(collected)} | ${pct}%`);
-
-        if (!done) {
-          await new Promise((r) => setTimeout(r, 1000));
-        }
+        await new Promise(r => setTimeout(r, 500));
       }
 
-      if (abortRef.current) {
-        addLog("⚠️ Geração cancelada pelo usuário");
-        stopPolling();
-        setGenerating(false);
-        return;
+      if (abortRef.current) { addLog("⚠️ Cancelado"); setGenerating(false); return; }
+
+      // ===== FINALIZE =====
+      setGenState(s => ({ ...s, phase: "finalize", progressPct: 95 }));
+      addLog("🧮 Fase Finalize: Calculando rankings e KPIs...");
+
+      const finalizeRes = await supabase.functions.invoke("discover-collector", {
+        body: { mode: "finalize", reportId },
+      });
+
+      if (finalizeRes.error || !finalizeRes.data?.success) {
+        throw new Error(finalizeRes.data?.error || finalizeRes.error?.message || "Finalize failed");
       }
 
-      // Trigger AI analysis
-      stopPolling();
-      setProgress(97);
-      setProgressLabel("Gerando análise com IA...");
-      addLog("Coleta finalizada! Gerando narrativas com IA...");
+      addLog(`✅ Rankings calculados: ${formatNumber(finalizeRes.data.reported_count)} ilhas reportadas`);
 
-      if (reportId) {
-        await supabase.functions.invoke("discover-report-ai", { body: { reportId } });
-      }
+      // ===== AI =====
+      setGenState(s => ({ ...s, phase: "ai", progressPct: 97 }));
+      addLog("🤖 Fase IA: Gerando narrativas com IA...");
 
-      setProgress(100);
-      setProgressLabel("✅ Relatório completo!");
-      addLog(`✅ Relatório gerado! ${formatNumber(liveIslands)} ilhas com dados (${totalSkippedNull} sem dados ignoradas)`);
-      toast({ title: "Relatório gerado!", description: `Coleta finalizada com sucesso.` });
+      await supabase.functions.invoke("discover-report-ai", { body: { reportId } });
+
+      // ===== DONE =====
+      setGenState(s => ({ ...s, phase: "done", progressPct: 100 }));
+      addLog("🎉 Relatório completo!");
+      toast({ title: "Relatório gerado!", description: "Coleta e análise finalizadas com sucesso." });
 
       fetchReports();
       setTimeout(() => {
         setGenerating(false);
-        setProgress(0);
-        setProgressLabel("");
+        setGenState(s => ({ ...s, phase: "idle", progressPct: 0 }));
         setLogs([]);
-        setTotalAvailable(null);
       }, 4000);
+
     } catch (e: any) {
-      stopPolling();
-      addLog(`⚠️ Erro na coleta: ${e.message || "Falha desconhecida"}`);
+      addLog(`❌ Erro: ${e.message || "Falha desconhecida"}`);
 
-      const savedReportId = reportIdRef.current;
-      if (savedReportId) {
-        addLog(`Finalizando com os dados já coletados...`);
-        setProgressLabel("Finalizando com dados parciais...");
-        setProgress(96);
+      // Try to finalize with partial data
+      const savedReportId = genState.reportId;
+      if (savedReportId && genState.metricsDone > 0) {
+        addLog("🔄 Tentando finalizar com dados parciais...");
         try {
-          await supabase.functions.invoke("discover-collector", {
-            body: { reportId: savedReportId, mode: "finalize" },
-          });
-
-          setProgress(98);
-          setProgressLabel("Gerando análise com IA (dados parciais)...");
-          addLog("Gerando narrativas com IA sobre dados parciais...");
+          await supabase.functions.invoke("discover-collector", { body: { reportId: savedReportId, mode: "finalize" } });
           await supabase.functions.invoke("discover-report-ai", { body: { reportId: savedReportId } });
-
-          setProgress(100);
-          setProgressLabel("✅ Relatório parcial gerado!");
-          addLog(`✅ Relatório gerado com dados parciais`);
-          toast({ title: "Relatório parcial gerado", description: `Coleta parou mas o relatório foi salvo.` });
+          addLog("✅ Relatório parcial salvo!");
+          toast({ title: "Relatório parcial", description: "Salvo com os dados coletados até o momento." });
           fetchReports();
-          setTimeout(() => {
-            setGenerating(false);
-            setProgress(0);
-            setProgressLabel("");
-            setLogs([]);
-            setTotalAvailable(null);
-          }, 4000);
-          return;
-        } catch (finalizeErr: any) {
-          addLog(`❌ Falha ao finalizar dados parciais: ${finalizeErr.message}`);
+        } catch (finalErr: any) {
+          addLog(`❌ Falha ao finalizar parcial: ${finalErr.message}`);
         }
       }
 
-      toast({ title: "Erro", description: e.message || "Falha ao gerar relatório", variant: "destructive" });
-      setGenerating(false);
-      setProgress(0);
-      setProgressLabel("");
+      toast({ title: "Erro", description: e.message, variant: "destructive" });
+      setTimeout(() => {
+        setGenerating(false);
+        setGenState(s => ({ ...s, phase: "idle" }));
+      }, 3000);
     }
   };
 
@@ -310,6 +271,15 @@ export default function DiscoverTrendsList() {
       toast({ title: "Deletado", description: "Relatório removido com sucesso." });
       setReports((prev) => prev.filter((r) => r.id !== id));
     }
+  };
+
+  const phaseLabel = {
+    idle: "",
+    catalog: "Indexando ilhas...",
+    metrics: "Coletando métricas...",
+    finalize: "Calculando rankings...",
+    ai: "Gerando narrativas com IA...",
+    done: "✅ Relatório completo!",
   };
 
   return (
@@ -346,36 +316,52 @@ export default function DiscoverTrendsList() {
           <CardContent className="pt-4 pb-4 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {progress >= 100 ? (
+                {genState.phase === "done" ? (
                   <CheckCircle2 className="h-5 w-5 text-primary" />
-                ) : liveStatus === "discovering" ? (
+                ) : genState.phase === "catalog" ? (
                   <Search className="h-5 w-5 animate-pulse text-primary" />
+                ) : genState.phase === "finalize" ? (
+                  <Database className="h-5 w-5 animate-pulse text-primary" />
                 ) : (
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 )}
-                <span className="text-sm font-medium">{progressLabel}</span>
+                <span className="text-sm font-medium">{phaseLabel[genState.phase]}</span>
               </div>
-              <span className="text-xs text-muted-foreground font-mono">{progress}%</span>
+              <span className="text-xs text-muted-foreground font-mono">{genState.progressPct}%</span>
             </div>
 
-            <Progress value={progress} className="h-3" />
+            <Progress value={genState.progressPct} className="h-3" />
 
-            <div className="grid grid-cols-3 gap-4 text-center">
+            {/* Stats Grid */}
+            <div className="grid grid-cols-5 gap-3 text-center">
               <div>
-                <p className="text-xs text-muted-foreground">Ilhas com Dados</p>
-                <p className="font-display font-bold text-lg text-primary">{formatNumber(liveIslands)}</p>
+                <p className="text-xs text-muted-foreground">Catalogadas</p>
+                <p className="font-display font-bold text-lg">{formatNumber(genState.catalogDiscovered)}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Total na API</p>
-                <p className="font-display font-bold text-lg">
-                  {totalAvailable != null ? formatNumber(totalAvailable) : "Descobrindo..."}
-                </p>
+                <p className="text-xs text-muted-foreground">Na Fila</p>
+                <p className="font-display font-bold text-lg">{genState.queueTotal != null ? formatNumber(genState.queueTotal) : "..."}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Status</p>
-                <p className="font-display font-bold text-lg capitalize">{liveStatus}</p>
+                <p className="text-xs text-muted-foreground">Com Dados</p>
+                <p className="font-display font-bold text-lg text-primary">{formatNumber(genState.reported)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Suprimidas</p>
+                <p className="font-display font-bold text-lg text-muted-foreground">{formatNumber(genState.suppressed)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Erros</p>
+                <p className="font-display font-bold text-lg text-destructive">{formatNumber(genState.errors)}</p>
               </div>
             </div>
+
+            {/* Metrics progress detail */}
+            {genState.phase === "metrics" && genState.queueTotal && (
+              <div className="text-xs text-muted-foreground text-center">
+                {formatNumber(genState.metricsDone)} / {formatNumber(genState.queueTotal)} processadas
+              </div>
+            )}
 
             <div className="bg-muted/50 rounded-md border max-h-40 overflow-y-auto p-3 font-mono text-xs space-y-1">
               {logs.length === 0 ? (
@@ -392,7 +378,7 @@ export default function DiscoverTrendsList() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Sem limite fixo — o sistema coleta todas as ilhas disponíveis na API da Epic, ignorando ilhas sem dados.
+              Pipeline em 3 fases: Catálogo → Métricas (com probe 1d) → Rankings + IA. Sem limite fixo.
             </p>
           </CardContent>
         </Card>
