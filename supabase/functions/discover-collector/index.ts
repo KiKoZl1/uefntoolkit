@@ -7,10 +7,10 @@ const corsHeaders = {
 };
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
-const PARALLEL_BATCH = 5;
-const PAGE_SIZE = 500;
-const ISLANDS_PER_PASS = 400;
-const TIME_LIMIT_MS = 45000;
+const PARALLEL_BATCH = 20;
+const PAGE_SIZE = 1000;
+const ISLANDS_PER_PASS = 1000;
+const TIME_LIMIT_MS = 50000;
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -484,7 +484,7 @@ serve(async (req) => {
 
       cursor = nextCursor;
       if (!cursor) { apiExhausted = true; break; }
-      await delay(100);
+      await delay(50);
     }
 
     const batch = newIslandsToProcess.slice(0, ISLANDS_PER_PASS);
@@ -509,7 +509,7 @@ serve(async (req) => {
       if (i % 50 === 0 && i > 0) {
         console.log(`Metrics progress: ${newIslandData.length}/${batch.length}`);
       }
-      await delay(500);
+      await delay(100);
     }
 
     const allIslands = [...existingIslands, ...newIslandData];
