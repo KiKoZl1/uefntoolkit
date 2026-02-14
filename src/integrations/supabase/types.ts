@@ -1103,18 +1103,31 @@ export type Database = {
           priority: number
         }[]
       }
-      claim_discovery_exposure_target: {
-        Args: { p_stale_after_seconds?: number }
-        Returns: {
-          id: string
-          interval_minutes: number
-          locale: string
-          lock_id: string
-          platform: string
-          region: string
-          surface_name: string
-        }[]
-      }
+      claim_discovery_exposure_target:
+        | {
+            Args: { p_stale_after_seconds?: number }
+            Returns: {
+              id: string
+              interval_minutes: number
+              locale: string
+              lock_id: string
+              platform: string
+              region: string
+              surface_name: string
+            }[]
+          }
+        | {
+            Args: { p_stale_after_seconds?: number; p_take?: number }
+            Returns: {
+              id: string
+              interval_minutes: number
+              locale: string
+              lock_id: string
+              platform: string
+              region: string
+              surface_name: string
+            }[]
+          }
       compute_discovery_exposure_rollup_daily: {
         Args: { p_date: string }
         Returns: number

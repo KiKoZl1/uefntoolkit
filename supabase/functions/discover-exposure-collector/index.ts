@@ -337,10 +337,25 @@ function classifyLinkCode(linkCode: string): "island" | "collection" {
   return ISLAND_CODE_RE.test(linkCode) ? "island" : "collection";
 }
 
+type AuthContext = {
+  accountId: string;
+  accessToken: string;
+  branchStr: string;
+  discAccessToken: string;
+};
+
+async function getAuthContext(): Promise<AuthContext> {
+  const { accountId, accessToken } = await getEg1Token();
+  const branchStr = await getLiveBranchStr();
+  const discAccessToken = await getDiscoveryAccessToken(branchStr, accessToken);
+  return { accountId, accessToken, branchStr, discAccessToken };
+}
+
 async function runTick(
   supabase: any,
   claim: TargetClaim,
   rails: GuardRails,
+  auth?: AuthContext,
 ): Promise<{
   ok: boolean;
   tickId: string;
@@ -373,9 +388,7 @@ async function runTick(
   const tickId = String(tickRow.id);
 
   try {
-    const { accountId, accessToken } = await getEg1Token();
-    const branchStr = await getLiveBranchStr();
-    const discTok = await getDiscoveryAccessToken(branchStr, accessToken);
+    const { accountId, accessToken, branchStr, discAccessToken: discTok } = auth || await getAuthContext();
 
     const profile = buildProfileBody(accountId, claim.region, claim.platform, claim.locale);
     const surfaceResp = await fetchSurface(claim.surface_name, branchStr, accessToken, discTok, profile);
@@ -669,33 +682,47 @@ serve(async (req) => {
     const rails = DEFAULT_GUARD_RAILS;
     const { data: claimed, error: claimErr } = await supabase.rpc("claim_discovery_exposure_target", {
       p_stale_after_seconds: 180,
+      p_take: 4,
     });
     if (claimErr) return json({ success: false, error: claimErr.message }, 500);
-    const claim = (Array.isArray(claimed) ? claimed[0] : null) as TargetClaim | null;
-    if (!claim?.id) return json({ success: true, mode, claimed: false });
+    const claims = (Array.isArray(claimed) ? claimed : []) as TargetClaim[];
+    if (!claims.length) return json({ success: true, mode, claimed: false });
 
-    const result = await runTick(supabase, claim, rails);
+    // Fetch auth ONCE, share across all parallel ticks
+    const auth = await getAuthContext();
 
-    // Release the logical lock (best-effort, guard by lock_id).
-    await supabase
-      .from("discovery_exposure_targets")
-      .update({
-        last_status: "idle",
-        locked_at: null,
-        lock_id: null,
-        last_ok_tick_at: result.ok ? new Date().toISOString() : undefined,
-        last_failed_tick_at: result.ok ? undefined : new Date().toISOString(),
-        last_error: result.ok ? null : result.error,
-      })
-      .eq("id", claim.id)
-      .eq("lock_id", claim.lock_id);
+    // Run all claimed targets in parallel
+    const results = await Promise.all(
+      claims.map(async (claim) => {
+        const result = await runTick(supabase, claim, rails, auth);
+
+        // Release the logical lock (best-effort, guard by lock_id).
+        await supabase
+          .from("discovery_exposure_targets")
+          .update({
+            last_status: "idle",
+            locked_at: null,
+            lock_id: null,
+            last_ok_tick_at: result.ok ? new Date().toISOString() : undefined,
+            last_failed_tick_at: result.ok ? undefined : new Date().toISOString(),
+            last_error: result.ok ? null : result.error,
+          })
+          .eq("id", claim.id)
+          .eq("lock_id", claim.lock_id);
+
+        return {
+          target: { id: claim.id, region: claim.region, surface_name: claim.surface_name },
+          ...result,
+        };
+      }),
+    );
 
     return json({
       success: true,
       mode,
       claimed: true,
-      target: { id: claim.id, region: claim.region, surface_name: claim.surface_name },
-      ...result,
+      targets_count: results.length,
+      results,
     });
   } catch (e) {
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
