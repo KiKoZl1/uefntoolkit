@@ -1,0 +1,1 @@
+ALTER TABLE public.discover_reports ADD COLUMN IF NOT EXISTS rate_limited_count integer DEFAULT 0;

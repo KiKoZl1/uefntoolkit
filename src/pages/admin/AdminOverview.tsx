@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Sparkles, CheckCircle2, RefreshCcw, Gauge, Users, AlertTriangle } from "lucide-react";
+import { Loader2, Sparkles, CheckCircle2, RefreshCcw, Gauge, Users, AlertTriangle, ShieldAlert, EyeOff } from "lucide-react";
 
 interface GenerationState {
   phase: "idle" | "catalog" | "metrics" | "finalize" | "ai" | "done";
@@ -24,6 +24,8 @@ interface GenerationState {
   workersActive: number;
   throughputPerMin: number;
   staleRequeuedCount: number;
+  rateLimitedCount: number;
+  suppressedCount: number;
 }
 
 interface LogEntry {
@@ -68,6 +70,8 @@ export default function AdminOverview() {
     workersActive: 0,
     throughputPerMin: 0,
     staleRequeuedCount: 0,
+    rateLimitedCount: 0,
+    suppressedCount: 0,
   });
   const logsEndRef = useRef<HTMLDivElement>(null);
   const lastPhaseRef = useRef<string>("idle");
@@ -105,6 +109,8 @@ export default function AdminOverview() {
       workersActive: report?.workers_active || 0,
       throughputPerMin: Math.round(report?.throughput_per_min || 0),
       staleRequeuedCount: report?.stale_requeued_count || 0,
+      rateLimitedCount: report?.rate_limited_count || 0,
+      suppressedCount: report?.suppressed_count || 0,
     });
 
     if (logPhase && lastPhaseRef.current !== phase) {
@@ -259,7 +265,7 @@ export default function AdminOverview() {
               <div><p className="text-muted-foreground">Erros</p><p className="font-bold text-destructive">{formatNumber(genState.errors)}</p></div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 text-center text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center text-xs">
               <div className="rounded-md border bg-muted/40 p-2">
                 <p className="text-muted-foreground flex items-center justify-center gap-1"><Gauge className="h-3.5 w-3.5" /> Throughput</p>
                 <p className="font-semibold">{formatNumber(genState.throughputPerMin)} ilhas/min</p>
@@ -267,6 +273,14 @@ export default function AdminOverview() {
               <div className="rounded-md border bg-muted/40 p-2">
                 <p className="text-muted-foreground flex items-center justify-center gap-1"><Users className="h-3.5 w-3.5" /> Workers</p>
                 <p className="font-semibold">{genState.workersActive}</p>
+              </div>
+              <div className="rounded-md border bg-muted/40 p-2">
+                <p className="text-muted-foreground flex items-center justify-center gap-1"><EyeOff className="h-3.5 w-3.5" /> Suprimidas</p>
+                <p className="font-semibold">{formatNumber(genState.suppressedCount)}</p>
+              </div>
+              <div className={`rounded-md border p-2 ${genState.rateLimitedCount > 0 ? "bg-destructive/10 border-destructive/30" : "bg-muted/40"}`}>
+                <p className="text-muted-foreground flex items-center justify-center gap-1"><ShieldAlert className="h-3.5 w-3.5" /> 429 Rate Limit</p>
+                <p className={`font-semibold ${genState.rateLimitedCount > 0 ? "text-destructive" : ""}`}>{formatNumber(genState.rateLimitedCount)}</p>
               </div>
               <div className="rounded-md border bg-muted/40 p-2">
                 <p className="text-muted-foreground flex items-center justify-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Requeue stale</p>

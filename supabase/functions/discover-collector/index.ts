@@ -91,14 +91,14 @@ const TREND_KEYWORDS = [
 ];
 
 const METRICS_V2_DEFAULTS = {
-  workers: 6,
-  claimSizePerWorker: 250,
-  workerInitialConcurrency: 10,
-  workerMinConcurrency: 4,
+  workers: 8,
+  claimSizePerWorker: 500,
+  workerInitialConcurrency: 15,
+  workerMinConcurrency: 6,
   workerMaxConcurrency: 30,
   staleAfterSeconds: 900,
-  workerBudgetMs: 42000,
-  chunkSize: 300,
+  workerBudgetMs: 48000,
+  chunkSize: 500,
 };
 
 function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
@@ -601,7 +601,7 @@ serve(async (req) => {
         activePhase = report.phase;
         if (report.phase === "metrics" && report.last_metrics_tick_at) {
           const lastTick = new Date(report.last_metrics_tick_at).getTime();
-          if (Date.now() - lastTick < 45000) {
+          if (Date.now() - lastTick < 25000) {
             return new Response(JSON.stringify({
               success: true,
               reportId: activeReportId,
@@ -630,7 +630,7 @@ serve(async (req) => {
         activePhase = report.phase;
         if (report.phase === "metrics" && report.last_metrics_tick_at) {
           const lastTick = new Date(report.last_metrics_tick_at).getTime();
-          if (Date.now() - lastTick < 45000) {
+          if (Date.now() - lastTick < 25000) {
             return new Response(JSON.stringify({
               success: true,
               reportId: activeReportId,
@@ -815,7 +815,7 @@ serve(async (req) => {
     if (mode === "metrics") {
       const { data: report } = await supabase
         .from("discover_reports")
-        .select("queue_total, metrics_done_count, reported_count, suppressed_count, error_count, stale_requeued_count")
+        .select("queue_total, metrics_done_count, reported_count, suppressed_count, error_count, stale_requeued_count, rate_limited_count")
         .eq("id", reportId)
         .single();
 
@@ -907,6 +907,7 @@ serve(async (req) => {
             workers_active: workersActive,
             throughput_per_min: throughputPerMin,
             stale_requeued_count: (report.stale_requeued_count || 0) + staleRequeued,
+            rate_limited_count: (report.rate_limited_count || 0) + totals.rateLimited,
             last_metrics_tick_at: new Date().toISOString(),
             phase: isDone ? "finalize" : "metrics",
             progress_pct: progressPct,
@@ -915,7 +916,7 @@ serve(async (req) => {
         if (reportUpdateErr) throw new Error(`Failed to update report counters: ${reportUpdateErr.message}`);
 
         console.log(
-          `[metrics:v2] workers=${workersActive}/${METRICS_V2_DEFAULTS.workers} claimed=${totals.claimed} processed=${totals.processed} reported=${totals.reported} suppressed=${totals.suppressed} errors=${totals.errors} pending=${queueCounts.pending} processing=${queueCounts.processing} done=${queueCounts.done} throughput_per_min=${throughputPerMin}`
+          `[metrics:v2] workers=${workersActive}/${METRICS_V2_DEFAULTS.workers} claimed=${totals.claimed} processed=${totals.processed} reported=${totals.reported} suppressed=${totals.suppressed} errors=${totals.errors} rateLimited=${totals.rateLimited} pending=${queueCounts.pending} processing=${queueCounts.processing} done=${queueCounts.done} throughput_per_min=${throughputPerMin}`
         );
 
         return new Response(JSON.stringify({
