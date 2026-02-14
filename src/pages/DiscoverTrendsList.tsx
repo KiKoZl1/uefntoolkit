@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2 } from "lucide-react";
+import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2, XCircle } from "lucide-react";
 import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
 
 interface DiscoverReport {
@@ -19,6 +19,11 @@ interface DiscoverReport {
   island_count: number | null;
   platform_kpis: any;
   created_at: string;
+}
+
+interface LogEntry {
+  time: string;
+  message: string;
 }
 
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -35,14 +40,30 @@ function formatNumber(n: number | null | undefined): string {
   return n.toLocaleString("pt-BR");
 }
 
+function timeNow() {
+  return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+const TARGET_ISLANDS = 2000;
+
 export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [liveIslands, setLiveIslands] = useState(0);
+  const [liveStatus, setLiveStatus] = useState("");
   const abortRef = useRef(false);
+  const reportIdRef = useRef<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const addLog = useCallback((message: string) => {
+    setLogs(prev => [...prev.slice(-50), { time: timeNow(), message }]);
+  }, []);
 
   const fetchReports = async () => {
     const { data, error } = await supabase
@@ -56,96 +77,139 @@ export default function DiscoverTrendsList() {
 
   useEffect(() => { fetchReports(); }, []);
 
+  // Auto-scroll logs
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
+  // Polling: check report progress from DB every 3s
+  const startPolling = useCallback((reportId: string) => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from("discover_reports")
+        .select("island_count, status, platform_kpis")
+        .eq("id", reportId)
+        .single();
+      if (data) {
+        const count = data.island_count || 0;
+        setLiveIslands(count);
+        setLiveStatus(data.status);
+        const pct = Math.min(95, Math.round((count / TARGET_ISLANDS) * 100));
+        setProgress(pct);
+        setProgressLabel(`${count} ilhas coletadas de ${TARGET_ISLANDS} (${pct}%)`);
+        if (data.status === "completed" || data.status === "error") {
+          stopPolling();
+        }
+      }
+    }, 3000);
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
   const handleGenerate = async () => {
     setGenerating(true);
     setProgress(0);
+    setLogs([]);
+    setLiveIslands(0);
+    setLiveStatus("collecting");
     setProgressLabel("Iniciando coleta de ilhas...");
     abortRef.current = false;
+    reportIdRef.current = null;
+    addLog("Iniciando geração do relatório...");
 
     try {
       let reportId: string | null = null;
       let cursor: string | null = null;
       let done = false;
       let passCount = 0;
-      const TARGET_ISLANDS = 2000;
 
       while (!done && !abortRef.current) {
         passCount++;
-        setProgressLabel(
-          reportId
-            ? `Coletando dados... (lote ${passCount})`
-            : "Criando relatório e coletando primeiro lote..."
-        );
+        addLog(`Lote ${passCount}: enviando requisição para coletor...`);
 
         const res = await supabase.functions.invoke("discover-collector", {
-          body: {
-            reportId,
-            cursor,
-            targetIslands: TARGET_ISLANDS,
-            mode: "collect",
-          },
+          body: { reportId, cursor, targetIslands: TARGET_ISLANDS, mode: "collect" },
         });
 
         if (res.error) throw res.error;
         const data = res.data;
-
         if (!data.success) throw new Error(data.error || "Falha na coleta");
 
         reportId = data.reportId;
+        reportIdRef.current = reportId;
         cursor = data.cursor;
         done = data.done;
 
+        // Start polling after first successful call
+        if (passCount === 1 && reportId) {
+          startPolling(reportId);
+        }
+
+        const collected = data.totalCollected || 0;
+        const batchNew = data.batchCollected || 0;
         const pct = data.progress || 0;
         setProgress(Math.min(pct, 95));
-        setProgressLabel(
-          `${data.totalCollected || 0} ilhas coletadas de ${TARGET_ISLANDS}... (${pct}%)`
-        );
+        setLiveIslands(collected);
+        setProgressLabel(`${collected} ilhas coletadas de ${TARGET_ISLANDS} (${pct}%)`);
+        addLog(`Lote ${passCount} concluído: +${batchNew} novas ilhas | Total: ${collected} | ${pct}%`);
 
-        // Small delay between passes
-        if (!done) await new Promise((r) => setTimeout(r, 500));
+        if (!done) {
+          addLog(`Aguardando próximo lote... (cursor: ${cursor?.slice(0, 12)}...)`);
+          await new Promise((r) => setTimeout(r, 1000));
+        }
       }
 
       if (abortRef.current) {
+        addLog("⚠️ Geração cancelada pelo usuário");
         setProgressLabel("Cancelado");
+        stopPolling();
         setGenerating(false);
         return;
       }
 
       // Trigger AI analysis
+      stopPolling();
       setProgress(97);
       setProgressLabel("Gerando análise com IA...");
+      addLog("Coleta finalizada! Gerando narrativas com IA...");
 
       if (reportId) {
-        await supabase.functions.invoke("discover-report-ai", {
-          body: { reportId },
-        });
+        await supabase.functions.invoke("discover-report-ai", { body: { reportId } });
       }
 
       setProgress(100);
-      setProgressLabel("Relatório completo!");
-      toast({
-        title: "Relatório gerado!",
-        description: `Coleta finalizada com sucesso.`,
-      });
+      setProgressLabel("✅ Relatório completo!");
+      addLog("✅ Relatório gerado com sucesso!");
+      toast({ title: "Relatório gerado!", description: `Coleta finalizada com sucesso.` });
 
       fetchReports();
-
-      // Reset after a moment
       setTimeout(() => {
         setGenerating(false);
         setProgress(0);
         setProgressLabel("");
-      }, 2000);
+        setLogs([]);
+      }, 4000);
     } catch (e: any) {
-      toast({
-        title: "Erro",
-        description: e.message || "Falha ao gerar relatório",
-        variant: "destructive",
-      });
+      stopPolling();
+      addLog(`❌ Erro: ${e.message || "Falha desconhecida"}`);
+      toast({ title: "Erro", description: e.message || "Falha ao gerar relatório", variant: "destructive" });
       setGenerating(false);
       setProgress(0);
       setProgressLabel("");
     }
+  };
+
+  const handleCancel = () => {
+    abortRef.current = true;
+    addLog("Cancelando...");
   };
 
   return (
@@ -160,29 +224,74 @@ export default function DiscoverTrendsList() {
             Relatórios semanais automáticos do ecossistema Fortnite Discovery
           </p>
         </div>
-        <Button onClick={handleGenerate} disabled={generating}>
-          {generating ? (
-            <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando...</>
-          ) : (
-            <><Sparkles className="h-4 w-4 mr-2" /> Gerar Report</>
+        <div className="flex gap-2">
+          {generating && (
+            <Button variant="outline" onClick={handleCancel}>
+              <XCircle className="h-4 w-4 mr-2" /> Cancelar
+            </Button>
           )}
-        </Button>
+          <Button onClick={handleGenerate} disabled={generating}>
+            {generating ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Gerando...</>
+            ) : (
+              <><Sparkles className="h-4 w-4 mr-2" /> Gerar Report</>
+            )}
+          </Button>
+        </div>
       </div>
 
-      {/* Progress Bar */}
+      {/* Progress Panel */}
       {generating && (
         <Card className="mb-6 border-primary/30">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-3 mb-3">
-              {progress >= 100 ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              )}
-              <span className="text-sm font-medium">{progressLabel}</span>
+          <CardContent className="pt-4 pb-4 space-y-4">
+            {/* Status header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {progress >= 100 ? (
+                  <CheckCircle2 className="h-5 w-5 text-primary" />
+                ) : (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                )}
+                <span className="text-sm font-medium">{progressLabel}</span>
+              </div>
+              <span className="text-xs text-muted-foreground font-mono">{progress}%</span>
             </div>
-            <Progress value={progress} className="h-2" />
-            <p className="text-xs text-muted-foreground mt-2">
+
+            {/* Progress bar */}
+            <Progress value={progress} className="h-3" />
+
+            {/* Live stats */}
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <p className="text-xs text-muted-foreground">Ilhas Coletadas</p>
+                <p className="font-display font-bold text-lg text-primary">{formatNumber(liveIslands)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Alvo</p>
+                <p className="font-display font-bold text-lg">{formatNumber(TARGET_ISLANDS)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Status</p>
+                <p className="font-display font-bold text-lg capitalize">{liveStatus}</p>
+              </div>
+            </div>
+
+            {/* Live logs */}
+            <div className="bg-muted/50 rounded-md border max-h-40 overflow-y-auto p-3 font-mono text-xs space-y-1">
+              {logs.length === 0 ? (
+                <p className="text-muted-foreground">Aguardando logs...</p>
+              ) : (
+                logs.map((log, i) => (
+                  <div key={i} className="flex gap-2">
+                    <span className="text-muted-foreground shrink-0">[{log.time}]</span>
+                    <span>{log.message}</span>
+                  </div>
+                ))
+              )}
+              <div ref={logsEndRef} />
+            </div>
+
+            <p className="text-xs text-muted-foreground">
               A coleta pode levar alguns minutos. A API da Epic é consultada em lotes para respeitar os limites de taxa.
             </p>
           </CardContent>
