@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles } from "lucide-react";
+import { TrendingUp, Play, Users, Clock, Loader2, Calendar, Sparkles, CheckCircle2 } from "lucide-react";
 import { ReportListSkeleton } from "@/components/discover/ReportSkeleton";
 
 interface DiscoverReport {
@@ -38,6 +39,9 @@ export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
+  const abortRef = useRef(false);
   const { toast } = useToast();
 
   const fetchReports = async () => {
@@ -54,23 +58,94 @@ export default function DiscoverTrendsList() {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setProgress(0);
+    setProgressLabel("Iniciando coleta de ilhas...");
+    abortRef.current = false;
+
     try {
-      const res = await supabase.functions.invoke("discover-collector", {
-        body: { maxIslands: 100 },
-      });
-      if (res.error) throw res.error;
-      toast({ title: "Coleta iniciada!", description: "O relatório está sendo gerado. Atualize em alguns minutos." });
-      // Also trigger AI analysis if reportId is returned
-      if (res.data?.reportId) {
+      let reportId: string | null = null;
+      let cursor: string | null = null;
+      let done = false;
+      let passCount = 0;
+      const TARGET_ISLANDS = 1000;
+
+      while (!done && !abortRef.current) {
+        passCount++;
+        setProgressLabel(
+          reportId
+            ? `Coletando dados... (lote ${passCount})`
+            : "Criando relatório e coletando primeiro lote..."
+        );
+
+        const res = await supabase.functions.invoke("discover-collector", {
+          body: {
+            reportId,
+            cursor,
+            targetIslands: TARGET_ISLANDS,
+            mode: "collect",
+          },
+        });
+
+        if (res.error) throw res.error;
+        const data = res.data;
+
+        if (!data.success) throw new Error(data.error || "Falha na coleta");
+
+        reportId = data.reportId;
+        cursor = data.cursor;
+        done = data.done;
+
+        const pct = data.progress || 0;
+        setProgress(Math.min(pct, 95));
+        setProgressLabel(
+          `${data.totalCollected || 0} ilhas coletadas de ${TARGET_ISLANDS}... (${pct}%)`
+        );
+
+        // Small delay between passes
+        if (!done) await new Promise((r) => setTimeout(r, 500));
+      }
+
+      if (abortRef.current) {
+        setProgressLabel("Cancelado");
+        setGenerating(false);
+        return;
+      }
+
+      // Trigger AI analysis
+      setProgress(97);
+      setProgressLabel("Gerando análise com IA...");
+
+      if (reportId) {
         await supabase.functions.invoke("discover-report-ai", {
-          body: { reportId: res.data.reportId },
+          body: { reportId },
         });
       }
+
+      setProgress(100);
+      setProgressLabel("Relatório completo!");
+      toast({
+        title: "Relatório gerado!",
+        description: `Coleta finalizada com sucesso.`,
+      });
+
       fetchReports();
+
+      // Reset after a moment
+      setTimeout(() => {
+        setGenerating(false);
+        setProgress(0);
+        setProgressLabel("");
+      }, 2000);
     } catch (e: any) {
-      toast({ title: "Erro", description: e.message || "Falha ao gerar relatório", variant: "destructive" });
+      toast({
+        title: "Erro",
+        description: e.message || "Falha ao gerar relatório",
+        variant: "destructive",
+      });
+      setGenerating(false);
+      setProgress(0);
+      setProgressLabel("");
     }
-    setGenerating(false);
   };
 
   return (
@@ -93,6 +168,26 @@ export default function DiscoverTrendsList() {
           )}
         </Button>
       </div>
+
+      {/* Progress Bar */}
+      {generating && (
+        <Card className="mb-6 border-primary/30">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3 mb-3">
+              {progress >= 100 ? (
+                <CheckCircle2 className="h-5 w-5 text-primary" />
+              ) : (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              )}
+              <span className="text-sm font-medium">{progressLabel}</span>
+            </div>
+            <Progress value={progress} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-2">
+              A coleta pode levar alguns minutos. A API da Epic é consultada em lotes para respeitar os limites de taxa.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {loading ? (
         <ReportListSkeleton />
