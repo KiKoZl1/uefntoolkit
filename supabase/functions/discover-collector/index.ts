@@ -292,7 +292,7 @@ serve(async (req) => {
 
       if (!report) throw new Error("Report not found");
 
-      const BATCH_SIZE = 500;
+      const BATCH_SIZE = 800;
       const startTime = Date.now();
 
       // Fetch pending items from queue ordered by priority (lower = higher priority)
@@ -352,8 +352,8 @@ serve(async (req) => {
       const sixtyDaysAgo = new Date(todayMidnight);
       sixtyDaysAgo.setUTCDate(sixtyDaysAgo.getUTCDate() - 60);
 
-      // Adaptive concurrency
-      let concurrency = 15;
+      // Adaptive concurrency - increased for better throughput
+      let concurrency = 30; // increased from 15
       let consecutiveOk = 0;
       let reported = 0;
       let suppressed = 0;
@@ -512,8 +512,8 @@ serve(async (req) => {
           await delay(backoffMs);
         } else {
           consecutiveOk++;
-          if (consecutiveOk >= 5 && concurrency < 30) {
-            concurrency += 2;
+          if (consecutiveOk >= 5 && concurrency < 60) {
+            concurrency += 4;
             consecutiveOk = 0;
           }
         }
