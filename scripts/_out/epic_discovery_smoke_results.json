@@ -1,0 +1,85 @@
+﻿{
+    "meta":  {
+                 "ts":  "2026-02-14T16:09:58.9493362-03:00",
+                 "branch":  "++Fortnite+Release-39.40",
+                 "surface":  "CreativeDiscoverySurface_Frontend",
+                 "iterations":  50,
+                 "account_id":  "1fc2a6df483f49acadaf9dfef8d95758",
+                 "access_token_redacted":  "eg1~eyJr...cJekqQ",
+                 "linkCode_surface":  "reference_current_island",
+                 "linkCode_search":  "2515-6266-7600",
+                 "creator_account_id":  "epic"
+             },
+    "endpoints":  [
+                      {
+                          "name":  "discovery_access_token",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  181.1,
+                          "p95_ms":  215.5,
+                          "last_status":  200,
+                          "last_preview":  "{\n  \"branchName\" : \"++Fortnite+Release-39.40\",\n  \"appId\" : \"Fortnite\",\n  \"token\" : \"R90+6+wy3R6GtRcavDaay23XXAhC1xBbLdomZ1cNp1w=\"\n}"
+                      },
+                      {
+                          "name":  "v2_surface",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  483,
+                          "p95_ms":  523,
+                          "last_status":  200,
+                          "last_preview":  "{\"testVariantName\":\"NU1\",\"testName\":\"3730_Frontend_ABTests\",\"testAnalyticsId\":\"297-MzczMF9Gcm9udGVuZF9BQlRlc3Rz-841\",\"testVariantAnalyticsId\":\"{\\\"Platform\\\":[],\\\"MatchmakingRegion\\\":[],\\\"ISOCountryCode\\\":[],\\\"PartySize\\\""
+                      },
+                      {
+                          "name":  "v2_page",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  330.9,
+                          "p95_ms":  348.5,
+                          "last_status":  200,
+                          "last_preview":  "{\"results\":[{\"lastVisited\":null,\"linkCode\":\"reference_current_island\",\"isFavorite\":false,\"globalCCU\":-1,\"lockStatus\":\"UNLOCKED\",\"lockStatusReason\":\"NONE\",\"isVisible\":true,\"favoriteStatus\":\"NONE\"},{\"lastVisited\":null,\"lin"
+                      },
+                      {
+                          "name":  "link_entries",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  301.5,
+                          "p95_ms":  306,
+                          "last_status":  200,
+                          "last_preview":  "{\"reference_current_island\":{\"lastVisited\":null,\"linkCode\":\"reference_current_island\",\"isFavorite\":false,\"globalCCU\":-1,\"lockStatus\":\"UNLOCKED\",\"lockStatusReason\":\"NONE\",\"isVisible\":true,\"favoriteStatus\":\"NONE\"}}"
+                      },
+                      {
+                          "name":  "search_links",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  295.9,
+                          "p95_ms":  344.6,
+                          "last_status":  200,
+                          "last_preview":  "{\"results\":[{\"linkCode\":\"2515-6266-7600\",\"lastVisited\":null,\"isFavorite\":false,\"score\":72.09323,\"globalCCU\":8951,\"lockStatus\":\"UNLOCKED\",\"lockStatusReason\":\"LEGACY\",\"isVisible\":true},{\"linkCode\":\"6145-7952-0729\",\"lastVis"
+                      },
+                      {
+                          "name":  "search_creators",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  211.6,
+                          "p95_ms":  240.5,
+                          "last_status":  200,
+                          "last_preview":  "{\"results\":[{\"accountId\":\"epic\",\"score\":847.81506},{\"accountId\":\"fb4a48597aa0449db8f3d7ee1f94f4b8\",\"score\":421.957},{\"accountId\":\"5ace219b9fd84a1abb6a0d5f3a806d86\",\"score\":380.6158},{\"accountId\":\"2a424a0d91d04c58aa2d6a3e"
+                      },
+                      {
+                          "name":  "creator_page",
+                          "n":  50,
+                          "success":  50,
+                          "success_rate":  100,
+                          "p50_ms":  197.8,
+                          "p95_ms":  205.9,
+                          "last_status":  200,
+                          "last_preview":  "{\"creatorId\":\"epic\",\"links\":[{\"linkCode\":\"experience_br\",\"lastActivatedDate\":\"2026-02-13T20:11:17.445Z\",\"isFavorite\":false,\"globalCCU\":392271,\"lockStatus\":\"UNLOCKED\",\"lockStatusReason\":\"RATING_THRESHOLD\",\"isVisible\":true"
+                      }
+                  ]
+}
