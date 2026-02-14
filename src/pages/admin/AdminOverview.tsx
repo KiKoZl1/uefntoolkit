@@ -251,7 +251,7 @@ export default function AdminOverview() {
             <Progress value={genState.progressPct} className="h-3" />
 
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center text-xs">
-              <div><p className="text-muted-foreground">Na fila</p><p className="font-bold">{formatNumber(genState.queueTotal)}</p></div>
+              <div><p className="text-muted-foreground">{genState.phase === "catalog" ? "Descobertas" : "Na fila"}</p><p className="font-bold">{formatNumber(genState.phase === "catalog" ? genState.catalogDiscovered : genState.queueTotal)}</p></div>
               <div><p className="text-muted-foreground">Processadas</p><p className="font-bold">{formatNumber(genState.metricsDone)}</p></div>
               <div><p className="text-muted-foreground">Pendentes</p><p className="font-bold">{formatNumber(genState.pendingCount)}</p></div>
               <div><p className="text-muted-foreground">Processing</p><p className="font-bold">{formatNumber(genState.processingCount)}</p></div>
