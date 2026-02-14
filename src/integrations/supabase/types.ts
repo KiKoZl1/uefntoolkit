@@ -329,6 +329,7 @@ export type Database = {
           processing_count: number | null
           progress_pct: number | null
           queue_total: number | null
+          rate_limited_count: number | null
           raw_metrics: Json | null
           reported_count: number | null
           stale_requeued_count: number | null
@@ -363,6 +364,7 @@ export type Database = {
           processing_count?: number | null
           progress_pct?: number | null
           queue_total?: number | null
+          rate_limited_count?: number | null
           raw_metrics?: Json | null
           reported_count?: number | null
           stale_requeued_count?: number | null
@@ -397,6 +399,7 @@ export type Database = {
           processing_count?: number | null
           progress_pct?: number | null
           queue_total?: number | null
+          rate_limited_count?: number | null
           raw_metrics?: Json | null
           reported_count?: number | null
           stale_requeued_count?: number | null
