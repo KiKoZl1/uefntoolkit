@@ -184,11 +184,32 @@ serve(async (req) => {
 
         pagesThisRun++;
         
-        // Bulk insert into queue
+        // Bulk insert into queue with metadata
         const queueRows = islands.map((isl: any) => ({
           report_id: reportId,
           island_code: isl.code,
         }));
+
+        // Pre-populate island metadata from catalog listing
+        const metaRows = islands.map((isl: any) => ({
+          report_id: reportId,
+          island_code: isl.code,
+          title: isl.title || null,
+          creator_code: isl.creatorCode || null,
+          category: isl.category || null,
+          created_in: isl.createdIn || null,
+          tags: isl.tags || [],
+          status: "pending",
+        }));
+
+        // Insert metadata in chunks of 500
+        for (let i = 0; i < metaRows.length; i += 500) {
+          const chunk = metaRows.slice(i, i + 500);
+          await supabase.from("discover_report_islands").upsert(chunk, {
+            onConflict: "report_id,island_code",
+            ignoreDuplicates: true,
+          });
+        }
 
         // Insert in chunks of 500
         for (let i = 0; i < queueRows.length; i += 500) {
@@ -297,8 +318,6 @@ serve(async (req) => {
       const sevenDaysAgo = new Date(todayMidnight);
       sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
 
-      const probeFrom = yesterday.toISOString();
-      const probeTo = todayMidnight.toISOString();
       const weekFrom = sevenDaysAgo.toISOString();
       const weekTo = todayMidnight.toISOString();
 
@@ -319,25 +338,24 @@ serve(async (req) => {
 
         const results = await Promise.all(batch.map(async (item: any) => {
           try {
-            // PROBE: 1-day metrics
-            const probeUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${probeFrom}&to=${probeTo}`;
-            const probeRes = await fetchWithRetry(probeUrl);
+            // SINGLE 7-day fetch — replaces probe + week + metadata (3→1 API call)
+            const weekUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${weekFrom}&to=${weekTo}`;
+            const weekRes = await fetchWithRetry(weekUrl);
 
-            if (probeRes.status === 429) return { item, rateLimited: true };
-            if (!probeRes.data) {
-              return { item, error: true, errorMsg: `Probe failed: status ${probeRes.status}` };
+            if (weekRes.status === 429) return { item, rateLimited: true };
+            if (!weekRes.data) {
+              return { item, error: true, errorMsg: `Metrics failed: status ${weekRes.status}` };
             }
 
-            const metrics = probeRes.data;
-            const probeUnique = sumMetric(metrics.uniquePlayers);
-            const probePlays = sumMetric(metrics.plays);
-            const probeMinutes = sumMetric(metrics.minutesPlayed);
-            const probePeakCcu = maxMetric(metrics.peakCCU);
+            const m = weekRes.data;
+            const weekUnique = sumMetric(m.uniquePlayers);
+            const weekPlays = sumMetric(m.plays);
+            const weekMinutes = sumMetric(m.minutesPlayed);
+            const weekPeakCcu = maxMetric(m.peakCCU);
 
-            const hasData = probeUnique > 0 || probePlays > 0;
+            const hasData = weekUnique > 0 || weekPlays > 0;
 
             if (!hasData) {
-              // SUPPRESSED — no 7d fetch needed
               return {
                 item,
                 suppressed: true,
@@ -345,36 +363,23 @@ serve(async (req) => {
                   report_id: reportId,
                   island_code: item.island_code,
                   status: "suppressed",
-                  probe_unique: probeUnique,
-                  probe_plays: probePlays,
-                  probe_minutes: probeMinutes,
-                  probe_peak_ccu: probePeakCcu,
-                  probe_date: yesterday.toISOString().split("T")[0],
                 },
               };
             }
 
-            // REPORTED — fetch 7d data
-            const weekUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${weekFrom}&to=${weekTo}`;
-            const weekRes = await fetchWithRetry(weekUrl);
+            // Has data — compute all aggregates from the same response
+            const weekMpp = avgMetric(m.averageMinutesPerPlayer);
+            const weekFavorites = sumMetric(m.favorites);
+            const weekRecommends = sumMetric(m.recommendations);
+            const weekD1 = avgRetentionCalc(m.retention, "d1");
+            const weekD7 = avgRetentionCalc(m.retention, "d7");
 
-            if (weekRes.status === 429) return { item, rateLimited: true };
-
-            const weekMetrics = weekRes.data || metrics; // fallback to probe data
-            const weekUnique = sumMetric(weekMetrics.uniquePlayers);
-            const weekPlays = sumMetric(weekMetrics.plays);
-            const weekMinutes = sumMetric(weekMetrics.minutesPlayed);
-            const weekMpp = avgMetric(weekMetrics.averageMinutesPerPlayer);
-            const weekPeakCcu = maxMetric(weekMetrics.peakCCU);
-            const weekFavorites = sumMetric(weekMetrics.favorites);
-            const weekRecommends = sumMetric(weekMetrics.recommendations);
-            const weekD1 = avgRetentionCalc(weekMetrics.retention, "d1");
-            const weekD7 = avgRetentionCalc(weekMetrics.retention, "d7");
-
-            // Fetch island metadata
-            const metaUrl = `${EPIC_API}/islands/${item.island_code}`;
-            const metaRes = await fetchWithRetry(metaUrl);
-            const meta = metaRes.data || {};
+            // Extract yesterday's probe values from the 7d array
+            const yesterdayStr = yesterday.toISOString().split("T")[0];
+            const probeUnique = m.uniquePlayers?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+            const probePlays = m.plays?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+            const probeMinutes = m.minutesPlayed?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+            const probePeakCcu = m.peakCCU?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
 
             return {
               item,
@@ -382,17 +387,12 @@ serve(async (req) => {
               islandData: {
                 report_id: reportId,
                 island_code: item.island_code,
-                title: meta.title || null,
-                creator_code: meta.creatorCode || null,
-                category: meta.category || null,
-                created_in: meta.createdIn || null,
-                tags: meta.tags || [],
                 status: "reported",
                 probe_unique: probeUnique,
                 probe_plays: probePlays,
                 probe_minutes: probeMinutes,
                 probe_peak_ccu: probePeakCcu,
-                probe_date: yesterday.toISOString().split("T")[0],
+                probe_date: yesterdayStr,
                 week_unique: weekUnique,
                 week_plays: weekPlays,
                 week_minutes: weekMinutes,
@@ -412,7 +412,6 @@ serve(async (req) => {
         // Check for rate limits
         const hasRateLimit = results.some((r: any) => r.rateLimited);
         if (hasRateLimit) {
-          // Put rate-limited items back
           for (const r of results) {
             if (r.rateLimited) islandQueue.unshift(r.item);
           }
