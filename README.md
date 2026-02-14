@@ -1,73 +1,161 @@
-# Welcome to your Lovable project
+# Epic Insight Engine
 
-## Project info
+A comprehensive data analytics platform for Fortnite UGC (User-Generated Content) discovery, providing insights into island metrics, trends, rankings, and AI-powered analysis.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Overview
 
-## How can I edit this code?
+Epic Insight Engine collects and analyzes data from Fortnite's island ecosystem, providing:
 
-There are several ways of editing your application.
+- **Weekly Discovery Reports** - Comprehensive analysis of trending islands
+- **Island Metrics** - Plays, unique players, minutes played, peak CCU, retention
+- **Creator Analytics** - Track creator performance and trends
+- **Category Analysis** - Breakdowns by game mode (Battle Royale, Prop Hunt, etc.)
+- **AI-Powered Insights** - Automated narrative generation and trend detection
+- **Public Report Portal** - Shareable reports with public slugs
 
-**Use Lovable**
+## Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, TypeScript, Vite |
+| UI Framework | Tailwind CSS, shadcn/ui |
+| State Management | React Query (TanStack Query) |
+| Routing | React Router DOM v6 |
+| Backend | Supabase (Auth, Database, Edge Functions) |
+| Charts | Recharts |
+| Forms | React Hook Form + Zod |
+| Testing | Vitest |
 
-Changes made via Lovable will be committed automatically to this repo.
+## Project Structure
 
-**Use your preferred IDE**
+```
+epic-insight-engine/
+├── src/
+│   ├── components/           # React components
+│   │   ├── ui/              # shadcn/ui components
+│   │   ├── discover/        # Discovery-specific components
+│   │   └── *.tsx            # Layout and routing components
+│   ├── pages/               # Page components
+│   │   ├── public/          # Public-facing pages
+│   │   ├── admin/           # Admin dashboard pages
+│   │   └── *.tsx            # Main app pages
+│   ├── hooks/               # Custom React hooks
+│   │   ├── useAuth.tsx      # Authentication context
+│   │   └── useMobile.tsx    # Mobile detection
+│   ├── integrations/        # Third-party integrations
+│   │   └── supabase/        # Supabase client & types
+│   ├── lib/                 # Utility libraries
+│   │   └── parsing/         # Data processing utilities
+│   └── test/                # Test files
+├── supabase/
+│   ├── functions/           # Edge Functions
+│   │   ├── ai-analyst/      # AI analysis function
+│   │   ├── discover-collector/  # Data collection
+│   │   ├── discover-island-lookup/ # Island lookup
+│   │   └── discover-report-ai/    # Report AI
+│   └── migrations/          # Database migrations
+└── public/                  # Static assets
+```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Getting Started
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Prerequisites
 
-Follow these steps:
+- Node.js 18+
+- npm or bun
+- Supabase account (for backend)
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Installation
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+```bash
+# Clone the repository
+git clone <repository-url>
+cd epic-insight-engine
 
-# Step 3: Install the necessary dependencies.
-npm i
+# Install dependencies
+npm install
+# or
+bun install
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### Environment Variables
+
+Create a `.env` file in the root directory:
+
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_key
+```
+
+### Running the Development Server
+
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The app will be available at `http://localhost:8080`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Building for Production
 
-**Use GitHub Codespaces**
+```bash
+npm run build
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## User Roles
 
-## What technologies are used for this project?
+The application supports three user roles:
 
-This project is built with:
+| Role | Permissions |
+|------|-------------|
+| `admin` | Full access to all features, user management |
+| `editor` | Create and edit reports, access admin features |
+| `client` | Access personal dashboard and owned projects |
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Key Features
 
-## How can I deploy this project?
+### Public Portal
+- Home page with platform overview
+- Public reports list with search
+- Individual report viewing with shareable links
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Client Dashboard
+- Project management
+- Report dashboards with detailed metrics
+- Island lookup tool
 
-## Can I connect a custom domain to my Lovable project?
+### Admin Panel
+- Overview dashboard with platform KPIs
+- Reports management (create, edit, publish)
+- Report editor with AI assistance
 
-Yes, you can!
+## Database Schema
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+The application uses Supabase with the following key tables:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- `discover_reports` - Weekly discovery reports
+- `discover_report_islands` - Island data per report
+- `discover_report_queue` - Processing queue
+- `discover_islands_cache` - Cached island metadata
+- `weekly_reports` - CMS for public reports
+- `user_roles` - Role-based access control
+
+## API Integration
+
+The backend integrates with:
+- **Fortnite API** (`api.fortnite.com/ecosystem/v1`) - Island catalog and metrics
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+Private - All rights reserved
+
+## Support
+
+For issues or questions, please contact the development team.
+
