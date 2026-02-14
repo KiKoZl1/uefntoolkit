@@ -49,7 +49,7 @@ function timeNow() {
   return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const TARGET_ISLANDS = 3000;
+const TARGET_ISLANDS = 10000;
 
 export default function DiscoverTrendsList() {
   const [reports, setReports] = useState<DiscoverReport[]>([]);
