@@ -1144,14 +1144,24 @@ export type Database = {
           target_id: string
         }[]
       }
-      discovery_exposure_run_maintenance: {
-        Args: {
-          p_delete_batch?: number
-          p_raw_hours?: number
-          p_segment_days?: number
-        }
-        Returns: Json
-      }
+      discovery_exposure_run_maintenance:
+        | {
+            Args: {
+              p_delete_batch?: number
+              p_do_rollup?: boolean
+              p_raw_hours?: number
+              p_segment_days?: number
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_delete_batch?: number
+              p_raw_hours?: number
+              p_segment_days?: number
+            }
+            Returns: Json
+          }
       discovery_exposure_top_by_panel: {
         Args: {
           p_date_from: string
