@@ -608,10 +608,19 @@ serve(async (req) => {
     }
 
     if (mode === "maintenance") {
-      const { data, error } = await supabase.rpc("discovery_exposure_run_maintenance", {
-        p_raw_hours: 48,
-        p_segment_days: 30,
-      });
+      const rawHours = Number(body.rawHours ?? 48);
+      const segmentDays = Number(body.segmentDays ?? 30);
+      const deleteBatch = body.deleteBatch != null ? Number(body.deleteBatch) : undefined;
+      const doRollup = body.doRollup != null ? Boolean(body.doRollup) : true;
+
+      const args: Record<string, unknown> = {
+        p_raw_hours: rawHours,
+        p_segment_days: segmentDays,
+        p_do_rollup: doRollup,
+      };
+      if (deleteBatch != null && isFinite(deleteBatch)) args.p_delete_batch = deleteBatch;
+
+      const { data, error } = await supabase.rpc("discovery_exposure_run_maintenance", args);
       if (error) return json({ success: false, error: error.message }, 500);
       return json({ success: true, maintenance: data });
     }
@@ -680,49 +689,64 @@ serve(async (req) => {
     }
 
     const rails = DEFAULT_GUARD_RAILS;
-    const { data: claimed, error: claimErr } = await supabase.rpc("claim_discovery_exposure_target", {
-      p_stale_after_seconds: 180,
-      p_take: 4,
-    });
-    if (claimErr) return json({ success: false, error: claimErr.message }, 500);
-    const claims = (Array.isArray(claimed) ? claimed : []) as TargetClaim[];
-    if (!claims.length) return json({ success: true, mode, claimed: false });
 
-    // Fetch auth ONCE, share across all parallel ticks
+    // Sequential orchestrate: claim one target at a time and run it, repeating until
+    // we run out of due targets or we are close to the Edge Function timeout.
+    const orchestrateStartedAt = Date.now();
+    const orchestrateBudgetMs = 48_000; // keep a couple seconds of margin vs ~50s limit
+    const minRemainingMsToStartTick = 8_000; // guard against starting a tick we can't finish
+
+    // Fetch auth once and reuse across sequential ticks in this invocation.
     const auth = await getAuthContext();
 
-    // Run all claimed targets in parallel
-    const results = await Promise.all(
-      claims.map(async (claim) => {
-        const result = await runTick(supabase, claim, rails, auth);
+    const results: Array<Record<string, unknown>> = [];
+    let claimedAny = false;
 
-        // Release the logical lock (best-effort, guard by lock_id).
-        await supabase
-          .from("discovery_exposure_targets")
-          .update({
-            last_status: "idle",
-            locked_at: null,
-            lock_id: null,
-            last_ok_tick_at: result.ok ? new Date().toISOString() : undefined,
-            last_failed_tick_at: result.ok ? undefined : new Date().toISOString(),
-            last_error: result.ok ? null : result.error,
-          })
-          .eq("id", claim.id)
-          .eq("lock_id", claim.lock_id);
+    while (Date.now() - orchestrateStartedAt < orchestrateBudgetMs) {
+      const remaining = orchestrateBudgetMs - (Date.now() - orchestrateStartedAt);
+      if (remaining < minRemainingMsToStartTick) break;
 
-        return {
-          target: { id: claim.id, region: claim.region, surface_name: claim.surface_name },
-          ...result,
-        };
-      }),
-    );
+      const { data: claimed, error: claimErr } = await supabase.rpc("claim_discovery_exposure_target", {
+        p_stale_after_seconds: 180,
+        p_take: 1,
+      });
+      if (claimErr) return json({ success: false, error: claimErr.message }, 500);
+
+      const claims = (Array.isArray(claimed) ? claimed : []) as TargetClaim[];
+      if (!claims.length) break;
+
+      const claim = claims[0];
+      claimedAny = true;
+
+      const result = await runTick(supabase, claim, rails, auth);
+
+      // Release the logical lock (best-effort, guard by lock_id).
+      await supabase
+        .from("discovery_exposure_targets")
+        .update({
+          last_status: "idle",
+          locked_at: null,
+          lock_id: null,
+          last_ok_tick_at: result.ok ? new Date().toISOString() : undefined,
+          last_failed_tick_at: result.ok ? undefined : new Date().toISOString(),
+          last_error: result.ok ? null : result.error,
+        })
+        .eq("id", claim.id)
+        .eq("lock_id", claim.lock_id);
+
+      results.push({
+        target: { id: claim.id, region: claim.region, surface_name: claim.surface_name },
+        ...result,
+      });
+    }
 
     return json({
       success: true,
       mode,
-      claimed: true,
+      claimed: claimedAny,
       targets_count: results.length,
       results,
+      orchestrate_duration_ms: Date.now() - orchestrateStartedAt,
     });
   } catch (e) {
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);

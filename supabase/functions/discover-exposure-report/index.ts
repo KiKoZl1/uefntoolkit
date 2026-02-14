@@ -81,11 +81,16 @@ serve(async (req) => {
 
     const { data: targets, error: tErr } = await supabase
       .from("discovery_exposure_targets")
-      .select("id,region,surface_name,platform,locale,interval_minutes")
-      .in("region", ["NAE", "EU"])
+      .select("id,region,surface_name,platform,locale,interval_minutes,last_ok_tick_at")
       .in("surface_name", ["CreativeDiscoverySurface_Frontend", "CreativeDiscoverySurface_Browse"]);
     if (tErr) throw new Error(tErr.message);
-    const targetRows = (targets || []) as any[];
+
+    // Default: include all active targets (so adding BR/ASIA automatically shows up in reports)
+    // Caller can override by passing regions: ["NAE","EU",...].
+    const reqRegions = Array.isArray(body.regions) ? body.regions.map((r: any) => String(r)) : null;
+    const targetRows = (targets || [])
+      .filter((t: any) => (reqRegions ? reqRegions.includes(String(t.region)) : true))
+      .filter((t: any) => t.last_ok_tick_at != null) as any[];
 
     const targetIds = targetRows.map((t) => String(t.id));
 
@@ -258,4 +263,3 @@ serve(async (req) => {
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
-
