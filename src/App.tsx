@@ -26,6 +26,7 @@ import IslandLookup from "./pages/IslandLookup";
 import AdminOverview from "./pages/admin/AdminOverview";
 import AdminReportsList from "./pages/admin/AdminReportsList";
 import AdminReportEditor from "./pages/admin/AdminReportEditor";
+import AdminExposureHealth from "./pages/admin/AdminExposureHealth";
 
 import NotFound from "./pages/NotFound";
 
@@ -60,6 +61,7 @@ const App = () => (
               <Route index element={<AdminOverview />} />
               <Route path="reports" element={<AdminReportsList />} />
               <Route path="reports/:id/edit" element={<AdminReportEditor />} />
+              <Route path="exposure" element={<AdminExposureHealth />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

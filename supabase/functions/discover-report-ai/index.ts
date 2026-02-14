@@ -29,6 +29,69 @@ serve(async (req) => {
     const kpis = report.platform_kpis;
     const rankings = report.computed_rankings;
 
+    // Optional: Discovery Exposure enrichment (injected into weekly_reports.rankings_json.discoveryExposure)
+    const { data: weeklyRow } = await supabase
+      .from("weekly_reports")
+      .select("rankings_json,date_from,date_to")
+      .eq("discover_report_id", reportId)
+      .maybeSingle();
+
+    const exposure = (weeklyRow as any)?.rankings_json?.discoveryExposure || null;
+    const exposureSummary = (() => {
+      if (!exposure) return null;
+      const topByPanel = Array.isArray(exposure.topByPanel) ? exposure.topByPanel : [];
+      const panelSummaries = Array.isArray(exposure.panelSummaries) ? exposure.panelSummaries : [];
+      const profiles = Array.isArray(exposure.profiles) ? exposure.profiles : [];
+
+      // Reduce token usage: summarize only top panels and top islands/collections across the report range.
+      const topPanels = (() => {
+        const m = new Map<string, { key: string; minutes: number }>();
+        for (const r of topByPanel) {
+          const key = `${r.targetId}|||${r.panelName}`;
+          const cur = m.get(key) || { key, minutes: 0 };
+          cur.minutes += Number(r.minutesExposed || 0);
+          m.set(key, cur);
+        }
+        const arr = Array.from(m.values()).sort((a, b) => b.minutes - a.minutes).slice(0, 10);
+        return arr.map((x) => {
+          const [targetId, panelName] = x.key.split("|||");
+          const p = profiles.find((pp: any) => pp.targetId === targetId);
+          return {
+            profile: p ? `${p.region} ${p.surfaceName}` : targetId,
+            panelName,
+            minutes: Math.round(x.minutes),
+          };
+        });
+      })();
+
+      const topItems = topByPanel
+        .slice()
+        .sort((a: any, b: any) => Number(b.minutesExposed || 0) - Number(a.minutesExposed || 0))
+        .slice(0, 15)
+        .map((r: any) => ({
+          profile: `${r.surfaceName} ${r.targetId}`,
+          panel: r.panelName,
+          code: r.linkCode,
+          title: r.title || null,
+          creator: r.creatorCode || null,
+          minutes: Number(r.minutesExposed || 0),
+          bestRank: r.bestRank ?? null,
+          ccuMax: r.ccuMaxSeen ?? null,
+          type: r.linkCodeType,
+        }));
+
+      const daily = panelSummaries.slice(0, 50); // bounded
+
+      return {
+        dateFrom: exposure?.meta?.dateFrom || (weeklyRow as any)?.date_from || null,
+        dateTo: exposure?.meta?.dateTo || (weeklyRow as any)?.date_to || null,
+        profiles: profiles.map((p: any) => ({ region: p.region, surfaceName: p.surfaceName })),
+        topPanels,
+        topItems,
+        dailySample: daily,
+      };
+    })();
+
     // Build a rich data summary for the AI
     const rankingsSummary = JSON.stringify(rankings, null, 0);
 
@@ -70,8 +133,11 @@ ${lifecycleContext}
 ## Rankings & Trends Data
 ${rankingsSummary}
 
+## Discovery Exposure Data (Panels/Timeline)
+${exposureSummary ? JSON.stringify(exposureSummary, null, 0) : "Not available for this week (collector not running or insufficient data yet)."}
+
 ## Instructions
-Write insightful narratives for each of the 13 sections below. Each narrative MUST be 4-6 sentences long, data-driven, and include:
+Write insightful narratives for each of the 14 sections below. Each narrative MUST be 4-6 sentences long, data-driven, and include:
 - Specific numbers and percentages from the data
 - Comparisons and patterns (e.g., "The top 3 islands account for X% of total plays")
 - Actionable insights for creators (e.g., "Creators should consider X genre given Y trend")
@@ -93,13 +159,14 @@ Sections:
 10. Category & Tags - genre distribution, trending categories
 11. Conversion Efficiency - favorites/play, recommendations/play patterns
 12. Risers & Decliners - biggest WoW movers, what's growing and what's fading
-13. Island Lifecycle - revived islands, dead islands, breakout stories`;
+13. Island Lifecycle - revived islands, dead islands, breakout stories
+14. Discovery Exposure - which panels drove exposure, time-in-panel patterns, churn/stability, and actionable positioning insights (based on panel/rank timeline)`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const sectionProps: Record<string, any> = {};
-    for (let i = 1; i <= 13; i++) {
+    for (let i = 1; i <= 14; i++) {
       sectionProps[`section${i}`] = {
         type: "object",
         properties: {

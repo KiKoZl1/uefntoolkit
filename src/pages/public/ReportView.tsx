@@ -10,7 +10,7 @@ import { AiNarrative } from "@/components/discover/AiNarrative";
 import {
   ArrowLeft, Activity, Users, Play, Clock, TrendingUp, TrendingDown, Star, ThumbsUp,
   BarChart3, Crown, Map, Layers, Zap, Target, PieChart, Tags, Sparkles,
-  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, Share2, Copy,
+  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, Share2, Copy, EyeOff,
 } from "lucide-react";
 import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
 import {
@@ -18,6 +18,20 @@ import {
 } from "recharts";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  TooltipProvider,
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+} from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const PIE_COLORS = [
   "hsl(60, 100%, 58%)", "hsl(333, 100%, 51%)", "hsl(225, 100%, 50%)",
@@ -25,6 +39,20 @@ const PIE_COLORS = [
   "hsl(7, 100%, 58%)", "hsl(200, 80%, 50%)", "hsl(120, 60%, 45%)",
   "hsl(340, 75%, 55%)",
 ];
+
+function hashHue(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function fmtDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("pt-BR", { hour12: false });
+  } catch {
+    return iso;
+  }
+}
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -92,6 +120,7 @@ export default function ReportView() {
   const rankings = report.rankings_json || {};
   const aiSections = report.ai_sections_json || {};
   const editorSections = report.editor_sections_json || {};
+  const exposure = rankings.discoveryExposure || null;
 
   const getNarrative = (sectionNum: number): string | null => {
     const edited = editorSections[`section${sectionNum}`];
@@ -305,6 +334,180 @@ export default function ReportView() {
         <RankingTable title="💀 Mortas" icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(13)} />
+
+      {exposure?.profiles?.length > 0 && (
+        <>
+          <div className="border-t border-border my-8" />
+          <TooltipProvider>
+              <SectionHeader
+                icon={EyeOff}
+                number={14}
+                title="Discovery Exposure"
+                description="Timeline por panel (rank #1..#10) a partir do Discovery 24/7"
+              />
+            <DiscoveryExposureSection exposure={exposure} />
+            <AiNarrative text={getNarrative(14)} />
+          </TooltipProvider>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DiscoveryExposureSection({ exposure }: { exposure: any }) {
+  const profiles = Array.isArray(exposure?.profiles) ? exposure.profiles : [];
+  const panels = Array.isArray(exposure?.panels) ? exposure.panels : [];
+  const timeline = Array.isArray(exposure?.panelRankTimeline) ? exposure.panelRankTimeline : [];
+  const topByPanel = Array.isArray(exposure?.topByPanel) ? exposure.topByPanel : [];
+
+  const rangeStart = new Date(exposure?.meta?.rangeStart || "").getTime();
+  const rangeEnd = new Date(exposure?.meta?.rangeEnd || "").getTime();
+  const rangeMs = Math.max(1, rangeEnd - rangeStart);
+
+  const [profileId, setProfileId] = useState<string>(profiles[0]?.targetId || "");
+  const panelOptions = panels.filter((p: any) => String(p.target_id) === profileId);
+  const [panelName, setPanelName] = useState<string>(panelOptions[0]?.panelName || "");
+
+  useEffect(() => {
+    const opts = panels.filter((p: any) => String(p.target_id) === profileId);
+    if (!opts.find((p: any) => String(p.panelName) === panelName)) {
+      setPanelName(opts[0]?.panelName || "");
+    }
+  }, [profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const segs = timeline.filter((s: any) => String(s.targetId) === profileId && String(s.panelName) === panelName);
+  const segsByRank = new Map<number, any[]>();
+  for (const s of segs) {
+    const r = Number(s.rank) || 0;
+    if (!segsByRank.has(r)) segsByRank.set(r, []);
+    segsByRank.get(r)!.push(s);
+  }
+
+  const topRows = topByPanel
+    .filter((r: any) => String(r.targetId) === profileId && String(r.panelName) === panelName)
+    .sort((a: any, b: any) => Number(b.minutesExposed || 0) - Number(a.minutesExposed || 0))
+    .slice(0, 3);
+
+  const profileLabel = (p: any) => `${p.region} · ${p.surfaceName === "CreativeDiscoverySurface_Frontend" ? "Frontend" : "Browse"}`;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Config</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Perfil</p>
+            <Select value={profileId} onValueChange={setProfileId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um perfil" />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((p: any) => (
+                  <SelectItem key={p.targetId} value={p.targetId}>
+                    {profileLabel(p)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Panel</p>
+            <Select value={panelName} onValueChange={setPanelName}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um panel" />
+              </SelectTrigger>
+              <SelectContent>
+                {panelOptions.map((p: any) => (
+                  <SelectItem key={p.panelName} value={p.panelName}>
+                    {p.panelDisplayName || p.panelName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {topRows.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Top 3 (minutos expostos)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {topRows.map((r: any, idx: number) => (
+              <div key={idx} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{r.title || r.linkCode}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {r.creatorCode ? `@${r.creatorCode}` : r.linkCodeType}
+                  </p>
+                </div>
+                <div className="text-xs font-display font-semibold whitespace-nowrap">
+                  {fmt(Number(r.minutesExposed || 0))} min
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {panelName && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Rank Timeline (#1..#10)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {Array.from({ length: 10 }).map((_, i) => {
+              const rank = i + 1;
+              const track = segsByRank.get(rank) || [];
+              return (
+                <div key={rank} className="flex items-center gap-3">
+                  <div className="w-10 text-xs font-mono text-muted-foreground text-right">#{rank}</div>
+                  <div className="relative h-6 flex-1 rounded-md bg-muted/40 overflow-hidden border">
+                    {track.map((s: any, j: number) => {
+                      const a = new Date(s.start).getTime();
+                      const b = new Date(s.end).getTime();
+                      const left = ((a - rangeStart) / rangeMs) * 100;
+                      const width = Math.max(0.5, ((b - a) / rangeMs) * 100);
+                      const hue = hashHue(String(s.linkCode || ""));
+                      const color = `hsl(${hue}, 75%, 55%)`;
+                      return (
+                        <UITooltip key={j}>
+                          <UITooltipTrigger asChild>
+                            <div
+                              className="absolute top-0 bottom-0 rounded-sm cursor-pointer"
+                              style={{
+                                left: `${Math.max(0, left)}%`,
+                                width: `${Math.min(100, width)}%`,
+                                backgroundColor: color,
+                                opacity: 0.9,
+                              }}
+                            />
+                          </UITooltipTrigger>
+                          <UITooltipContent side="top" className="max-w-xs">
+                            <div className="space-y-1">
+                              <p className="text-xs font-semibold">{s.title || s.linkCode}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {fmtDateTime(s.start)} â†’ {fmtDateTime(s.end)} ({fmt(Number(s.durationMinutes || 0))} min)
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Rank #{rank} â€¢ CCU max {s.ccuMax != null ? fmt(Number(s.ccuMax)) : "â€”"} â€¢{" "}
+                                {s.creatorCode ? `@${s.creatorCode}` : s.linkCodeType}
+                              </p>
+                            </div>
+                          </UITooltipContent>
+                        </UITooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

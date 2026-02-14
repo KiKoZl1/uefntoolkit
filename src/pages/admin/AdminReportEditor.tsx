@@ -14,6 +14,7 @@ const SECTION_NAMES = [
   "Core Activity", "Trending Topics", "Player Engagement", "Novas Ilhas",
   "Retention & Loyalty", "Creator Performance", "Map Quality", "Low Performance",
   "Ratios & Derived", "Categories & Tags", "Efficiency", "Risers & Decliners", "Island Lifecycle",
+  "Discovery Exposure",
 ];
 
 export default function AdminReportEditor() {

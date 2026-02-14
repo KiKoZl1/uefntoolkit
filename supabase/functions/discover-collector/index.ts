@@ -1744,7 +1744,7 @@ serve(async (req) => {
         const publicSlug = weekKey.toLowerCase();
         const titlePublic = `Fortnite Discovery - Semana ${reportMeta.week_number}/${reportMeta.year}`;
 
-        await supabase.from("weekly_reports").upsert({
+        const { data: weeklyRow, error: weeklyErr } = await supabase.from("weekly_reports").upsert({
           discover_report_id: reportId,
           week_key: weekKey,
           date_from: reportMeta.week_start,
@@ -1755,9 +1755,23 @@ serve(async (req) => {
           kpis_json: platformKPIs,
           rankings_json: computedRankings,
           ai_sections_json: reportMeta.ai_narratives || {},
-        }, { onConflict: "public_slug" });
+        }, { onConflict: "public_slug" }).select("id").single();
 
         console.log(`[finalize] Created/updated weekly_reports draft: ${weekKey}`);
+
+        if (!weeklyErr && weeklyRow?.id) {
+          // Best-effort enrichment: inject discovery exposure section into rankings_json.
+          const { error: expErr } = await supabase.functions.invoke("discover-exposure-report", {
+            body: { weeklyReportId: weeklyRow.id },
+          });
+          if (expErr) {
+            console.log(`[finalize] discovery exposure enrichment failed: ${expErr.message}`);
+          } else {
+            console.log(`[finalize] discovery exposure injected into weekly_reports: ${weekKey}`);
+          }
+        } else if (weeklyErr) {
+          console.log(`[finalize] weekly_reports upsert select failed: ${weeklyErr.message}`);
+        }
       }
 
       console.log(`[finalize] Done. ${islands.length} reported, ${suppressedCount} suppressed, ${revivedIslands.length} revived, ${deadIslands.length} dead, ${topRisers.length} risers, ${topDecliners.length} decliners`);
