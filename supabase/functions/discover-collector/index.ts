@@ -90,6 +90,434 @@ const TREND_KEYWORDS = [
   "lego", "rocket racing", "fall guys", "tmnt", "walking dead",
 ];
 
+const METRICS_V2_DEFAULTS = {
+  workers: 6,
+  claimSizePerWorker: 250,
+  workerInitialConcurrency: 10,
+  workerMinConcurrency: 4,
+  workerMaxConcurrency: 30,
+  staleAfterSeconds: 900,
+  workerBudgetMs: 42000,
+  chunkSize: 300,
+};
+
+function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
+  const out: T[][] = [];
+  const size = Math.max(1, chunkSize);
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function getFunctionsBaseUrl(): string {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  if (!supabaseUrl) throw new Error("SUPABASE_URL is not configured");
+  return `${supabaseUrl}/functions/v1`;
+}
+
+async function callEdgeFunction(functionName: string, payload: Record<string, unknown>): Promise<any> {
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (serviceRoleKey) {
+    headers.Authorization = `Bearer ${serviceRoleKey}`;
+    headers.apikey = serviceRoleKey;
+  }
+
+  const res = await fetch(`${getFunctionsBaseUrl()}/${functionName}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    const errorMessage = data?.error || `HTTP ${res.status}`;
+    throw new Error(`${functionName} failed: ${errorMessage}`);
+  }
+  return data;
+}
+
+async function getQueueStatusCounts(supabase: any, reportId: string) {
+  const statuses = ["pending", "processing", "done", "error"] as const;
+  const results = await Promise.all(
+    statuses.map((status) =>
+      supabase
+        .from("discover_report_queue")
+        .select("*", { count: "exact", head: true })
+        .eq("report_id", reportId)
+        .eq("status", status)
+    )
+  );
+
+  const counts: Record<string, number> = { pending: 0, processing: 0, done: 0, error: 0 };
+  for (let i = 0; i < statuses.length; i++) {
+    const status = statuses[i];
+    const { count, error } = results[i];
+    if (error) throw new Error(`Queue count (${status}) failed: ${error.message}`);
+    counts[status] = count || 0;
+  }
+
+  return {
+    pending: counts.pending,
+    processing: counts.processing,
+    done: counts.done,
+    error: counts.error,
+    total: counts.pending + counts.processing + counts.done + counts.error,
+  };
+}
+
+async function getIslandStatusCounts(supabase: any, reportId: string) {
+  const [reportedRes, suppressedRes] = await Promise.all([
+    supabase
+      .from("discover_report_islands")
+      .select("*", { count: "exact", head: true })
+      .eq("report_id", reportId)
+      .eq("status", "reported"),
+    supabase
+      .from("discover_report_islands")
+      .select("*", { count: "exact", head: true })
+      .eq("report_id", reportId)
+      .eq("status", "suppressed"),
+  ]);
+
+  if (reportedRes.error) throw new Error(`Reported count failed: ${reportedRes.error.message}`);
+  if (suppressedRes.error) throw new Error(`Suppressed count failed: ${suppressedRes.error.message}`);
+
+  return {
+    reported: reportedRes.count || 0,
+    suppressed: suppressedRes.count || 0,
+  };
+}
+
+async function flushQueueStatusUpdatesV2(supabase: any, reportId: string, updates: any[]) {
+  if (!updates.length) return 0;
+  let total = 0;
+  for (const chunk of chunkArray(updates, 500)) {
+    const { data, error } = await supabase.rpc("apply_discover_queue_results", {
+      p_report_id: reportId,
+      p_results: chunk,
+    });
+    if (error) throw new Error(`apply_discover_queue_results failed: ${error.message}`);
+    total += Number(data || 0);
+  }
+  return total;
+}
+
+async function processMetricsWorkerV2(
+  supabase: any,
+  reportId: string,
+  weekFrom: string,
+  weekTo: string,
+  yesterdayStr: string,
+  profile: typeof METRICS_V2_DEFAULTS
+) {
+  const workerStart = Date.now();
+  const { data: claimedRows, error: claimErr } = await supabase.rpc("claim_discover_report_queue", {
+    p_report_id: reportId,
+    p_take: profile.claimSizePerWorker,
+    p_stale_after_seconds: profile.staleAfterSeconds,
+  });
+
+  if (claimErr) throw new Error(`Queue claim failed: ${claimErr.message}`);
+  const claimed = (claimedRows || []) as Array<{ id: string; island_code: string; priority: number | null }>;
+  if (!claimed.length) {
+    return {
+      claimed: 0,
+      processed: 0,
+      reported: 0,
+      suppressed: 0,
+      errors: 0,
+      skipped: 0,
+      requeuedPending: 0,
+      rateLimited: 0,
+      finalConcurrency: profile.workerInitialConcurrency,
+      durationSec: (Date.now() - workerStart) / 1000,
+    };
+  }
+
+  const claimedMap = new Map<string, { id: string; island_code: string; priority: number | null }>();
+  for (const row of claimed) claimedMap.set(row.id, row);
+
+  const { data: cacheRows, error: cacheErr } = await supabase
+    .from("discover_islands_cache")
+    .select("island_code, last_status, suppressed_streak, last_reported_at, reported_streak")
+    .in("island_code", claimed.map((r) => r.island_code));
+  if (cacheErr) throw new Error(`Cache preload failed: ${cacheErr.message}`);
+
+  const cacheMap = new Map<string, any>();
+  for (const c of cacheRows || []) cacheMap.set(c.island_code, c);
+
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setUTCDate(sixtyDaysAgo.getUTCDate() - 60);
+
+  const skipQueue: Array<{ id: string; island_code: string }> = [];
+  const islandQueue: Array<{ id: string; island_code: string }> = [];
+  for (const item of claimed) {
+    const cached = cacheMap.get(item.island_code);
+    if (cached && (cached.suppressed_streak || 0) >= 6) {
+      const lastReported = cached.last_reported_at ? new Date(cached.last_reported_at) : null;
+      const isOld = !lastReported || lastReported < sixtyDaysAgo;
+      const shouldRevalidate = Math.random() < 0.1;
+      if (isOld && !shouldRevalidate) {
+        skipQueue.push({ id: item.id, island_code: item.island_code });
+        continue;
+      }
+    }
+    islandQueue.push({ id: item.id, island_code: item.island_code });
+  }
+
+  let concurrency = profile.workerInitialConcurrency;
+  let consecutiveOk = 0;
+  let processed = 0;
+  let reported = 0;
+  let suppressed = 0;
+  let errors = 0;
+  let skipped = 0;
+  let rateLimited = 0;
+  let requeuedPending = 0;
+
+  const queueUpdates: Array<{ id: string; status: string; last_error?: string }> = [];
+  const islandUpserts: any[] = [];
+  const cacheUpserts: any[] = [];
+
+  for (const item of skipQueue) {
+    skipped++;
+    processed++;
+    suppressed++;
+    islandUpserts.push({
+      report_id: reportId,
+      island_code: item.island_code,
+      status: "suppressed",
+    });
+    const cached = cacheMap.get(item.island_code);
+    cacheUpserts.push({
+      island_code: item.island_code,
+      last_seen_at: new Date().toISOString(),
+      last_status: "suppressed",
+      last_report_id: reportId,
+      last_suppressed_at: new Date().toISOString(),
+      suppressed_streak: (cached?.suppressed_streak || 0) + 1,
+      reported_streak: 0,
+      updated_at: new Date().toISOString(),
+    });
+    queueUpdates.push({ id: item.id, status: "done" });
+    claimedMap.delete(item.id);
+  }
+
+  while (islandQueue.length > 0) {
+    if (Date.now() - workerStart > profile.workerBudgetMs) {
+      for (const pendingItem of islandQueue) {
+        queueUpdates.push({ id: pendingItem.id, status: "pending" });
+        claimedMap.delete(pendingItem.id);
+        requeuedPending++;
+      }
+      islandQueue.length = 0;
+      break;
+    }
+
+    const batch = islandQueue.splice(0, Math.max(1, Math.min(concurrency, islandQueue.length)));
+    const results = await Promise.all(batch.map(async (item) => {
+      try {
+        const weekUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${weekFrom}&to=${weekTo}`;
+        const weekRes = await fetchWithRetry(weekUrl);
+        if (weekRes.status === 429) return { item, rateLimited: true };
+        if (!weekRes.data) return { item, error: true, errorMsg: `Metrics failed: status ${weekRes.status}` };
+
+        const m = weekRes.data;
+        const weekUnique = sumMetric(m.uniquePlayers);
+        const weekPlays = sumMetric(m.plays);
+        const weekMinutes = sumMetric(m.minutesPlayed);
+        const weekPeakCcu = maxMetric(m.peakCCU);
+        const hasData = weekUnique > 0 || weekPlays > 0;
+
+        if (!hasData) {
+          return {
+            item,
+            suppressed: true,
+            islandData: {
+              report_id: reportId,
+              island_code: item.island_code,
+              status: "suppressed",
+            },
+          };
+        }
+
+        const weekMpp = avgMetric(m.averageMinutesPerPlayer);
+        const weekFavorites = sumMetric(m.favorites);
+        const weekRecommends = sumMetric(m.recommendations);
+        const weekD1 = avgRetentionCalc(m.retention, "d1");
+        const weekD7 = avgRetentionCalc(m.retention, "d7");
+
+        const probeUnique = m.uniquePlayers?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+        const probePlays = m.plays?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+        const probeMinutes = m.minutesPlayed?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+        const probePeakCcu = m.peakCCU?.find((v: any) => v.timestamp?.startsWith(yesterdayStr))?.value ?? 0;
+
+        return {
+          item,
+          reported: true,
+          islandData: {
+            report_id: reportId,
+            island_code: item.island_code,
+            status: "reported",
+            probe_unique: probeUnique,
+            probe_plays: probePlays,
+            probe_minutes: probeMinutes,
+            probe_peak_ccu: probePeakCcu,
+            probe_date: yesterdayStr,
+            week_unique: weekUnique,
+            week_plays: weekPlays,
+            week_minutes: weekMinutes,
+            week_minutes_per_player_avg: weekMpp,
+            week_peak_ccu_max: weekPeakCcu,
+            week_favorites: weekFavorites,
+            week_recommends: weekRecommends,
+            week_d1_avg: weekD1,
+            week_d7_avg: weekD7,
+          },
+          weekData: {
+            weekUnique,
+            weekPlays,
+            weekMinutes,
+            weekPeakCcu,
+            weekFavorites,
+            weekRecommends,
+            weekMpp,
+            weekD1,
+            weekD7,
+            probeUnique,
+            probePlays,
+          },
+        };
+      } catch (e) {
+        return {
+          item,
+          error: true,
+          errorMsg: e instanceof Error ? e.message : "Unknown",
+        };
+      }
+    }));
+
+    const hasRateLimit = results.some((r: any) => r.rateLimited);
+    if (hasRateLimit) {
+      const relimitItems = results.filter((r: any) => r.rateLimited).map((r: any) => r.item);
+      rateLimited += relimitItems.length;
+      islandQueue.push(...relimitItems);
+      concurrency = Math.max(profile.workerMinConcurrency, Math.floor(concurrency / 2));
+      consecutiveOk = 0;
+      await delay(800 + Math.floor(Math.random() * 1200));
+    } else {
+      consecutiveOk++;
+      if (consecutiveOk >= 3 && concurrency < profile.workerMaxConcurrency) {
+        concurrency = Math.min(profile.workerMaxConcurrency, concurrency + 2);
+        consecutiveOk = 0;
+      }
+    }
+
+    for (const r of results) {
+      if (r.rateLimited) continue;
+
+      processed++;
+      if (r.error) {
+        errors++;
+        queueUpdates.push({ id: r.item.id, status: "error", last_error: r.errorMsg || "Unknown error" });
+        claimedMap.delete(r.item.id);
+        continue;
+      }
+
+      if (r.suppressed) {
+        suppressed++;
+        islandUpserts.push(r.islandData);
+        queueUpdates.push({ id: r.item.id, status: "done" });
+        const cached = cacheMap.get(r.item.island_code);
+        cacheUpserts.push({
+          island_code: r.item.island_code,
+          last_seen_at: new Date().toISOString(),
+          last_status: "suppressed",
+          last_report_id: reportId,
+          last_suppressed_at: new Date().toISOString(),
+          suppressed_streak: (cached?.suppressed_streak || 0) + 1,
+          reported_streak: 0,
+          updated_at: new Date().toISOString(),
+        });
+        claimedMap.delete(r.item.id);
+        continue;
+      }
+
+      if (r.reported) {
+        reported++;
+        islandUpserts.push(r.islandData);
+        queueUpdates.push({ id: r.item.id, status: "done" });
+        const wd = r.weekData;
+        cacheUpserts.push({
+          island_code: r.item.island_code,
+          last_seen_at: new Date().toISOString(),
+          last_status: "reported",
+          last_report_id: reportId,
+          last_reported_at: new Date().toISOString(),
+          suppressed_streak: 0,
+          reported_streak: (cacheMap.get(r.item.island_code)?.reported_streak || 0) + 1,
+          last_probe_unique: wd.probeUnique,
+          last_probe_plays: wd.probePlays,
+          last_week_unique: wd.weekUnique,
+          last_week_plays: wd.weekPlays,
+          last_week_minutes: wd.weekMinutes,
+          last_week_peak_ccu: wd.weekPeakCcu,
+          last_week_favorites: wd.weekFavorites,
+          last_week_recommends: wd.weekRecommends,
+          last_week_d1_avg: wd.weekD1,
+          last_week_d7_avg: wd.weekD7,
+          last_week_minutes_per_player_avg: wd.weekMpp,
+          updated_at: new Date().toISOString(),
+        });
+        claimedMap.delete(r.item.id);
+      }
+    }
+  }
+
+  for (const orphan of claimedMap.values()) {
+    queueUpdates.push({ id: orphan.id, status: "pending" });
+    requeuedPending++;
+  }
+
+  for (const chunk of chunkArray(islandUpserts, profile.chunkSize)) {
+    const { error } = await supabase
+      .from("discover_report_islands")
+      .upsert(chunk, { onConflict: "report_id,island_code" });
+    if (error) throw new Error(`discover_report_islands upsert failed: ${error.message}`);
+  }
+
+  for (const chunk of chunkArray(cacheUpserts, profile.chunkSize)) {
+    const { error } = await supabase
+      .from("discover_islands_cache")
+      .upsert(chunk, { onConflict: "island_code" });
+    if (error) throw new Error(`discover_islands_cache upsert failed: ${error.message}`);
+  }
+
+  await flushQueueStatusUpdatesV2(supabase, reportId, queueUpdates);
+
+  return {
+    claimed: claimed.length,
+    processed,
+    reported,
+    suppressed,
+    errors,
+    skipped,
+    requeuedPending,
+    rateLimited,
+    finalConcurrency: concurrency,
+    durationSec: (Date.now() - workerStart) / 1000,
+  };
+}
+
 // ========== Main Handler ==========
 
 serve(async (req) => {
@@ -155,6 +583,103 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({
         success: true, reportId: report.id, estimated_total: estimatedTotal, phase: "catalog",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ======================== MODE: ORCHESTRATE ========================
+    if (mode === "orchestrate") {
+      let activeReportId: string | null = reportId;
+      let activePhase: string | null = null;
+
+      if (activeReportId) {
+        const { data: report, error } = await supabase
+          .from("discover_reports")
+          .select("id, phase, last_metrics_tick_at")
+          .eq("id", activeReportId)
+          .single();
+        if (error || !report) throw new Error("Active report not found");
+        activePhase = report.phase;
+        if (report.phase === "metrics" && report.last_metrics_tick_at) {
+          const lastTick = new Date(report.last_metrics_tick_at).getTime();
+          if (Date.now() - lastTick < 45000) {
+            return new Response(JSON.stringify({
+              success: true,
+              reportId: activeReportId,
+              idle: true,
+              message: "Recent metrics tick still fresh; skipping overlap",
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+        }
+      } else {
+        const { data: report } = await supabase
+          .from("discover_reports")
+          .select("id, phase, created_at, last_metrics_tick_at")
+          .in("phase", ["catalog", "metrics", "finalize", "ai"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!report) {
+          return new Response(JSON.stringify({
+            success: true,
+            idle: true,
+            message: "No active report to orchestrate",
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        activeReportId = report.id;
+        activePhase = report.phase;
+        if (report.phase === "metrics" && report.last_metrics_tick_at) {
+          const lastTick = new Date(report.last_metrics_tick_at).getTime();
+          if (Date.now() - lastTick < 45000) {
+            return new Response(JSON.stringify({
+              success: true,
+              reportId: activeReportId,
+              idle: true,
+              message: "Recent metrics tick still fresh; skipping overlap",
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+        }
+      }
+
+      let tickResult: any = {};
+      if (activePhase === "catalog") {
+        tickResult = await callEdgeFunction("discover-collector", { mode: "catalog", reportId: activeReportId });
+      } else if (activePhase === "metrics") {
+        tickResult = await callEdgeFunction("discover-collector", { mode: "metrics", reportId: activeReportId });
+      } else if (activePhase === "finalize") {
+        tickResult = await callEdgeFunction("discover-collector", { mode: "finalize", reportId: activeReportId });
+      } else if (activePhase === "ai") {
+        tickResult = await callEdgeFunction("discover-report-ai", { reportId: activeReportId });
+      } else {
+        tickResult = { success: true, phase: activePhase };
+      }
+
+      const [{ data: latestReport }, queueCounts] = await Promise.all([
+        supabase
+          .from("discover_reports")
+          .select("id, phase, progress_pct, metrics_done_count, reported_count, suppressed_count, error_count, queue_total, throughput_per_min, workers_active")
+          .eq("id", activeReportId)
+          .single(),
+        getQueueStatusCounts(supabase, activeReportId),
+      ]);
+
+      return new Response(JSON.stringify({
+        success: true,
+        reportId: activeReportId,
+        triggered_phase: activePhase,
+        phase: latestReport?.phase || activePhase,
+        progress_pct: latestReport?.progress_pct || 0,
+        metrics_done_count: latestReport?.metrics_done_count || 0,
+        queue_total: latestReport?.queue_total || queueCounts.total,
+        reported_count: latestReport?.reported_count || 0,
+        suppressed_count: latestReport?.suppressed_count || 0,
+        error_count: latestReport?.error_count || queueCounts.error,
+        throughput_per_min: latestReport?.throughput_per_min || 0,
+        workers_active: latestReport?.workers_active || 0,
+        pending_count: queueCounts.pending,
+        processing_count: queueCounts.processing,
+        done_count: queueCounts.done,
+        tick_result: tickResult,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -286,11 +811,131 @@ serve(async (req) => {
     if (mode === "metrics") {
       const { data: report } = await supabase
         .from("discover_reports")
-        .select("queue_total, metrics_done_count, reported_count, suppressed_count, error_count")
+        .select("queue_total, metrics_done_count, reported_count, suppressed_count, error_count, stale_requeued_count")
         .eq("id", reportId)
         .single();
 
       if (!report) throw new Error("Report not found");
+
+      const metricsEngine = (Deno.env.get("METRICS_ENGINE") || "v2").toLowerCase();
+      if (metricsEngine === "v2") {
+        const tickStart = Date.now();
+        const requeueRes = await supabase.rpc("requeue_stale_discover_queue", {
+          p_report_id: reportId,
+          p_stale_after_seconds: METRICS_V2_DEFAULTS.staleAfterSeconds,
+          p_max_rows: 5000,
+        });
+        if (requeueRes.error) throw new Error(`requeue_stale_discover_queue failed: ${requeueRes.error.message}`);
+        const staleRequeued = Number(requeueRes.data || 0);
+
+        const now = new Date();
+        const todayMidnight = new Date(now);
+        todayMidnight.setUTCHours(0, 0, 0, 0);
+        const yesterday = new Date(todayMidnight);
+        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+        const sevenDaysAgo = new Date(todayMidnight);
+        sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
+        const weekFrom = sevenDaysAgo.toISOString();
+        const weekTo = todayMidnight.toISOString();
+        const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+        const workerRuns = await Promise.all(
+          Array.from({ length: METRICS_V2_DEFAULTS.workers }).map(() =>
+            processMetricsWorkerV2(
+              supabase,
+              reportId,
+              weekFrom,
+              weekTo,
+              yesterdayStr,
+              METRICS_V2_DEFAULTS
+            )
+          )
+        );
+
+        const totals = workerRuns.reduce((acc, worker) => {
+          acc.claimed += worker.claimed;
+          acc.processed += worker.processed;
+          acc.reported += worker.reported;
+          acc.suppressed += worker.suppressed;
+          acc.errors += worker.errors;
+          acc.skipped += worker.skipped;
+          acc.requeuedPending += worker.requeuedPending;
+          acc.rateLimited += worker.rateLimited;
+          return acc;
+        }, {
+          claimed: 0,
+          processed: 0,
+          reported: 0,
+          suppressed: 0,
+          errors: 0,
+          skipped: 0,
+          requeuedPending: 0,
+          rateLimited: 0,
+        });
+
+        const workersActive = workerRuns.filter((w) => w.claimed > 0).length;
+        const elapsedSec = Math.max(1, (Date.now() - tickStart) / 1000);
+        const throughputPerMin = Math.round((totals.processed / elapsedSec) * 60);
+
+        const [queueCounts, islandCounts] = await Promise.all([
+          getQueueStatusCounts(supabase, reportId),
+          getIslandStatusCounts(supabase, reportId),
+        ]);
+
+        const queueTotal = report.queue_total || queueCounts.total || 1;
+        const metricsDone = queueCounts.done + queueCounts.error;
+        const isDone = queueCounts.pending === 0 && queueCounts.processing === 0;
+        const progressPct = isDone
+          ? 95
+          : Math.min(95, 10 + Math.floor((metricsDone / queueTotal) * 85));
+
+        const { error: reportUpdateErr } = await supabase
+          .from("discover_reports")
+          .update({
+            queue_total: queueTotal,
+            metrics_done_count: metricsDone,
+            reported_count: islandCounts.reported,
+            suppressed_count: islandCounts.suppressed,
+            error_count: queueCounts.error,
+            pending_count: queueCounts.pending,
+            processing_count: queueCounts.processing,
+            done_count: queueCounts.done,
+            workers_active: workersActive,
+            throughput_per_min: throughputPerMin,
+            stale_requeued_count: (report.stale_requeued_count || 0) + staleRequeued,
+            last_metrics_tick_at: new Date().toISOString(),
+            phase: isDone ? "finalize" : "metrics",
+            progress_pct: progressPct,
+          })
+          .eq("id", reportId);
+        if (reportUpdateErr) throw new Error(`Failed to update report counters: ${reportUpdateErr.message}`);
+
+        console.log(
+          `[metrics:v2] workers=${workersActive}/${METRICS_V2_DEFAULTS.workers} claimed=${totals.claimed} processed=${totals.processed} reported=${totals.reported} suppressed=${totals.suppressed} errors=${totals.errors} pending=${queueCounts.pending} processing=${queueCounts.processing} done=${queueCounts.done} throughput_per_min=${throughputPerMin}`
+        );
+
+        return new Response(JSON.stringify({
+          success: true,
+          engine: "v2",
+          phase: isDone ? "finalize" : "metrics",
+          metrics_done_count: metricsDone,
+          queue_total: queueTotal,
+          reported_count: islandCounts.reported,
+          suppressed_count: islandCounts.suppressed,
+          error_count: queueCounts.error,
+          progress_pct: progressPct,
+          workers_active: workersActive,
+          throughput_per_min: throughputPerMin,
+          pending_count: queueCounts.pending,
+          processing_count: queueCounts.processing,
+          done_count: queueCounts.done,
+          stale_requeued_count: staleRequeued,
+          batch_processed: totals.processed,
+          batch_claimed: totals.claimed,
+          batch_rate_limited: totals.rateLimited,
+          batch_requeued_pending: totals.requeuedPending,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
 
       const BATCH_SIZE = 800;
       const startTime = Date.now();

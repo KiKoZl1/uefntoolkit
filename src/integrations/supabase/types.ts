@@ -316,24 +316,31 @@ export type Database = {
           catalog_done: boolean | null
           computed_rankings: Json | null
           created_at: string
+          done_count: number | null
           error_count: number | null
           estimated_total: number | null
           id: string
           island_count: number | null
+          last_metrics_tick_at: string | null
           metrics_done_count: number | null
+          pending_count: number | null
           phase: string | null
           platform_kpis: Json | null
+          processing_count: number | null
           progress_pct: number | null
           queue_total: number | null
           raw_metrics: Json | null
           reported_count: number | null
+          stale_requeued_count: number | null
           started_at: string | null
           status: string
           suppressed_count: number | null
+          throughput_per_min: number | null
           updated_at: string
           week_end: string
           week_number: number
           week_start: string
+          workers_active: number | null
           year: number
         }
         Insert: {
@@ -343,24 +350,31 @@ export type Database = {
           catalog_done?: boolean | null
           computed_rankings?: Json | null
           created_at?: string
+          done_count?: number | null
           error_count?: number | null
           estimated_total?: number | null
           id?: string
           island_count?: number | null
+          last_metrics_tick_at?: string | null
           metrics_done_count?: number | null
+          pending_count?: number | null
           phase?: string | null
           platform_kpis?: Json | null
+          processing_count?: number | null
           progress_pct?: number | null
           queue_total?: number | null
           raw_metrics?: Json | null
           reported_count?: number | null
+          stale_requeued_count?: number | null
           started_at?: string | null
           status?: string
           suppressed_count?: number | null
+          throughput_per_min?: number | null
           updated_at?: string
           week_end: string
           week_number: number
           week_start: string
+          workers_active?: number | null
           year: number
         }
         Update: {
@@ -370,24 +384,31 @@ export type Database = {
           catalog_done?: boolean | null
           computed_rankings?: Json | null
           created_at?: string
+          done_count?: number | null
           error_count?: number | null
           estimated_total?: number | null
           id?: string
           island_count?: number | null
+          last_metrics_tick_at?: string | null
           metrics_done_count?: number | null
+          pending_count?: number | null
           phase?: string | null
           platform_kpis?: Json | null
+          processing_count?: number | null
           progress_pct?: number | null
           queue_total?: number | null
           raw_metrics?: Json | null
           reported_count?: number | null
+          stale_requeued_count?: number | null
           started_at?: string | null
           status?: string
           suppressed_count?: number | null
+          throughput_per_min?: number | null
           updated_at?: string
           week_end?: string
           week_number?: number
           week_start?: string
+          workers_active?: number | null
           year?: number
         }
         Relationships: []
@@ -644,12 +665,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_discover_queue_results: {
+        Args: {
+          p_report_id: string
+          p_results: Json
+        }
+        Returns: number
+      }
+      claim_discover_report_queue: {
+        Args: {
+          p_report_id: string
+          p_stale_after_seconds?: number
+          p_take?: number
+        }
+        Returns: {
+          id: string
+          island_code: string
+          priority: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      requeue_stale_discover_queue: {
+        Args: {
+          p_report_id: string
+          p_max_rows?: number
+          p_stale_after_seconds?: number
+        }
+        Returns: number
+      }
+      repair_discover_report_state: {
+        Args: {
+          p_report_id: string
+          p_stale_after_seconds?: number
+        }
+        Returns: Json
       }
     }
     Enums: {
