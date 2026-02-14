@@ -769,26 +769,30 @@ serve(async (req) => {
         if (!cursor) { exhausted = true; break; }
       }
 
-      // Update report state
-      const progressPct = report.estimated_total
+      // Count current queue size for dashboard visibility
+      const { count: currentQueueCount } = await supabase
+        .from("discover_report_queue")
+        .select("*", { count: "exact", head: true })
+        .eq("report_id", reportId);
+
+      const queueNow = currentQueueCount || discovered;
+
+      // Update report state - always show pending_count during catalog
+      const progressPct = report.estimated_total && report.estimated_total > 0
         ? Math.min(10, Math.floor((discovered / report.estimated_total) * 10))
-        : 0;
+        : (exhausted ? 10 : Math.min(9, Math.floor(pagesThisRun / 2)));
 
       const updateFields: any = {
         catalog_discovered_count: discovered,
         catalog_cursor: cursor,
         progress_pct: progressPct,
+        pending_count: queueNow,
+        island_count: discovered,
       };
 
       if (exhausted) {
-        // Count total queue items
-        const { count } = await supabase
-          .from("discover_report_queue")
-          .select("*", { count: "exact", head: true })
-          .eq("report_id", reportId);
-
         updateFields.catalog_done = true;
-        updateFields.queue_total = count || discovered;
+        updateFields.queue_total = queueNow;
         updateFields.phase = "metrics";
         updateFields.progress_pct = 10;
       }
