@@ -1082,6 +1082,34 @@ serve(async (req) => {
         status: "analyzing",
       }).eq("id", reportId);
 
+      // Create/update weekly_reports CMS entry as draft
+      const { data: reportMeta } = await supabase
+        .from("discover_reports")
+        .select("week_start, week_end, week_number, year, ai_narratives")
+        .eq("id", reportId)
+        .single();
+
+      if (reportMeta) {
+        const weekKey = `${reportMeta.year}-W${String(reportMeta.week_number).padStart(2, "0")}`;
+        const publicSlug = weekKey.toLowerCase();
+        const titlePublic = `Fortnite Discovery - Semana ${reportMeta.week_number}/${reportMeta.year}`;
+
+        await supabase.from("weekly_reports").upsert({
+          discover_report_id: reportId,
+          week_key: weekKey,
+          date_from: reportMeta.week_start,
+          date_to: reportMeta.week_end,
+          status: "draft",
+          public_slug: publicSlug,
+          title_public: titlePublic,
+          kpis_json: platformKPIs,
+          rankings_json: computedRankings,
+          ai_sections_json: reportMeta.ai_narratives || {},
+        }, { onConflict: "public_slug" });
+
+        console.log(`[finalize] Created/updated weekly_reports draft: ${weekKey}`);
+      }
+
       console.log(`[finalize] Done. ${islands.length} reported, ${suppressedCount} suppressed, ${revivedIslands.length} revived, ${deadIslands.length} dead, ${topRisers.length} risers, ${topDecliners.length} decliners`);
 
       return new Response(JSON.stringify({

@@ -1,4 +1,4 @@
-import { Radar, Search, FolderOpen, LogOut, Shield } from "lucide-react";
+import { Radar, LayoutDashboard, FileText, LogOut, ArrowLeft } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -7,13 +7,13 @@ import {
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 
-const tools = [
-  { title: "CSV Analytics", url: "/app", icon: FolderOpen, end: true },
-  { title: "Island Lookup", url: "/app/island-lookup", icon: Search },
+const items = [
+  { title: "Overview", url: "/admin", icon: LayoutDashboard, end: true },
+  { title: "Reports", url: "/admin/reports", icon: FileText },
 ];
 
-export function AppSidebar() {
-  const { signOut, isAdmin } = useAuth();
+export function AdminSidebar() {
+  const { signOut } = useAuth();
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -29,11 +29,11 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
-            Ferramentas
+            Admin Panel
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {tools.map((item) => (
+              {items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink
@@ -54,19 +54,12 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4 space-y-2">
-        {isAdmin && (
-          <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" asChild>
-            <NavLink to="/admin" className="">
-              <Shield className="h-4 w-4 mr-2" /> Admin
-            </NavLink>
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-          onClick={signOut}
-        >
+        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" asChild>
+          <NavLink to="/app" className="">
+            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar ao App
+          </NavLink>
+        </Button>
+        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={signOut}>
           <LogOut className="h-4 w-4 mr-2" /> Sair
         </Button>
       </SidebarFooter>

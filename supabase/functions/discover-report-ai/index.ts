@@ -157,6 +157,12 @@ Sections:
       .update({ ai_narratives: narratives, status: "completed", phase: "done", progress_pct: 100 })
       .eq("id", reportId);
 
+    // Sync AI narratives to weekly_reports CMS
+    await supabase
+      .from("weekly_reports")
+      .update({ ai_sections_json: narratives })
+      .eq("discover_report_id", reportId);
+
     return new Response(JSON.stringify({ success: true, narratives }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
