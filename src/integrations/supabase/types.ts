@@ -85,6 +85,93 @@ export type Database = {
         }
         Relationships: []
       }
+      discover_islands_cache: {
+        Row: {
+          category: string | null
+          created_in: string | null
+          creator_code: string | null
+          first_seen_at: string | null
+          island_code: string
+          last_probe_plays: number | null
+          last_probe_unique: number | null
+          last_report_id: string | null
+          last_reported_at: string | null
+          last_seen_at: string | null
+          last_status: string | null
+          last_suppressed_at: string | null
+          last_week_d1_avg: number | null
+          last_week_d7_avg: number | null
+          last_week_favorites: number | null
+          last_week_minutes: number | null
+          last_week_minutes_per_player_avg: number | null
+          last_week_peak_ccu: number | null
+          last_week_plays: number | null
+          last_week_recommends: number | null
+          last_week_unique: number | null
+          reported_streak: number | null
+          suppressed_streak: number | null
+          tags: Json | null
+          title: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          first_seen_at?: string | null
+          island_code: string
+          last_probe_plays?: number | null
+          last_probe_unique?: number | null
+          last_report_id?: string | null
+          last_reported_at?: string | null
+          last_seen_at?: string | null
+          last_status?: string | null
+          last_suppressed_at?: string | null
+          last_week_d1_avg?: number | null
+          last_week_d7_avg?: number | null
+          last_week_favorites?: number | null
+          last_week_minutes?: number | null
+          last_week_minutes_per_player_avg?: number | null
+          last_week_peak_ccu?: number | null
+          last_week_plays?: number | null
+          last_week_recommends?: number | null
+          last_week_unique?: number | null
+          reported_streak?: number | null
+          suppressed_streak?: number | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_in?: string | null
+          creator_code?: string | null
+          first_seen_at?: string | null
+          island_code?: string
+          last_probe_plays?: number | null
+          last_probe_unique?: number | null
+          last_report_id?: string | null
+          last_reported_at?: string | null
+          last_seen_at?: string | null
+          last_status?: string | null
+          last_suppressed_at?: string | null
+          last_week_d1_avg?: number | null
+          last_week_d7_avg?: number | null
+          last_week_favorites?: number | null
+          last_week_minutes?: number | null
+          last_week_minutes_per_player_avg?: number | null
+          last_week_peak_ccu?: number | null
+          last_week_plays?: number | null
+          last_week_recommends?: number | null
+          last_week_unique?: number | null
+          reported_streak?: number | null
+          suppressed_streak?: number | null
+          tags?: Json | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       discover_report_islands: {
         Row: {
           category: string | null
@@ -182,6 +269,7 @@ export type Database = {
           island_code: string
           last_error: string | null
           locked_at: string | null
+          priority: number | null
           report_id: string
           status: string | null
           updated_at: string | null
@@ -193,6 +281,7 @@ export type Database = {
           island_code: string
           last_error?: string | null
           locked_at?: string | null
+          priority?: number | null
           report_id: string
           status?: string | null
           updated_at?: string | null
@@ -204,6 +293,7 @@ export type Database = {
           island_code?: string
           last_error?: string | null
           locked_at?: string | null
+          priority?: number | null
           report_id?: string
           status?: string | null
           updated_at?: string | null

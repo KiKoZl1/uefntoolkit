@@ -9,9 +9,9 @@ import { RankingTable } from "@/components/discover/RankingTable";
 import { SectionHeader } from "@/components/discover/SectionHeader";
 import { AiNarrative } from "@/components/discover/AiNarrative";
 import {
-  ArrowLeft, Activity, Users, Play, Clock, TrendingUp, Star, ThumbsUp,
+  ArrowLeft, Activity, Users, Play, Clock, TrendingUp, TrendingDown, Star, ThumbsUp,
   BarChart3, Crown, Map, Layers, Zap, Target, PieChart, Tags, Sparkles,
-  AlertTriangle, Flame, UserPlus, Loader2,
+  AlertTriangle, Flame, UserPlus, Loader2, HeartPulse, Skull, Rocket,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
@@ -187,12 +187,12 @@ export default function DiscoverTrendsReport() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
         <KpiCard icon={Map} label="Total de Ilhas" value={fmt(report.island_count)} />
         <KpiCard icon={Users} label="Criadores Únicos" value={fmt(kpis.totalCreators)} />
-        <KpiCard icon={Map} label="Ilhas Ativas" value={fmt(kpis.activeIslands)} />
+        <KpiCard icon={Map} label="Ilhas Ativas" value={fmt(kpis.activeIslands)} change={kpis.wowActiveIslands} />
         <KpiCard icon={Map} label="Avg Maps/Creator" value={fmt(kpis.avgMapsPerCreator)} />
         <KpiCard icon={Sparkles} label="Novos Mapas" value={fmt(kpis.newMapsThisWeek)} />
         <KpiCard icon={UserPlus} label="Novos Criadores" value={fmt(kpis.newCreatorsThisWeek)} />
-        <KpiCard icon={AlertTriangle} label="Ilhas c/ Baixa Perf." value={fmt(kpis.failedIslands)} />
-        <KpiCard icon={Users} label="Avg Players/Day" value={fmt(kpis.avgPlayersPerDay)} />
+        <KpiCard icon={HeartPulse} label="Revividas" value={fmt(kpis.revivedCount)} />
+        <KpiCard icon={Skull} label="Morreram" value={fmt(kpis.deadCount)} />
       </div>
       <AiNarrative text={getNarrative(1)} />
 
@@ -231,11 +231,11 @@ export default function DiscoverTrendsReport() {
       {/* Section 3: Player Engagement */}
       <SectionHeader icon={Play} number={3} title="Player Engagement Metrics" description="Engajamento dos jogadores no ecossistema" />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-        <KpiCard icon={Play} label="Total Plays" value={fmt(kpis.totalPlays)} />
+        <KpiCard icon={Play} label="Total Plays" value={fmt(kpis.totalPlays)} change={kpis.wowTotalPlays} />
         <KpiCard icon={BarChart3} label="Avg CCU/Map" value={fmt(kpis.avgCCUPerMap)} />
         <KpiCard icon={Clock} label="Avg Duração" value={fmt(kpis.avgPlayDuration)} suffix=" min" />
-        <KpiCard icon={Clock} label="Total Minutos" value={fmt(kpis.totalMinutesPlayed)} />
-        <KpiCard icon={Users} label="Total Players" value={fmt(kpis.totalUniquePlayers)} />
+        <KpiCard icon={Clock} label="Total Minutos" value={fmt(kpis.totalMinutesPlayed)} change={kpis.wowTotalMinutes} />
+        <KpiCard icon={Users} label="Total Players" value={fmt(kpis.totalUniquePlayers)} change={kpis.wowTotalPlayers} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
         <RankingTable title="Top 10 Peak CCU (Global)" icon={BarChart3} items={rankings.topPeakCCU || []} />
@@ -363,6 +363,33 @@ export default function DiscoverTrendsReport() {
         <RankingTable title="Top Recommends/Play" icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
       </div>
       <AiNarrative text={getNarrative(11)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 12: Risers & Decliners */}
+      <SectionHeader icon={Rocket} number={12} title="Risers & Decliners" description="Maiores variações Week-over-Week em plays" />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title="🚀 Top Risers (mais crescimento)" icon={TrendingUp} items={rankings.topRisers || []} barColor="bg-green-500" />
+        <RankingTable title="📉 Top Decliners (maior queda)" icon={TrendingDown} items={rankings.topDecliners || []} barColor="bg-destructive" />
+      </div>
+      {rankings.breakouts?.length > 0 && (
+        <RankingTable title="💥 Breakouts (suppressed → top)" icon={Rocket} items={rankings.breakouts || []} barColor="bg-amber-500" />
+      )}
+      <AiNarrative text={getNarrative(12)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 13: Island Lifecycle */}
+      <SectionHeader icon={HeartPulse} number={13} title="Island Lifecycle" description="Ilhas revividas, mortas e mudanças no ecossistema" />
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <KpiCard icon={HeartPulse} label="Ilhas Revividas" value={fmt(kpis.revivedCount)} />
+        <KpiCard icon={Skull} label="Ilhas que Morreram" value={fmt(kpis.deadCount)} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title="🔄 Ilhas Revividas" icon={HeartPulse} items={rankings.revivedIslands || []} barColor="bg-green-500" />
+        <RankingTable title="💀 Ilhas que Morreram" icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
+      </div>
+      <AiNarrative text={getNarrative(13)} />
     </div>
   );
 }
