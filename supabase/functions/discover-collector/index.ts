@@ -330,6 +330,19 @@ async function processMetricsWorkerV2(
         const weekUrl = `${EPIC_API}/islands/${item.island_code}/metrics/day?from=${weekFrom}&to=${weekTo}`;
         const weekRes = await fetchWithRetry(weekUrl);
         if (weekRes.status === 429) return { item, rateLimited: true };
+        // Treat 404 as suppressed (island doesn't exist / was removed)
+        if (weekRes.status === 404) {
+          return {
+            item,
+            suppressed: true,
+            islandData: {
+              report_id: reportId,
+              island_code: item.island_code,
+              status: "suppressed",
+            },
+            permanent404: true,
+          };
+        }
         if (!weekRes.data) return { item, error: true, errorMsg: `Metrics failed: status ${weekRes.status}` };
 
         const m = weekRes.data;
@@ -886,10 +899,49 @@ serve(async (req) => {
         const elapsedSec = Math.max(1, (Date.now() - tickStart) / 1000);
         const throughputPerMin = Math.round((totals.processed / elapsedSec) * 60);
 
-        const [queueCounts, islandCounts] = await Promise.all([
+        let [queueCounts, islandCounts] = await Promise.all([
           getQueueStatusCounts(supabase, reportId),
           getIslandStatusCounts(supabase, reportId),
         ]);
+
+        // SELF-HEAL: If no workers claimed anything but there are stale processing items,
+        // force-requeue them immediately (60s timeout instead of 15min)
+        if (totals.claimed === 0 && queueCounts.pending === 0 && queueCounts.processing > 0) {
+          console.log(`[metrics:v2:self-heal] 0 claimed, ${queueCounts.processing} stuck in processing — force-requeue with 60s stale`);
+          const { data: forceRequeued } = await supabase.rpc("requeue_stale_discover_queue", {
+            p_report_id: reportId,
+            p_stale_after_seconds: 60,
+            p_max_rows: 10000,
+          });
+          const forceCount = Number(forceRequeued || 0);
+          console.log(`[metrics:v2:self-heal] force-requeued ${forceCount} items`);
+
+          // If force-requeue found nothing (items are very fresh), mark remaining processing as done
+          if (forceCount === 0 && queueCounts.processing > 0) {
+            console.log(`[metrics:v2:self-heal] items too fresh to requeue — force-marking ${queueCounts.processing} as done`);
+            const { error: forceErr } = await supabase
+              .from("discover_report_queue")
+              .update({ status: "done", last_error: "force_cleared: stuck processing", locked_at: null, updated_at: new Date().toISOString() })
+              .eq("report_id", reportId)
+              .eq("status", "processing");
+            if (forceErr) console.error(`[self-heal] force-clear failed: ${forceErr.message}`);
+          }
+
+          // Re-fetch counts after self-heal
+          queueCounts = await getQueueStatusCounts(supabase, reportId);
+        }
+
+        // SELF-HEAL: Force-clear error items with too many attempts (they'll never succeed)
+        if (queueCounts.pending === 0 && queueCounts.processing === 0 && queueCounts.error > 0) {
+          console.log(`[metrics:v2:self-heal] ${queueCounts.error} error items remaining — marking as done to unblock finalize`);
+          const { error: clearErr } = await supabase
+            .from("discover_report_queue")
+            .update({ status: "done", last_error: "auto_cleared: permanent error", locked_at: null, updated_at: new Date().toISOString() })
+            .eq("report_id", reportId)
+            .eq("status", "error");
+          if (clearErr) console.error(`[self-heal] error-clear failed: ${clearErr.message}`);
+          queueCounts = await getQueueStatusCounts(supabase, reportId);
+        }
 
         const queueTotal = report.queue_total || queueCounts.total || 1;
         const metricsDone = queueCounts.done + queueCounts.error;
@@ -1087,6 +1139,18 @@ serve(async (req) => {
             const weekRes = await fetchWithRetry(weekUrl);
 
             if (weekRes.status === 429) return { item, rateLimited: true };
+            // Treat 404 as suppressed (island removed/doesn't exist)
+            if (weekRes.status === 404) {
+              return {
+                item,
+                suppressed: true,
+                islandData: {
+                  report_id: reportId,
+                  island_code: item.island_code,
+                  status: "suppressed",
+                },
+              };
+            }
             if (!weekRes.data) {
               return { item, error: true, errorMsg: `Metrics failed: status ${weekRes.status}` };
             }
