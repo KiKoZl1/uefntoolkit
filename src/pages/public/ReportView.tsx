@@ -82,6 +82,7 @@ interface WeeklyReport {
   rankings_json: any;
   ai_sections_json: any;
   editor_sections_json: any;
+  cover_image_url?: string | null;
 }
 
 export default function ReportView() {
@@ -143,6 +144,13 @@ export default function ReportView() {
 
   return (
     <div className="px-6 py-8 max-w-6xl mx-auto pb-20">
+      {/* Cover Image */}
+      {(report as any).cover_image_url && (
+        <div className="rounded-xl overflow-hidden mb-6 max-h-64">
+          <img src={(report as any).cover_image_url} alt="Report cover" className="w-full h-64 object-cover" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
@@ -388,7 +396,12 @@ function DiscoveryExposureSection({ exposure }: { exposure: any }) {
     .sort((a: any, b: any) => Number(b.minutesExposed || 0) - Number(a.minutesExposed || 0))
     .slice(0, 3);
 
-  const profileLabel = (p: any) => `${p.region} · ${p.surfaceName === "CreativeDiscoverySurface_Frontend" ? "Frontend" : "Browse"}`;
+  const profileLabel = (p: any) => {
+    const surface = p.surfaceName === "CreativeDiscoverySurface_Frontend" ? "Discovery"
+      : p.surfaceName === "CreativeDiscoverySurface_Browse" ? "Browse"
+      : p.surfaceName;
+    return `${p.region} · ${surface}`;
+  };
 
   return (
     <div className="space-y-4">

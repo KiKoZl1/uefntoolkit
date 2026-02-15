@@ -1250,6 +1250,7 @@ export type Database = {
       weekly_reports: {
         Row: {
           ai_sections_json: Json | null
+          cover_image_url: string | null
           created_at: string | null
           date_from: string
           date_to: string
@@ -1270,6 +1271,7 @@ export type Database = {
         }
         Insert: {
           ai_sections_json?: Json | null
+          cover_image_url?: string | null
           created_at?: string | null
           date_from: string
           date_to: string
@@ -1290,6 +1292,7 @@ export type Database = {
         }
         Update: {
           ai_sections_json?: Json | null
+          cover_image_url?: string | null
           created_at?: string | null
           date_from?: string
           date_to?: string

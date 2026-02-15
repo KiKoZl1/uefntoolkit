@@ -146,6 +146,12 @@ Write insightful narratives for each of the 14 sections below. Each narrative MU
 
 Write in English. Be analytical, not generic. Reference specific island names, creators, and categories from the rankings.
 
+IMPORTANT terminology rules (MUST follow):
+- CreativeDiscoverySurface_Browse MUST be referred to as "Browse" (never use the full technical name)
+- CreativeDiscoverySurface_Frontend MUST be referred to as "Discovery" (never use the full technical name)
+- The terms "Discover", "Browse", and "Discovery" must NEVER be translated — always keep them in English
+- Keep island names, creator names, and technical terms in their original form
+
 Sections:
 1. Core Activity Overview - ecosystem health, new maps/creators, overall activity, WoW changes
 2. Trending Topics - emerging genres, popular themes, what's gaining traction
