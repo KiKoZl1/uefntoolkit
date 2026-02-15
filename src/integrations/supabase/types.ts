@@ -921,6 +921,156 @@ export type Database = {
           },
         ]
       }
+      discovery_panel_tiers: {
+        Row: {
+          label: string | null
+          panel_name: string
+          tier: number
+          updated_at: string
+        }
+        Insert: {
+          label?: string | null
+          panel_name: string
+          tier: number
+          updated_at?: string
+        }
+        Update: {
+          label?: string | null
+          panel_name?: string
+          tier?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      discovery_public_emerging_now: {
+        Row: {
+          as_of: string
+          best_rank_24h: number | null
+          creator_code: string | null
+          first_seen_at: string
+          link_code: string
+          link_code_type: string
+          minutes_24h: number
+          minutes_6h: number
+          panels_24h: number
+          premium_panels_24h: number
+          reentries_24h: number
+          region: string
+          score: number
+          surface_name: string
+          title: string | null
+        }
+        Insert: {
+          as_of: string
+          best_rank_24h?: number | null
+          creator_code?: string | null
+          first_seen_at: string
+          link_code: string
+          link_code_type: string
+          minutes_24h: number
+          minutes_6h: number
+          panels_24h: number
+          premium_panels_24h: number
+          reentries_24h: number
+          region: string
+          score: number
+          surface_name: string
+          title?: string | null
+        }
+        Update: {
+          as_of?: string
+          best_rank_24h?: number | null
+          creator_code?: string | null
+          first_seen_at?: string
+          link_code?: string
+          link_code_type?: string
+          minutes_24h?: number
+          minutes_6h?: number
+          panels_24h?: number
+          premium_panels_24h?: number
+          reentries_24h?: number
+          region?: string
+          score?: number
+          surface_name?: string
+          title?: string | null
+        }
+        Relationships: []
+      }
+      discovery_public_pollution_creators_now: {
+        Row: {
+          as_of: string
+          creator_code: string
+          duplicate_clusters_7d: number
+          duplicate_islands_7d: number
+          duplicates_over_min: number
+          sample_titles: string[] | null
+          spam_score: number
+        }
+        Insert: {
+          as_of: string
+          creator_code: string
+          duplicate_clusters_7d: number
+          duplicate_islands_7d: number
+          duplicates_over_min: number
+          sample_titles?: string[] | null
+          spam_score: number
+        }
+        Update: {
+          as_of?: string
+          creator_code?: string
+          duplicate_clusters_7d?: number
+          duplicate_islands_7d?: number
+          duplicates_over_min?: number
+          sample_titles?: string[] | null
+          spam_score?: number
+        }
+        Relationships: []
+      }
+      discovery_public_premium_now: {
+        Row: {
+          as_of: string
+          ccu: number | null
+          creator_code: string | null
+          link_code: string
+          link_code_type: string
+          panel_display_name: string | null
+          panel_name: string
+          panel_type: string | null
+          rank: number
+          region: string
+          surface_name: string
+          title: string | null
+        }
+        Insert: {
+          as_of: string
+          ccu?: number | null
+          creator_code?: string | null
+          link_code: string
+          link_code_type: string
+          panel_display_name?: string | null
+          panel_name: string
+          panel_type?: string | null
+          rank: number
+          region: string
+          surface_name: string
+          title?: string | null
+        }
+        Update: {
+          as_of?: string
+          ccu?: number | null
+          creator_code?: string | null
+          link_code?: string
+          link_code_type?: string
+          panel_display_name?: string | null
+          panel_name?: string
+          panel_type?: string | null
+          rank?: number
+          region?: string
+          surface_name?: string
+          title?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -1232,6 +1382,10 @@ export type Database = {
       compute_discovery_exposure_rollup_daily: {
         Args: { p_date: string }
         Returns: number
+      }
+      compute_discovery_public_intel: {
+        Args: { p_as_of?: string }
+        Returns: Json
       }
       discovery_exposure_panel_daily_summaries: {
         Args: { p_date_from: string; p_date_to: string }
