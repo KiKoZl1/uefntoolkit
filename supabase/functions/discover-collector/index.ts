@@ -91,15 +91,15 @@ const TREND_KEYWORDS = [
 ];
 
 const METRICS_V2_DEFAULTS = {
-  workers: 6,
-  claimSizePerWorker: 400,
-  workerInitialConcurrency: 5,
-  workerMinConcurrency: 2,
-  workerMaxConcurrency: 12,
+  workers: 4,
+  claimSizePerWorker: 500,
+  workerInitialConcurrency: 3,
+  workerMinConcurrency: 1,
+  workerMaxConcurrency: 8,
   staleAfterSeconds: 900,
-  workerBudgetMs: 48000,
+  workerBudgetMs: 55000,
   chunkSize: 500,
-  globalDelayBetweenBatchesMs: 200,
+  globalDelayBetweenBatchesMs: 300,
 };
 
 function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
