@@ -1,99 +1,103 @@
-# Plano: Turbo Mode - 274k ilhas em 1-2 horas
+# Plano: Preview do Report, Editor Melhorado e IA em Portugues
 
-## Diagnostico
+## Problemas Identificados
 
+1. **Sem preview antes de publicar** -- O editor admin (`AdminReportEditor`) so permite editar campos de texto, mas nao tem como ver como o report vai ficar para o publico
+2. **Editor muito simples** -- Apenas `<Textarea>` basico, sem suporte a imagens, capa, ou formatacao rica
+3. **IA gerando em ingles** -- O prompt da edge function `discover-report-ai` instrui explicitamente "Write in English", mas o site esta em portugues
+4. **Terminologia incorreta** -- A IA nao sabe traduzir `CreativeDiscoverySurface_Browse` para "Browse" e `CreativeDiscoverySurface_Frontend` para "Discovery"
 
-| Parametro atual          | Valor | Impacto             |
-| ------------------------ | ----- | ------------------- |
-| workers                  | 6     | OK, mas pode subir  |
-| claimSizePerWorker       | 250   | Limita o lote       |
-| workerInitialConcurrency | 10    | GARGALO PRINCIPAL   |
-| workerMaxConcurrency     | 30    | Teto baixo          |
-| workerBudgetMs           | 42000 | Pode subir um pouco |
-| Tick interval (cron)     | 60s   | Tempo morto         |
+---
 
+## Solucao em 4 Partes
 
-Cada worker faz ~350 chamadas em 42s com concurrency=10. A Epic API responde em ~150ms e nao esta retornando 429. Ha margem enorme para subir.
+### Parte 1: Preview do Report no Admin
 
-## Mudancas propostas
+Adicionar uma aba "Preview" ao lado da aba "Editar" na pagina `AdminReportEditor`. O preview vai reutilizar a mesma logica de renderizacao do `ReportView.tsx` publico, mas sem exigir que o report esteja publicado.
 
-### 1. Novo perfil de performance (discover-collector/index.ts)
+- Adicionar sistema de tabs (Editar | Preview) no `AdminReportEditor`
+- Criar componente `ReportPreview` que recebe os dados do `weekly_report` e renderiza exatamente como a pagina publica
+- O preview mostra os dados editados em tempo real (titulo, subtitulo, nota editorial, textos editados por secao) com fallback para IA
+- Adicionar botao "Salvar" separado do "Publicar" (ja existe, mas garantir que funciona independente)
+
+### Parte 2: Editor Melhorado com Capa e Imagens
+
+- Adicionar campo `cover_image_url` na tabela `weekly_reports` (migracao SQL)
+- Componente de upload de imagem de capa usando Storage do Lovable Cloud
+  - Criar bucket `report-assets` para armazenar capas
+  - Upload direto com preview inline no editor
+- Melhorar os editores de texto das secoes:
+  - Indicar que suportam Markdown (ja renderiza com ReactMarkdown)
+  - Adicionar toolbar basica com dicas de formatacao (bold, italic, links, imagens via URL)
+  - Aumentar area do textarea e adicionar preview inline do Markdown
+- Exibir capa no ReportView publico e no Preview admin
+
+### Parte 3: IA Escrevendo em Portugues (PT-BR)
+
+Alterar o prompt da edge function `discover-report-ai/index.ts`:
+
+A ai sempre pode escrever em ingles mas nunca devemos usar o texto da a.i DIRETAMENTE NO report o texto da ai deve passar pelo nosso sistema de tradução do site para quando  site tiver sistema de idiomas o texto nos report se atualizarem 
+
+### Parte 4: Corrigir Labels no Frontend
+
+Na funcao `profileLabel` em `ReportView.tsx` (linha 391), ja traduz parcialmente mas precisa garantir consistencia:
+
+- `CreativeDiscoverySurface_Frontend` -> "Discovery"
+- `CreativeDiscoverySurface_Browse` -> "Browse"
+
+---
+
+## Detalhes Tecnicos
+
+### Migracao SQL
 
 ```text
-METRICS_V2_DEFAULTS (antes -> depois):
-  workers:                    6  -> 10
-  claimSizePerWorker:       250  -> 600
-  workerInitialConcurrency:  10  -> 40
-  workerMinConcurrency:       4  -> 8
-  workerMaxConcurrency:      30  -> 80
-  workerBudgetMs:         42000  -> 48000
-  chunkSize:                300  -> 500
+- ALTER TABLE weekly_reports ADD COLUMN cover_image_url TEXT;
+- Criar bucket de storage "report-assets" (publico para leitura)
 ```
 
-### 2. Reduzir intervalo do cron (SQL)
+### Arquivos Modificados
 
-Alterar o job `discover-collector-orchestrate-minute` de `* * * * *` (1 min) para `*/30 * * * * *` (a cada 30 segundos) usando `pg_cron` com `cron.alter_job`.
+1. `supabase/functions/discover-report-ai/index.ts` -- Prompt em PT-BR + terminologia
+2. `src/pages/admin/AdminReportEditor.tsx` -- Tabs Editar/Preview, upload de capa, editor melhorado
+3. `src/pages/public/ReportView.tsx` -- Exibir capa, garantir label de surfaces
+4. Novo componente `src/components/admin/ReportPreview.tsx` -- Renderizacao preview reutilizavel
 
-Como o sistema ja tem protecao de overlap (verifica `last_metrics_tick_at < 45s`), basta reduzir o threshold para 25s para combinar com ticks mais frequentes.
-
-### 3. Ajustar threshold de overlap (discover-collector/index.ts)
-
-Reduzir o check de `45000ms` para `25000ms` no modo `orchestrate`, permitindo ticks mais frequentes.
-
-## Projecao de throughput
+### Estrutura do Editor Melhorado
 
 ```text
-10 workers x 40 concurrency = 400 chamadas paralelas
-Cada chamada ~150ms = ~2,666 chamadas/s teorico
-Budget de 48s = ~8,000 chamadas efetivas por tick (com overhead de DB writes)
-Conservador (50% eficiencia): ~4,000 por tick
-Tick a cada ~55s (48s execucao + 7s overhead)
-= ~4,300 ilhas/min
-
-274k / 4,300 = ~64 min (~1 hora)
++-------------------------------------------+
+| [Editar]  [Preview]                       |
++-------------------------------------------+
+| Capa: [Upload imagem]  [preview thumb]    |
+| Titulo: [________________]                |
+| Subtitulo: [________________]             |
+| Nota Editorial: [textarea com toolbar]    |
++-------------------------------------------+
+| Secao 1: Core Activity                    |
+| IA (original): [texto colapsavel]         |
+| Editor: [textarea com toolbar markdown]   |
+|         [mini preview do markdown]        |
++-------------------------------------------+
+| ... (demais secoes)                       |
++-------------------------------------------+
+| [Salvar]  [Publicar/Despublicar]          |
++-------------------------------------------+
 ```
 
-Mesmo com overhead de DB (upserts de 6,000 linhas por tick), o alvo de 1-2 horas e alcancavel.
+### Mudancas no Prompt da IA
 
-## Riscos e mitigacoes
+```text
+De: "Write in English. Be analytical, not generic."
+Para: "Write in English. Be analytical, not generic.
+      IMPORTANT terminology rules:
+      - Never translate: Discover, Browse, Discovery
+      - CreativeDiscoverySurface_Browse = 'Browse'
+      - CreativeDiscoverySurface_Frontend = 'Discovery'
+      - Keep island names, creator names, and technical terms in Orinal State"
+```
 
+### Notas
 
-| Risco                         | Mitigacao                                                                    |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| 429 da Epic com 400 paralelas | Backoff adaptativo ja existe; workerMinConcurrency=8 garante operacao minima |
-| DB timeout com chunks maiores | chunkSize=500 ainda conservador; RPC batch ja e eficiente                    |
-| Edge function timeout (>50s)  | workerBudgetMs=48s deixa 2s de margem; itens nao processados sao requeued    |
-| Overlap de ticks              | Check de last_metrics_tick_at permanece ativo                                |
-
-
-## Arquivos alterados
-
-1. `supabase/functions/discover-collector/index.ts` - Novo perfil METRICS_V2_DEFAULTS + threshold de overlap
-2. Migration SQL - Alterar intervalo do cron job para 30s
-
-## Secao tecnica
-
-### Detalhes do calculo de throughput
-
-Cada worker opera assim dentro do budget:
-
-1. Claim 600 ilhas via RPC (~100ms)
-2. Preload cache (~200ms)
-3. Skip suppressed_streak>=6 (instantaneo)
-4. Loop de batches de 40 chamadas paralelas
-  - Cada batch: 40 chamadas x ~150ms = ~150ms wall time
-  - 600 ilhas / 40 = 15 batches = ~2.5s de API calls
-  - Com overhead: ~5-8s por worker
-5. Flush results: upserts + RPC batch (~3-5s)
-
-Total por worker: ~10-15s, bem dentro do budget de 48s.
-
-Os 10 workers rodam em paralelo via `Promise.all`, entao o tick inteiro leva o tempo do worker mais lento.
-
-### Cron de 30s
-
-O `pg_cron` padrao so suporta resolucao de 1 minuto. Para 30s, usaremos duas entradas cron defasadas ou um approach com `pg_cron` + schedule de segundo via extensao. Alternativa: manter 1 min mas compensar com throughput por tick (ja suficiente com o novo perfil).
-
-Se 1 tick por minuto com ~4,000 ilhas ja da ~4,000/min = 274k em 68 min, o cron de 30s pode nao ser necessario. Recomendo comecar com o novo perfil mantendo 1 min e so reduzir se necessario.  
-  
-EXPOR NO PAINEL DE ADMIN ONDE FICA AS INFORMAÇÕES EM TEMPO REAL PARA O USUARIO EXPOR CASO ACONTEÇA CODE 429, E VOLTAR A EXPOR TAMBÉM AS ILHAS NULL QUE FORAM APRA LISTA DE SUPRIMIDAS 
+- O preview usa os mesmos componentes do ReportView publico para garantir fidelidade visual
+- O upload de capa usa Storage com URL publica para simplicidade
