@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.discover-exposure-report]
 verify_jwt = false
+
+[functions.discover-cache-metadata]
+verify_jwt = false
