@@ -1,4 +1,4 @@
-import { Radar, LayoutDashboard, FileText, LogOut, ArrowLeft, Eye, Brain } from "lucide-react";
+import { Radar, Activity, FileText, LogOut, ArrowLeft, Eye, Brain } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -8,7 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 const items = [
-  { title: "Overview", url: "/admin", icon: LayoutDashboard, end: true },
+  { title: "Command Center", url: "/admin", icon: Activity, end: true },
   { title: "Reports", url: "/admin/reports", icon: FileText },
   { title: "Exposure", url: "/admin/exposure", icon: Eye },
   { title: "Intel", url: "/admin/intel", icon: Brain },
