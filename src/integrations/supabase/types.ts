@@ -172,6 +172,150 @@ export type Database = {
         }
         Relationships: []
       }
+      discover_link_metadata: {
+        Row: {
+          account_id: string | null
+          active: boolean | null
+          created_at_epic: string | null
+          creator_name: string | null
+          disabled: boolean | null
+          discovery_intent: string | null
+          extra_image_urls: Json | null
+          image_url: string | null
+          image_urls: Json | null
+          introduction: string | null
+          last_activated_at_epic: string | null
+          last_error: string | null
+          last_fetched_at: string | null
+          link_code: string
+          link_code_type: string
+          link_state: string | null
+          link_type: string | null
+          locale: string | null
+          lock_id: string | null
+          locked_at: string | null
+          max_players: number | null
+          max_social_party_size: number | null
+          min_players: number | null
+          moderation_status: string | null
+          namespace: string | null
+          next_due_at: string
+          published_at_epic: string | null
+          ratings: Json | null
+          raw: Json | null
+          support_code: string | null
+          tagline: string | null
+          title: string | null
+          updated_at: string
+          updated_at_epic: string | null
+          version: number | null
+          video_vuid: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          active?: boolean | null
+          created_at_epic?: string | null
+          creator_name?: string | null
+          disabled?: boolean | null
+          discovery_intent?: string | null
+          extra_image_urls?: Json | null
+          image_url?: string | null
+          image_urls?: Json | null
+          introduction?: string | null
+          last_activated_at_epic?: string | null
+          last_error?: string | null
+          last_fetched_at?: string | null
+          link_code: string
+          link_code_type?: string
+          link_state?: string | null
+          link_type?: string | null
+          locale?: string | null
+          lock_id?: string | null
+          locked_at?: string | null
+          max_players?: number | null
+          max_social_party_size?: number | null
+          min_players?: number | null
+          moderation_status?: string | null
+          namespace?: string | null
+          next_due_at?: string
+          published_at_epic?: string | null
+          ratings?: Json | null
+          raw?: Json | null
+          support_code?: string | null
+          tagline?: string | null
+          title?: string | null
+          updated_at?: string
+          updated_at_epic?: string | null
+          version?: number | null
+          video_vuid?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          active?: boolean | null
+          created_at_epic?: string | null
+          creator_name?: string | null
+          disabled?: boolean | null
+          discovery_intent?: string | null
+          extra_image_urls?: Json | null
+          image_url?: string | null
+          image_urls?: Json | null
+          introduction?: string | null
+          last_activated_at_epic?: string | null
+          last_error?: string | null
+          last_fetched_at?: string | null
+          link_code?: string
+          link_code_type?: string
+          link_state?: string | null
+          link_type?: string | null
+          locale?: string | null
+          lock_id?: string | null
+          locked_at?: string | null
+          max_players?: number | null
+          max_social_party_size?: number | null
+          min_players?: number | null
+          moderation_status?: string | null
+          namespace?: string | null
+          next_due_at?: string
+          published_at_epic?: string | null
+          ratings?: Json | null
+          raw?: Json | null
+          support_code?: string | null
+          tagline?: string | null
+          title?: string | null
+          updated_at?: string
+          updated_at_epic?: string | null
+          version?: number | null
+          video_vuid?: string | null
+        }
+        Relationships: []
+      }
+      discover_link_metadata_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: number
+          link_code: string
+          new_value: Json | null
+          old_value: Json | null
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: never
+          link_code: string
+          new_value?: Json | null
+          old_value?: Json | null
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: never
+          link_code?: string
+          new_value?: Json | null
+          old_value?: Json | null
+        }
+        Relationships: []
+      }
       discover_report_islands: {
         Row: {
           category: string | null
@@ -1345,6 +1489,13 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_discover_link_metadata: {
+        Args: { p_stale_after_seconds?: number; p_take?: number }
+        Returns: {
+          link_code: string
+          lock_id: string
+        }[]
+      }
       claim_discover_report_queue: {
         Args: {
           p_report_id: string
@@ -1438,6 +1589,10 @@ export type Database = {
           target_id: string
         }[]
       }
+      enqueue_discover_link_metadata: {
+        Args: { p_link_codes: string[] }
+        Returns: number
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1448,6 +1603,63 @@ export type Database = {
       repair_discover_report_state: {
         Args: { p_report_id: string; p_stale_after_seconds?: number }
         Returns: Json
+      }
+      report_dead_islands_by_unique_drop: {
+        Args: {
+          p_limit?: number
+          p_prev_report_id: string
+          p_report_id: string
+        }
+        Returns: {
+          creator_code: string
+          curr_unique: number
+          drop_pct: number
+          island_code: string
+          prev_unique: number
+          title: string
+        }[]
+      }
+      report_link_metadata_coverage: {
+        Args: { p_report_id: string }
+        Returns: Json
+      }
+      report_most_updated_islands: {
+        Args: {
+          p_limit?: number
+          p_report_id: string
+          p_week_end: string
+          p_week_start: string
+        }
+        Returns: {
+          category: string
+          creator_code: string
+          island_code: string
+          title: string
+          updated_at_epic: string
+          week_plays: number
+          week_unique: number
+        }[]
+      }
+      report_new_islands_by_launch: {
+        Args: {
+          p_limit?: number
+          p_report_id: string
+          p_week_end: string
+          p_week_start: string
+        }
+        Returns: {
+          category: string
+          creator_code: string
+          island_code: string
+          published_at: string
+          title: string
+          week_plays: number
+          week_unique: number
+        }[]
+      }
+      report_new_islands_by_launch_count: {
+        Args: { p_report_id: string; p_week_end: string; p_week_start: string }
+        Returns: number
       }
       requeue_stale_discover_queue: {
         Args: {

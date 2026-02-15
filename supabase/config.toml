@@ -26,3 +26,9 @@ verify_jwt = false
 
 [functions.discover-exposure-timeline]
 verify_jwt = false
+
+[functions.discover-exposure-timeline]
+verify_jwt = false
+
+[functions.discover-report-rebuild]
+verify_jwt = false

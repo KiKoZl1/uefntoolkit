@@ -517,6 +517,28 @@ async function runTick(
       if (error) console.log(`[tick] cache stub upsert warning: ${error.message}`);
     }
 
+    // Enqueue link codes for metadata collector (best-effort)
+    const allLinkCodes = Array.from(new Set(rowsForDb.map((r) => r.link_code)));
+    if (allLinkCodes.length > 0) {
+      try {
+        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        const supabaseUrl = Deno.env.get("SUPABASE_URL");
+        if (serviceRoleKey && supabaseUrl) {
+          await fetch(`${supabaseUrl}/functions/v1/discover-links-metadata-collector`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey,
+            },
+            body: JSON.stringify({ mode: "refresh_link_codes", linkCodes: allLinkCodes }),
+          });
+        }
+      } catch (e) {
+        console.log(`[tick] metadata enqueue warning: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     // Enqueue Links Service metadata refresh for anything that appeared in this tick (islands + collections).
     // This is best-effort and should never fail the tick.
     try {
