@@ -91,14 +91,15 @@ const TREND_KEYWORDS = [
 ];
 
 const METRICS_V2_DEFAULTS = {
-  workers: 8,
-  claimSizePerWorker: 500,
-  workerInitialConcurrency: 15,
-  workerMinConcurrency: 6,
-  workerMaxConcurrency: 30,
+  workers: 6,
+  claimSizePerWorker: 400,
+  workerInitialConcurrency: 5,
+  workerMinConcurrency: 2,
+  workerMaxConcurrency: 12,
   staleAfterSeconds: 900,
   workerBudgetMs: 48000,
   chunkSize: 500,
+  globalDelayBetweenBatchesMs: 200,
 };
 
 function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
@@ -411,14 +412,18 @@ async function processMetricsWorkerV2(
       const relimitItems = results.filter((r: any) => r.rateLimited).map((r: any) => r.item);
       rateLimited += relimitItems.length;
       islandQueue.push(...relimitItems);
-      concurrency = Math.max(profile.workerMinConcurrency, Math.floor(concurrency / 2));
+      concurrency = Math.max(profile.workerMinConcurrency, Math.floor(concurrency * 0.6));
       consecutiveOk = 0;
-      await delay(800 + Math.floor(Math.random() * 1200));
+      await delay(3000 + Math.floor(Math.random() * 3000));
     } else {
       consecutiveOk++;
-      if (consecutiveOk >= 3 && concurrency < profile.workerMaxConcurrency) {
-        concurrency = Math.min(profile.workerMaxConcurrency, concurrency + 2);
+      if (consecutiveOk >= 5 && concurrency < profile.workerMaxConcurrency) {
+        concurrency = Math.min(profile.workerMaxConcurrency, concurrency + 1);
         consecutiveOk = 0;
+      }
+      // Small delay between batches to smooth out request rate
+      if (profile.globalDelayBetweenBatchesMs > 0) {
+        await delay(profile.globalDelayBetweenBatchesMs);
       }
     }
 
