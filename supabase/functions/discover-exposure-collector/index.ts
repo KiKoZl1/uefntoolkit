@@ -517,35 +517,13 @@ async function runTick(
       if (error) console.log(`[tick] cache stub upsert warning: ${error.message}`);
     }
 
-    // Enqueue link codes for metadata collector (best-effort)
-    const allLinkCodes = Array.from(new Set(rowsForDb.map((r) => r.link_code)));
-    if (allLinkCodes.length > 0) {
-      try {
-        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-        const supabaseUrl = Deno.env.get("SUPABASE_URL");
-        if (serviceRoleKey && supabaseUrl) {
-          await fetch(`${supabaseUrl}/functions/v1/discover-links-metadata-collector`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${serviceRoleKey}`,
-              apikey: serviceRoleKey,
-            },
-            body: JSON.stringify({ mode: "refresh_link_codes", linkCodes: allLinkCodes }),
-          });
-        }
-      } catch (e) {
-        console.log(`[tick] metadata enqueue warning: ${e instanceof Error ? e.message : e}`);
-      }
-    }
-
     // Enqueue Links Service metadata refresh for anything that appeared in this tick (islands + collections).
-    // This is best-effort and should never fail the tick.
+    // Best-effort; never fails the tick.
     try {
       const linkCodes = Array.from(new Set(rowsForDb.map((r) => r.link_code))).slice(0, 5000);
       if (linkCodes.length) {
         const { error } = await supabase.functions.invoke("discover-links-metadata-collector", {
-          body: { mode: "refresh_link_codes", linkCodes },
+          body: { mode: "refresh_link_codes", linkCodes, dueWithinMinutes: 360 },
         });
         if (error) console.log(`[tick] metadata enqueue warning: ${error.message}`);
       }
@@ -666,7 +644,20 @@ serve(async (req) => {
 
       const { data, error } = await supabase.rpc("discovery_exposure_run_maintenance", args);
       if (error) return json({ success: false, error: error.message }, 500);
-      return json({ success: true, maintenance: data });
+
+      // V1 cleanup piggyback: link metadata events retention (best-effort)
+      let linkMetaCleanup: any = null;
+      try {
+        const { data: cData, error: cErr } = await supabase.rpc("cleanup_discover_link_metadata_events", {
+          p_days: 90,
+          p_delete_batch: deleteBatch != null && isFinite(deleteBatch) ? deleteBatch : undefined,
+        });
+        if (!cErr) linkMetaCleanup = cData;
+      } catch (_e) {
+        // ignore
+      }
+
+      return json({ success: true, maintenance: data, linkMetaCleanup });
     }
 
     if (mode === "intel_refresh") {
@@ -676,6 +667,24 @@ serve(async (req) => {
 
       const { data, error } = await supabase.rpc("compute_discovery_public_intel", args);
       if (error) return json({ success: false, error: error.message }, 500);
+
+      // Best-effort: bump metadata for current Tier1 items to keep thumbs/titles fresh.
+      try {
+        const { data: rows, error: rErr } = await supabase
+          .from("discovery_public_premium_now")
+          .select("link_code")
+          .order("rank", { ascending: true })
+          .limit(500);
+        if (!rErr && rows?.length) {
+          const codes = Array.from(new Set(rows.map((r: any) => String(r.link_code)).filter(Boolean)));
+          if (codes.length) {
+            await supabase.rpc("enqueue_discover_link_metadata", { p_link_codes: codes, p_due_within_minutes: 60 });
+          }
+        }
+      } catch (_e) {
+        // ignore
+      }
+
       return json({ success: true, mode, intel: data });
     }
 
@@ -868,6 +877,13 @@ serve(async (req) => {
         target: { id: claim.id, region: claim.region, surface_name: claim.surface_name },
         ...result,
       });
+    }
+
+    // Piggyback: compute system alerts once per orchestrate invocation (best-effort).
+    try {
+      await supabase.rpc("compute_system_alerts", {});
+    } catch (_e) {
+      // ignore
     }
 
     return json({

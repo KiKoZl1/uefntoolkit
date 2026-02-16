@@ -37,16 +37,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Enqueue via RPC (handles deduplication internally)
-    const { data: enqueued, error: rpcError } = await supabase.rpc(
+    // Enqueue via RPC (bump-controlled; returns jsonb)
+    const { data: enq, error: rpcError } = await supabase.rpc(
       "enqueue_discover_link_metadata",
-      { p_link_codes: codes }
+      { p_link_codes: codes, p_due_within_minutes: 0 }
     );
 
     if (rpcError) throw rpcError;
 
     return new Response(
-      JSON.stringify({ success: true, submitted: codes.length, enqueued: enqueued ?? 0 }),
+      JSON.stringify({ success: true, submitted: codes.length, enqueued: enq ?? null }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

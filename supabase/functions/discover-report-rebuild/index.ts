@@ -20,7 +20,7 @@ function mustEnv(key: string): string {
   return v;
 }
 
-async function requireAdminOrEditor(req: Request, supabase: any) {
+async function requireAdminOrEditor(req: Request, supabase: any): Promise<string> {
   const auth = req.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (!token) throw new Error("forbidden");
@@ -36,6 +36,7 @@ async function requireAdminOrEditor(req: Request, supabase: any) {
     .in("role", ["admin", "editor"])
     .limit(1);
   if (rErr || !roles || roles.length === 0) throw new Error("forbidden");
+  return userId;
 }
 
 function toDate(d: string | Date): string {
@@ -56,12 +57,114 @@ function asRankingItems(rows: any[], valueKey: string, opts: { nameKey?: string;
   }));
 }
 
+async function buildEvidence(args: {
+  supabase: any;
+  reportId: string;
+  weeklyReportId: string | null;
+  weekStartDate: string;
+  weekEndDate: string;
+  baselineAvailable: boolean;
+}) {
+  const { supabase, reportId, weeklyReportId, weekStartDate, weekEndDate, baselineAvailable } = args;
+
+  const evidence: any = {};
+
+  // Data quality
+  let metaCov: any = null;
+  try {
+    const { data, error } = await supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId });
+    if (!error) metaCov = data;
+  } catch (_e) {
+    // ignore
+  }
+
+  let exposureCov: any = null;
+  if (weeklyReportId) {
+    try {
+      const { data, error } = await supabase.rpc("report_exposure_coverage", { p_weekly_report_id: weeklyReportId });
+      if (!error) exposureCov = data;
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  let lowPerfHist: any = null;
+  try {
+    const { data, error } = await supabase.rpc("report_low_perf_histogram", { p_report_id: reportId });
+    if (!error) lowPerfHist = data;
+  } catch (_e) {
+    // ignore
+  }
+
+  evidence.dataQuality = {
+    baselineAvailable,
+    metadataCoverage: metaCov,
+    exposureCoverage: exposureCov,
+    lowPerformanceHistogram: lowPerfHist,
+  };
+
+  // New islands / updates (cheap helper RPCs)
+  try {
+    const { data: newRows } = await supabase.rpc("report_new_islands_by_launch", {
+      p_report_id: reportId,
+      p_week_start: weekStartDate,
+      p_week_end: weekEndDate,
+      p_limit: 20,
+    });
+    evidence.newIslands = {
+      topByPlays: asRankingItems(newRows || [], "week_plays"),
+      topByPlayers: asRankingItems(newRows || [], "week_unique"),
+    };
+  } catch (_e) {
+    // ignore
+  }
+
+  try {
+    const { data: updRows } = await supabase.rpc("report_most_updated_islands", {
+      p_report_id: reportId,
+      p_week_start: weekStartDate,
+      p_week_end: weekEndDate,
+      p_limit: 20,
+    });
+    evidence.updates = { mostUpdated: asRankingItems(updRows || [], "week_plays") };
+  } catch (_e) {
+    // ignore
+  }
+
+  // Exposure evidence (rollup-based)
+  if (weeklyReportId) {
+    evidence.exposure = {};
+    try {
+      const { data: topPanels } = await supabase.rpc("discovery_exposure_top_panels", {
+        p_date_from: weekStartDate,
+        p_date_to: weekEndDate,
+        p_limit: 20,
+      });
+      evidence.exposure.topPanelsByMinutes = topPanels || [];
+    } catch (_e) {
+      // ignore
+    }
+    try {
+      const { data: breadth } = await supabase.rpc("discovery_exposure_breadth_top", {
+        p_date_from: weekStartDate,
+        p_date_to: weekEndDate,
+        p_limit: 20,
+      });
+      evidence.exposure.breadthTop = breadth || [];
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  return evidence;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const supabase = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_SERVICE_ROLE_KEY"));
-    await requireAdminOrEditor(req, supabase);
+    const userId = await requireAdminOrEditor(req, supabase);
 
     let body: any = {};
     try {
@@ -215,12 +318,50 @@ serve(async (req) => {
     if (weeklyReportId) {
       const { data: wrExisting, error: wErr } = await supabase
         .from("weekly_reports")
-        .select("id,rankings_json")
+        .select("id,rankings_json,rebuild_count")
         .eq("id", weeklyReportId)
         .single();
       if (wErr) throw new Error(wErr.message);
       const mergedRankings = { ...(wrExisting.rankings_json || {}), ...patchRankings };
-      await supabase.from("weekly_reports").update({ kpis_json: patchKpis, rankings_json: mergedRankings }).eq("id", weeklyReportId);
+
+      const evidence = await buildEvidence({
+        supabase,
+        reportId,
+        weeklyReportId,
+        weekStartDate,
+        weekEndDate,
+        baselineAvailable,
+      });
+      (mergedRankings as any).evidence = evidence;
+
+      await supabase
+        .from("weekly_reports")
+        .update({
+          kpis_json: patchKpis,
+          rankings_json: mergedRankings,
+          rebuild_count: Number((wrExisting as any).rebuild_count || 0) + 1,
+          last_rebuilt_at: new Date().toISOString(),
+        })
+        .eq("id", weeklyReportId);
+
+      // Audit rebuild run (best-effort)
+      try {
+        await supabase.from("discover_report_rebuild_runs").insert({
+          weekly_report_id: weeklyReportId,
+          report_id: reportId,
+          user_id: userId,
+          ts_start: new Date().toISOString(),
+          ts_end: new Date().toISOString(),
+          ok: true,
+          summary_json: {
+            baselineAvailable,
+            metadataCoverage: patchKpis.metadataCoverage,
+            newPublishedCount: patchKpis.newMapsThisWeekPublished,
+          },
+        });
+      } catch (_e) {
+        // ignore
+      }
     }
 
     if (reinjectExposure && weeklyReportId) {

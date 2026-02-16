@@ -29,14 +29,16 @@ serve(async (req) => {
     const kpis = report.platform_kpis;
     const rankings = report.computed_rankings;
 
-    // Optional: Discovery Exposure enrichment (injected into weekly_reports.rankings_json.discoveryExposure)
+    // Optional: Discovery Exposure + evidence packs (injected into weekly_reports.rankings_json.*)
     const { data: weeklyRow } = await supabase
       .from("weekly_reports")
       .select("rankings_json,date_from,date_to")
       .eq("discover_report_id", reportId)
       .maybeSingle();
 
-    const exposure = (weeklyRow as any)?.rankings_json?.discoveryExposure || null;
+    const weeklyRankingsJson = (weeklyRow as any)?.rankings_json || null;
+    const evidence = weeklyRankingsJson?.evidence || null;
+    const exposure = weeklyRankingsJson?.discoveryExposure || null;
     const exposureSummary = (() => {
       if (!exposure) return null;
       const topByPanel = Array.isArray(exposure.topByPanel) ? exposure.topByPanel : [];
@@ -92,8 +94,17 @@ serve(async (req) => {
       };
     })();
 
-    // Build a rich data summary for the AI
-    const rankingsSummary = JSON.stringify(rankings, null, 0);
+    // Prefer evidence packs (materialized, bounded) over dumping full rankings JSON.
+    const evidenceSummary = evidence ? JSON.stringify(evidence, null, 0) : null;
+    const rankingsSummary = JSON.stringify({
+      baselineAvailable: Boolean((kpis as any)?.baselineAvailable),
+      topNewIslandsByPlaysPublished: (rankings as any)?.topNewIslandsByPlaysPublished?.slice?.(0, 10) || [],
+      topNewIslandsByPlayersPublished: (rankings as any)?.topNewIslandsByPlayersPublished?.slice?.(0, 10) || [],
+      mostUpdatedIslandsThisWeek: (rankings as any)?.mostUpdatedIslandsThisWeek?.slice?.(0, 20) || [],
+      deadIslandsByUniqueDrop: (rankings as any)?.deadIslandsByUniqueDrop?.slice?.(0, 10) || [],
+      topRisers: (rankings as any)?.topRisers?.slice?.(0, 10) || [],
+      topDecliners: (rankings as any)?.topDecliners?.slice?.(0, 10) || [],
+    }, null, 0);
     const baselineAvailable = Boolean((kpis as any)?.baselineAvailable) || kpis.wowTotalPlays != null;
 
     // WoW context
@@ -118,6 +129,12 @@ serve(async (req) => {
 - Revived Islands: ${JSON.stringify(rankings.revivedIslands?.slice(0, 5) || [])}
 - Dead Islands: ${JSON.stringify(rankings.deadIslands?.slice(0, 5) || [])}`;
 
+    const lifecycleBlock = baselineAvailable
+      ? lifecycleContext
+      : `
+ ## Island Lifecycle
+ - Baseline not available yet for WoW/lifecycle movers (N/A on the first report).`;
+
     const prompt = `You are a senior Fortnite Discovery ecosystem analyst writing a comprehensive weekly trends report (Week ${report.week_number}, ${report.year}). You are writing for island creators and game developers who want actionable insights.
 
 ## Data Available
@@ -132,10 +149,13 @@ serve(async (req) => {
 - Avg D1 Retention: ${((kpis.avgRetentionD1 || 0) * 100).toFixed(1)}%, Avg D7: ${((kpis.avgRetentionD7 || 0) * 100).toFixed(1)}%
 - Fav-to-Play: ${((kpis.favToPlayRatio || 0) * 100).toFixed(2)}%, Rec-to-Play: ${((kpis.recToPlayRatio || 0) * 100).toFixed(2)}%
 ${wowContext}
-${lifecycleContext}
+${lifecycleBlock}
 
 ## Rankings & Trends Data
 ${rankingsSummary}
+
+## Evidence Packs (Preferred, materialized)
+${evidenceSummary || "Not available yet."}
 
 ## Discovery Exposure Data (Panels/Timeline)
 ${exposureSummary ? JSON.stringify(exposureSummary, null, 0) : "Not available for this week (collector not running or insufficient data yet)."}

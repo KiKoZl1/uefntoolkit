@@ -121,6 +121,14 @@ interface CronJob {
   name: string; schedule: string; active: boolean;
 }
 
+interface SystemAlert {
+  alert_key: string;
+  severity: "ok" | "warn" | "error";
+  message: string;
+  details: any;
+  updated_at: string;
+}
+
 interface GenerationState {
   phase: "idle" | "catalog" | "metrics" | "finalize" | "ai" | "done";
   reportId: string | null; catalogDiscovered: number; queueTotal: number;
@@ -158,6 +166,9 @@ export default function AdminOverview() {
 
   // Crons
   const [crons, setCrons] = useState<CronJob[]>([]);
+
+  // System alerts (materialized in DB by orchestrator)
+  const [alerts, setAlerts] = useState<SystemAlert[]>([]);
 
   // Weekly pipeline (preserved)
   const [reports, setReports] = useState<any[]>([]);
@@ -277,8 +288,10 @@ export default function AdminOverview() {
       const res = await supabase.functions.invoke("discover-enqueue-gap", { body: {} });
       if (res.error) throw new Error(res.error.message);
       const { enqueued, submitted } = res.data || {};
-      toast({ title: "Enfileiramento concluído", description: `${enqueued} novas ilhas enfileiradas de ${submitted} submetidas.` });
-      addLog(`Enfileirar Top 5K: ${enqueued} novas de ${submitted}`);
+      const inserted = typeof enqueued === "number" ? enqueued : Number(enqueued?.inserted || 0);
+      const updated = typeof enqueued === "object" && enqueued ? Number(enqueued.updated || 0) : 0;
+      toast({ title: "Enfileiramento concluído", description: `${inserted} novas enfileiradas (${updated} bump) de ${submitted} submetidas.` });
+      addLog(`Enfileirar Top 5K: ${inserted} novas (${updated} bump) de ${submitted}`);
       await fetchMeta();
     } catch (e: any) {
       toast({ title: "Erro ao enfileirar", description: e.message, variant: "destructive" });
@@ -319,6 +332,15 @@ export default function AdminOverview() {
     setCrons(knownCrons);
   }, []);
 
+  const fetchAlerts = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("system_alerts_current")
+      .select("alert_key,severity,message,details,updated_at")
+      .order("alert_key", { ascending: true });
+    if (error) return;
+    setAlerts((data || []) as any);
+  }, []);
+
   const fetchReports = useCallback(async () => {
     const { data } = await supabase.from("discover_reports").select("*").order("created_at", { ascending: false }).limit(5);
     if (data) setReports(data);
@@ -328,13 +350,13 @@ export default function AdminOverview() {
 
   useEffect(() => {
     const tick = async () => {
-      await Promise.all([fetchCensus(), fetchMeta(), fetchExposure(), fetchCrons(), fetchReports()]);
+      await Promise.all([fetchCensus(), fetchMeta(), fetchExposure(), fetchCrons(), fetchReports(), fetchAlerts()]);
       setLastRefresh(timeNow());
     };
     tick();
     const id = setInterval(tick, 10_000);
     return () => clearInterval(id);
-  }, [fetchCensus, fetchMeta, fetchExposure, fetchCrons, fetchReports]);
+  }, [fetchCensus, fetchMeta, fetchExposure, fetchCrons, fetchReports, fetchAlerts]);
 
   // ─── Weekly pipeline (preserved logic) ────────────────────
 
@@ -434,6 +456,10 @@ export default function AdminOverview() {
   const metaGap = (census?.totalIslands || 0) - (meta?.total || 0);
   const metaEta = metaThroughput && metaThroughput > 0 && meta ? Math.ceil((meta.total - meta.withTitle) / metaThroughput) : null;
 
+  const alertBad = alerts.filter(a => a.severity !== "ok");
+  const alertStatus: HealthStatus =
+    alertBad.length === 0 ? "ok" : alertBad.some(a => a.severity === "error") ? "error" : "warn";
+
   const phaseLabel: Record<string, string> = {
     idle: "", catalog: "Catalogando", metrics: "Coletando metricas",
     finalize: "Finalizando rankings", ai: "Gerando IA", done: "Concluido",
@@ -465,10 +491,35 @@ export default function AdminOverview() {
             <div className="flex items-center gap-1.5"><HealthDot status={exposureHealth} label={`${exposure?.ticksFailed || 0} falhas 24h`} /><span className="text-muted-foreground">Exposure</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={metaHealth} label={`${metaPct.toFixed(1)}% preenchido`} /><span className="text-muted-foreground">Metadata</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={reportHealth} label={generating ? "Em andamento" : "Idle"} /><span className="text-muted-foreground">Report</span></div>
+            <div className="flex items-center gap-1.5"><HealthDot status={alertStatus} label={`${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status="ok" label="7/7 ativos" /><span className="text-muted-foreground">Crons</span></div>
           </div>
         </CardContent>
       </Card>
+
+      {alertBad.length > 0 && (
+        <Card className="border-destructive/30">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" /> Alertas Ativos
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 pb-3 text-xs space-y-2">
+            {alertBad.slice(0, 6).map((a) => (
+              <div key={a.alert_key} className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <span className={`mt-0.5 inline-block h-2 w-2 rounded-full ${a.severity === "error" ? "bg-red-500" : "bg-yellow-500"}`} />
+                  <div>
+                    <div className="font-medium">{a.message}</div>
+                    <div className="text-[11px] text-muted-foreground">{a.alert_key}</div>
+                  </div>
+                </div>
+                <div className="text-[11px] text-muted-foreground whitespace-nowrap">{new Date(a.updated_at).toLocaleTimeString("pt-BR")}</div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Section 2: Database Census ─────────────────────── */}
       <div>

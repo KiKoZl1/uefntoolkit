@@ -192,9 +192,15 @@ serve(async (req) => {
     if (mode === "refresh_link_codes") {
       const linkCodes = Array.isArray(body.linkCodes) ? body.linkCodes.map((x: any) => String(x)) : [];
       if (!linkCodes.length) return json({ success: false, error: "Missing linkCodes[]" }, 400);
-      const { data, error } = await supabase.rpc("enqueue_discover_link_metadata", { p_link_codes: linkCodes });
+      const dueWithinMinutesRaw = body.dueWithinMinutes != null ? Number(body.dueWithinMinutes) : 0;
+      const dueWithinMinutes = isFinite(dueWithinMinutesRaw) ? Math.max(0, Math.min(24 * 60, dueWithinMinutesRaw)) : 0;
+
+      const { data, error } = await supabase.rpc("enqueue_discover_link_metadata", {
+        p_link_codes: linkCodes,
+        p_due_within_minutes: dueWithinMinutes,
+      });
       if (error) return json({ success: false, error: error.message }, 500);
-      return json({ success: true, mode, enqueued: data });
+      return json({ success: true, mode, enqueued: data, submitted: linkCodes.length, dueWithinMinutes });
     }
 
     // mode=orchestrate
@@ -398,11 +404,33 @@ serve(async (req) => {
         last_error: null,
         locked_at: null,
         lock_id: null,
-        raw: p,
+        // V1: do not persist full RAW payload permanently.
+        raw: {},
         updated_at: now.toISOString(),
       });
 
       results.push({ linkCode: code, ok: true, status: 200, correlationId, premiumNow: premiumNow.has(code) });
+
+      // Write-back (islands only) for legacy cache consumers (best-effort).
+      if (linkCodeType === "island") {
+        try {
+          await supabase
+            .from("discover_islands_cache")
+            .update({
+              image_url: f.imageUrl,
+              published_at_epic: f.publishedAtEpic,
+              updated_at_epic: f.updatedAtEpic,
+              moderation_status: f.moderationStatus,
+              link_state: f.linkState,
+              max_players: f.maxPlayers,
+              min_players: f.minPlayers,
+              last_metadata_fetch_at: now.toISOString(),
+            })
+            .eq("island_code", code);
+        } catch (_e) {
+          // ignore
+        }
+      }
 
       // Be nice to the upstream.
       await sleep(25);
@@ -433,4 +461,3 @@ serve(async (req) => {
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
-

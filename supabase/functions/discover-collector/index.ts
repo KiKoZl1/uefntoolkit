@@ -1889,6 +1889,61 @@ serve(async (req) => {
           } else {
             console.log(`[finalize] discovery exposure injected into weekly_reports: ${weekKey}`);
           }
+
+          // Build minimal evidence packs for AI/UI (best-effort, avoids refetching Epic APIs).
+          // This is intentionally cheap and relies on existing helper RPCs + exposure injection.
+          try {
+            const { data: cov } = await supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId });
+            const { data: hist } = await supabase.rpc("report_low_perf_histogram", { p_report_id: reportId });
+            const { data: expCov } = await supabase.rpc("report_exposure_coverage", { p_weekly_report_id: weeklyRow.id });
+            const weekStartDate = new Date(String(reportMeta.week_start)).toISOString().slice(0, 10);
+            const weekEndDate = new Date(String(reportMeta.week_end)).toISOString().slice(0, 10);
+            const { data: topPanels } = await supabase.rpc("discovery_exposure_top_panels", {
+              p_date_from: weekStartDate,
+              p_date_to: weekEndDate,
+              p_limit: 20,
+            });
+            const { data: breadth } = await supabase.rpc("discovery_exposure_breadth_top", {
+              p_date_from: weekStartDate,
+              p_date_to: weekEndDate,
+              p_limit: 20,
+            });
+
+            const evidence = {
+              dataQuality: {
+                baselineAvailable: Boolean(platformKPIs?.baselineAvailable),
+                metadataCoverage: cov || null,
+                exposureCoverage: expCov || null,
+                lowPerformanceHistogram: hist || null,
+              },
+              newIslands: {
+                topByPlays: computedRankings.topNewIslandsByPlaysPublished || computedRankings.topNewIslandsByPlays || [],
+                topByPlayers: computedRankings.topNewIslandsByPlayersPublished || computedRankings.topNewIslandsByPlayers || [],
+              },
+              updates: {
+                mostUpdated: computedRankings.mostUpdatedIslandsThisWeek || [],
+              },
+              exposure: {
+                topPanelsByMinutes: topPanels || [],
+                breadthTop: breadth || [],
+                // Deep details stay inside rankings_json.discoveryExposure
+                hasDiscoveryExposure: true,
+              },
+            };
+
+            const { data: wr2 } = await supabase
+              .from("weekly_reports")
+              .select("id,rankings_json")
+              .eq("id", weeklyRow.id)
+              .single();
+            if (wr2?.rankings_json) {
+              const merged = { ...(wr2.rankings_json || {}) };
+              (merged as any).evidence = evidence;
+              await supabase.from("weekly_reports").update({ rankings_json: merged }).eq("id", weeklyRow.id);
+            }
+          } catch (e) {
+            console.log(`[finalize] evidence packs build warning: ${e instanceof Error ? e.message : String(e)}`);
+          }
         } else if (weeklyErr) {
           console.log(`[finalize] weekly_reports upsert select failed: ${weeklyErr.message}`);
         }
