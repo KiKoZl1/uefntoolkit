@@ -53,6 +53,26 @@ Anthropic:
 scripts\run-ralph-local-runner.bat --mode=qa --dry-run=false --llm-provider=anthropic --llm-model=claude-3-5-sonnet-latest --scope=csv,lookup --max-iterations=3
 ```
 
+## 4.1) Enable site/platform edits (safe modes)
+
+Propose patch files only (no code changes applied):
+
+```powershell
+scripts\run-ralph-local-runner.bat --mode=dev --dry-run=false --llm-provider=openai --llm-model=gpt-4.1-mini --scope=csv,lookup --max-iterations=2 --edit-mode=propose --edit-max-files=2 --edit-allowlist=src/,index.html,docs/
+```
+
+Apply patch automatically (requires non-main branch by default):
+
+```powershell
+git checkout -b feat/ralph-autofix-test
+scripts\run-ralph-local-runner.bat --mode=dev --dry-run=false --llm-provider=openai --llm-model=gpt-4.1-mini --scope=csv,lookup --max-iterations=2 --edit-mode=apply --edit-max-files=2 --edit-allowlist=src/,index.html,docs/ --gate-build=true --gate-test=true
+```
+
+Notes:
+- `--edit-mode=apply` is blocked on `main/master` unless `--require-non-main-branch=false`.
+- Patch files are saved under `scripts/_out/ralph_local_runner/run_*/patches/`.
+- Scope control is enforced by allowlist and max touched files.
+
 ## 5) Optional quality gates
 
 Enable build/test gates:
@@ -62,6 +82,12 @@ scripts\run-ralph-local-runner.bat --mode=dev --dry-run=true --gate-build=true -
 ```
 
 Note: existing project build/test failures will mark run as `failed`.
+
+Lint gate is also available:
+
+```powershell
+scripts\run-ralph-local-runner.bat --mode=dev --dry-run=true --gate-lint=true
+```
 
 ## 6) Useful checks
 
