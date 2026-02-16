@@ -37,6 +37,25 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function requireAdminOrEditor(req: Request, supabase: any) {
+  const auth = req.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  if (!token) throw new Error("forbidden: missing Authorization");
+
+  const { data: u, error: uErr } = await supabase.auth.getUser(token);
+  if (uErr || !u?.user?.id) throw new Error("forbidden: invalid user");
+  const userId = u.user.id;
+
+  const { data: roles, error: rErr } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .in("role", ["admin", "editor"])
+    .limit(1);
+  if (rErr) throw new Error("forbidden: role check failed");
+  if (!roles || roles.length === 0) throw new Error("forbidden: not admin/editor");
+}
+
 async function fetchJson(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
@@ -296,21 +315,29 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Auth guard: require service_role key
+    // Auth guard: require service_role key OR admin for specific modes
     const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    if (authHeader !== `Bearer ${serviceKey}`) {
-      return json({ error: "Forbidden: service_role required" }, 403);
-    }
-
-    const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
-
+    
     let body: any = {};
     try {
       body = await req.json();
     } catch {
       body = {};
     }
+    const mode = String(body.mode || "orchestrate") as Mode;
+    const userAuthModes = ["backfill_recent_collections", "config_status"];
+
+    if (authHeader !== `Bearer ${serviceKey}`) {
+       if (userAuthModes.includes(mode)) {
+          const supabaseUser = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_ANON_KEY"));
+          await requireAdminOrEditor(req, supabaseUser);
+       } else {
+          return json({ error: "Forbidden: service_role required" }, 403);
+       }
+    }
+
+    const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
 
     const mode = String(body.mode || "orchestrate") as Mode;
 
@@ -696,14 +723,22 @@ serve(async (req) => {
     }
 
     // Keep link graph edges current for each processed parent.
-    for (const [parentCode, edges] of edgeMapByParent.entries()) {
+    for (const [_parentCode, edges] of edgeMapByParent.entries()) {
+      if (!edges.length) continue;
       try {
-        await supabase.from("discover_link_edges").delete().eq("parent_link_code", parentCode);
-        if (edges.length) {
-          for (let i = 0; i < edges.length; i += 500) {
-            const chunk = edges.slice(i, i + 500);
-            await supabase.from("discover_link_edges").insert(chunk);
-          }
+        const dbRows = edges.map((e) => ({
+          parent_link_code: e.parent_link_code,
+          child_link_code: e.child_link_code,
+          edge_type: e.edge_type,
+          sort_order: e.sort_order,
+          first_seen_at: e.last_seen_at,
+          last_seen_at: e.last_seen_at,
+        }));
+        for (let i = 0; i < dbRows.length; i += 500) {
+          const chunk = dbRows.slice(i, i + 500);
+          await supabase.from("discover_link_edges").upsert(chunk, {
+            onConflict: "parent_link_code,child_link_code,edge_type",
+          });
         }
       } catch (e) {
         console.warn("discover_link_edges upsert warning:", e instanceof Error ? e.message : String(e));

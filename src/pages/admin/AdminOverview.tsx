@@ -246,6 +246,35 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
         action: "Verifique cron metadata e execute maintenance (cleanup_discover_link_edges).",
       };
     }
+    case "link_edges_coverage": {
+      const parents = Number(d.parents_resolved || 0);
+      const collections = Number(d.collections_total || 0);
+      const edges = Number(d.edges_total || 0);
+      if (alert.severity === "ok") return {
+        title: "Link Edges Coverage",
+        description: `${parents} collections com edges resolvidos de ${collections} total (${edges} edges).`,
+      };
+      return {
+        title: "Cobertura de Link Edges Baixa",
+        description: `Apenas ${parents} de ${collections} collections têm edges resolvidos.`,
+        detail: `O metadata collector precisa processar collections para resolver seus filhos. Verifique se o cron está rodando e considere executar um backfill_recent_collections.`,
+        action: "⚠️ Execute backfill_recent_collections para aquecer a cobertura.",
+      };
+    }
+    case "link_edges_freshness": {
+      const stale = Number(d.stale_60d || 0);
+      const total = Number(d.total || 0);
+      if (alert.severity === "ok") return {
+        title: "Link Edges Freshness",
+        description: `Edges atualizados. ${stale} stale de ${total} total.`,
+      };
+      return {
+        title: "Link Edges Desatualizados",
+        description: `${fmt(stale)} edges não são atualizados há mais de 60 dias (${total} total).`,
+        detail: `Edges stale podem causar dados obsoletos nos rails resolvidos. O cleanup diário removerá edges com mais de 60 dias.`,
+        action: stale > total * 0.5 ? "⚠️ Verifique se o metadata collector está processando collections." : undefined,
+      };
+    }
     default:
       return {
         title: alert.message,

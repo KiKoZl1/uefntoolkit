@@ -54,7 +54,6 @@ serve(async (req) => {
       .select("id,region,surface_name,platform,locale,last_ok_tick_at")
       .eq("region", region)
       .eq("surface_name", surfaceName)
-      .eq("is_active", true)
       .order("last_ok_tick_at", { ascending: false, nullsFirst: false })
       .limit(1);
     if (tErr) throw new Error(tErr.message);

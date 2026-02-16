@@ -196,6 +196,33 @@ export type Database = {
         }
         Relationships: []
       }
+      discover_link_edges: {
+        Row: {
+          child_link_code: string
+          edge_type: string
+          first_seen_at: string
+          last_seen_at: string
+          parent_link_code: string
+          sort_order: number | null
+        }
+        Insert: {
+          child_link_code: string
+          edge_type?: string
+          first_seen_at?: string
+          last_seen_at?: string
+          parent_link_code: string
+          sort_order?: number | null
+        }
+        Update: {
+          child_link_code?: string
+          edge_type?: string
+          first_seen_at?: string
+          last_seen_at?: string
+          parent_link_code?: string
+          sort_order?: number | null
+        }
+        Relationships: []
+      }
       discover_link_metadata: {
         Row: {
           account_id: string | null
@@ -1641,6 +1668,10 @@ export type Database = {
               surface_name: string
             }[]
           }
+      cleanup_discover_link_edges: {
+        Args: { p_days?: number; p_delete_batch?: number }
+        Returns: Json
+      }
       cleanup_discover_link_metadata_events: {
         Args: { p_days?: number; p_delete_batch?: number }
         Returns: Json
@@ -1729,6 +1760,7 @@ export type Database = {
         Returns: Json
       }
       get_link_card: { Args: { p_link_code: string }; Returns: Json }
+      get_link_graph_stats: { Args: never; Returns: Json }
       get_metadata_pipeline_stats: { Args: never; Returns: Json }
       has_role: {
         Args: {
