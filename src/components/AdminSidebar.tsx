@@ -1,21 +1,24 @@
 import { Radar, Activity, FileText, LogOut, ArrowLeft, Eye, Brain } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
+import { useTranslation } from "react-i18next";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-
-const items = [
-  { title: "Command Center", url: "/admin", icon: Activity, end: true },
-  { title: "Reports", url: "/admin/reports", icon: FileText },
-  { title: "Exposure", url: "/admin/exposure", icon: Eye },
-  { title: "Intel", url: "/admin/intel", icon: Brain },
-];
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export function AdminSidebar() {
   const { signOut } = useAuth();
+  const { t } = useTranslation();
+
+  const items = [
+    { title: t("admin.commandCenter"), url: "/admin", icon: Activity, end: true },
+    { title: t("nav.reports"), url: "/admin/reports", icon: FileText },
+    { title: t("admin.exposure"), url: "/admin/exposure", icon: Eye },
+    { title: t("admin.intel"), url: "/admin/intel", icon: Brain },
+  ];
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -31,7 +34,7 @@ export function AdminSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
-            Admin Panel
+            {t("admin.panel")}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -56,13 +59,14 @@ export function AdminSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4 space-y-2">
+        <LanguageSwitcher />
         <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" asChild>
           <NavLink to="/app" className="">
-            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar ao App
+            <ArrowLeft className="h-4 w-4 mr-2" /> {t("common.backToApp")}
           </NavLink>
         </Button>
         <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={signOut}>
-          <LogOut className="h-4 w-4 mr-2" /> Sair
+          <LogOut className="h-4 w-4 mr-2" /> {t("common.signOut")}
         </Button>
       </SidebarFooter>
     </Sidebar>

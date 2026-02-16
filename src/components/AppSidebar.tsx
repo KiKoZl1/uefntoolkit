@@ -1,19 +1,22 @@
 import { Radar, Search, FolderOpen, LogOut, Shield } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
+import { useTranslation } from "react-i18next";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-
-const tools = [
-  { title: "CSV Analytics", url: "/app", icon: FolderOpen, end: true },
-  { title: "Island Lookup", url: "/app/island-lookup", icon: Search },
-];
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export function AppSidebar() {
   const { signOut, isAdmin } = useAuth();
+  const { t } = useTranslation();
+
+  const tools = [
+    { title: t("app.csvAnalytics"), url: "/app", icon: FolderOpen, end: true },
+    { title: "Island Lookup", url: "/app/island-lookup", icon: Search },
+  ];
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -29,7 +32,7 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
-            Ferramentas
+            {t("common.tools")}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -54,10 +57,11 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4 space-y-2">
+        <LanguageSwitcher />
         {isAdmin && (
           <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent" asChild>
             <NavLink to="/admin" className="">
-              <Shield className="h-4 w-4 mr-2" /> Admin
+              <Shield className="h-4 w-4 mr-2" /> {t("common.admin")}
             </NavLink>
           </Button>
         )}
@@ -67,7 +71,7 @@ export function AppSidebar() {
           className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
           onClick={signOut}
         >
-          <LogOut className="h-4 w-4 mr-2" /> Sair
+          <LogOut className="h-4 w-4 mr-2" /> {t("common.signOut")}
         </Button>
       </SidebarFooter>
     </Sidebar>

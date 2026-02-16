@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, FolderOpen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface Project {
   id: string;
@@ -21,6 +22,7 @@ interface Project {
 export default function AppDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -28,11 +30,10 @@ export default function AppDashboard() {
   const [newCode, setNewCode] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
+
   const fetchProjects = async () => {
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
     if (!error && data) setProjects(data);
     setLoading(false);
   };
@@ -43,15 +44,11 @@ export default function AppDashboard() {
     e.preventDefault();
     if (!user) return;
     setCreating(true);
-    const { error } = await supabase.from("projects").insert({
-      name: newName,
-      island_code: newCode || null,
-      user_id: user.id,
-    });
+    const { error } = await supabase.from("projects").insert({ name: newName, island_code: newCode || null, user_id: user.id });
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Projeto criado!" });
+      toast({ title: t("app.projectCreated") });
       setNewName("");
       setNewCode("");
       setDialogOpen(false);
@@ -64,28 +61,28 @@ export default function AppDashboard() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="font-display text-2xl font-bold">Island Analytics</h1>
-          <p className="text-sm text-muted-foreground">Gerencie suas ilhas e relatórios via upload ZIP</p>
+          <h1 className="font-display text-2xl font-bold">{t("app.dashTitle")}</h1>
+          <p className="text-sm text-muted-foreground">{t("app.dashSubtitle")}</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" /> Novo Projeto</Button>
+            <Button><Plus className="h-4 w-4 mr-2" /> {t("app.newProject")}</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Criar Projeto</DialogTitle>
+              <DialogTitle>{t("app.createProject")}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-2">
-                <Label>Nome da Ilha</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Minha Ilha" required />
+                <Label>{t("app.islandName")}</Label>
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("app.islandNamePlaceholder")} required />
               </div>
               <div className="space-y-2">
-                <Label>Código da Ilha (opcional)</Label>
-                <Input value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder="1234-5678-9012" />
+                <Label>{t("app.islandCode")}</Label>
+                <Input value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder={t("app.islandCodePlaceholder")} />
               </div>
               <Button type="submit" className="w-full" disabled={creating}>
-                {creating ? "Criando..." : "Criar Projeto"}
+                {creating ? t("app.creating") : t("app.createProject")}
               </Button>
             </form>
           </DialogContent>
@@ -100,10 +97,10 @@ export default function AppDashboard() {
         <Card className="text-center py-16">
           <CardContent>
             <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="font-display text-lg font-semibold mb-2">Nenhum projeto ainda</h3>
-            <p className="text-sm text-muted-foreground mb-4">Crie seu primeiro projeto para começar a analisar dados.</p>
+            <h3 className="font-display text-lg font-semibold mb-2">{t("app.noProjects")}</h3>
+            <p className="text-sm text-muted-foreground mb-4">{t("app.noProjectsDesc")}</p>
             <Button onClick={() => setDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" /> Criar Primeiro Projeto
+              <Plus className="h-4 w-4 mr-2" /> {t("app.createFirst")}
             </Button>
           </CardContent>
         </Card>
@@ -114,11 +111,11 @@ export default function AppDashboard() {
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
                 <CardHeader>
                   <CardTitle className="font-display text-lg">{p.name}</CardTitle>
-                  <CardDescription>{p.island_code || "Sem código"}</CardDescription>
+                  <CardDescription>{p.island_code || t("app.noCode")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-muted-foreground">
-                    Criado em {new Date(p.created_at).toLocaleDateString("pt-BR")}
+                    {t("app.createdAt")} {new Date(p.created_at).toLocaleDateString(locale)}
                   </p>
                 </CardContent>
               </Card>
