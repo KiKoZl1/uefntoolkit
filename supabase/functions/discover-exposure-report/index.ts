@@ -387,7 +387,13 @@ serve(async (req) => {
       resolvedCollections,
     };
 
-    const existing = (wr.rankings_json || {}) as any;
+    // Re-read rankings_json to get the latest version (rebuild may have updated it after our initial read)
+    const { data: wrFresh } = await supabase
+      .from("weekly_reports")
+      .select("rankings_json")
+      .eq("id", weeklyReportId)
+      .single();
+    const existing = ((wrFresh?.rankings_json || wr.rankings_json) || {}) as any;
     const mergedRankings = { ...existing, discoveryExposure };
 
     const { error: updErr } = await supabase
