@@ -44,158 +44,6 @@ function toDate(d: string | Date): string {
   return x.toISOString().slice(0, 10);
 }
 
-function asRankingItems(rows: any[], valueKey: string, opts: { nameKey?: string; titleKey?: string } = {}) {
-  const nameKey = opts.nameKey || "title";
-  const titleKey = opts.titleKey || "title";
-  return (rows || []).map((r: any) => ({
-    code: r.island_code || r.code,
-    title: r[titleKey] || r.title || r.island_code,
-    creator: r.creator_code || r.creator || null,
-    category: r.category || "Fortnite UGC",
-    value: Number(r[valueKey] ?? r.value ?? 0),
-    name: r[nameKey] || r.title || r.island_code,
-  }));
-}
-
-async function buildEvidence(args: {
-  supabase: any;
-  reportId: string;
-  weeklyReportId: string | null;
-  weekStartDate: string;
-  weekEndDate: string;
-  baselineAvailable: boolean;
-}) {
-  const { supabase, reportId, weeklyReportId, weekStartDate, weekEndDate, baselineAvailable } = args;
-
-  const evidence: any = {};
-
-  // Data quality
-  let metaCov: any = null;
-  try {
-    const { data, error } = await supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId });
-    if (!error) metaCov = data;
-  } catch (_e) {
-    // ignore
-  }
-
-  let exposureCov: any = null;
-  if (weeklyReportId) {
-    try {
-      const { data, error } = await supabase.rpc("report_exposure_coverage", { p_weekly_report_id: weeklyReportId });
-      if (!error) exposureCov = data;
-    } catch (_e) {
-      // ignore
-    }
-  }
-
-  let lowPerfHist: any = null;
-  try {
-    const { data, error } = await supabase.rpc("report_low_perf_histogram", { p_report_id: reportId });
-    if (!error) lowPerfHist = data;
-  } catch (_e) {
-    // ignore
-  }
-
-  evidence.dataQuality = {
-    baselineAvailable,
-    metadataCoverage: metaCov,
-    exposureCoverage: exposureCov,
-    lowPerformanceHistogram: lowPerfHist,
-  };
-
-  // New islands / updates (cheap helper RPCs)
-  try {
-    const { data: newRows } = await supabase.rpc("report_new_islands_by_launch", {
-      p_report_id: reportId,
-      p_week_start: weekStartDate,
-      p_week_end: weekEndDate,
-      p_limit: 20,
-    });
-    evidence.newIslands = {
-      topByPlays: asRankingItems(newRows || [], "week_plays"),
-      topByPlayers: asRankingItems(newRows || [], "week_unique"),
-    };
-  } catch (_e) {
-    // ignore
-  }
-
-  try {
-    const { data: updRows } = await supabase.rpc("report_most_updated_islands", {
-      p_report_id: reportId,
-      p_week_start: weekStartDate,
-      p_week_end: weekEndDate,
-      p_limit: 20,
-    });
-    evidence.updates = { mostUpdated: asRankingItems(updRows || [], "week_plays") };
-  } catch (_e) {
-    // ignore
-  }
-
-  // Exposure evidence (rollup-based)
-  if (weeklyReportId) {
-    evidence.exposure = {};
-    try {
-      const { data: topPanels } = await supabase.rpc("discovery_exposure_top_panels", {
-        p_date_from: weekStartDate,
-        p_date_to: weekEndDate,
-        p_limit: 20,
-      });
-      evidence.exposure.topPanelsByMinutes = topPanels || [];
-    } catch (_e) {
-      // ignore
-    }
-    try {
-      const { data: breadth } = await supabase.rpc("discovery_exposure_breadth_top", {
-        p_date_from: weekStartDate,
-        p_date_to: weekEndDate,
-        p_limit: 20,
-      });
-      evidence.exposure.breadthTop = breadth || [];
-    } catch (_e) {
-      // ignore
-    }
-
-    // How much of collection containers can be expanded into child links (Homebar/reference/ref_panel).
-    try {
-      const rangeStart = `${weekStartDate}T00:00:00.000Z`;
-      const rangeEnd = `${weekEndDate}T00:00:00.000Z`;
-      const { data: collSegs, error: collErr } = await supabase
-        .from("discovery_exposure_rank_segments")
-        .select("link_code")
-        .eq("link_code_type", "collection")
-        .lt("start_ts", rangeEnd)
-        .or(`end_ts.is.null,end_ts.gt.${rangeStart}`)
-        .limit(50000);
-      if (!collErr) {
-        const collectionsSeen = Array.from(new Set((collSegs || []).map((r: any) => String(r.link_code))));
-        let resolvedCollections = 0;
-        if (collectionsSeen.length) {
-          const { data: edges, error: eErr } = await supabase
-            .from("discover_link_edges")
-            .select("parent_link_code")
-            .in("parent_link_code", collectionsSeen);
-          if (!eErr) {
-            const withEdges = new Set((edges || []).map((r: any) => String(r.parent_link_code)));
-            resolvedCollections = withEdges.size;
-          }
-        }
-        const coveragePct = collectionsSeen.length > 0
-          ? Number(((resolvedCollections / collectionsSeen.length) * 100).toFixed(1))
-          : null;
-        evidence.exposure.collectionResolution = {
-          collectionsSeen: collectionsSeen.length,
-          resolvedCollections,
-          coveragePct,
-        };
-      }
-    } catch (_e) {
-      // ignore
-    }
-  }
-
-  return evidence;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -204,11 +52,7 @@ serve(async (req) => {
     const userId = await requireAdminOrEditor(req, supabase);
 
     let body: any = {};
-    try {
-      body = await req.json();
-    } catch {
-      body = {};
-    }
+    try { body = await req.json(); } catch { body = {}; }
 
     const weeklyReportId = body.weeklyReportId ? String(body.weeklyReportId) : null;
     const reportIdIn = body.reportId ? String(body.reportId) : null;
@@ -218,6 +62,7 @@ serve(async (req) => {
 
     if (!weeklyReportId && !reportIdIn) return json({ success: false, error: "Missing weeklyReportId or reportId" }, 400);
 
+    // ── Resolve report & weekly report ──
     let reportId = reportIdIn;
     let wrRow: any = null;
     if (weeklyReportId) {
@@ -234,33 +79,29 @@ serve(async (req) => {
 
     const { data: report, error: rErr } = await supabase
       .from("discover_reports")
-      .select("id,week_start,week_end,platform_kpis,computed_rankings,week_number,year")
+      .select("id,week_start,week_end,week_number,year")
       .eq("id", reportId!)
       .single();
     if (rErr || !report) return json({ success: false, error: "discover report not found" }, 404);
 
-    const weekStart = report.week_start;
-    const weekEnd = report.week_end;
-    const weekStartDate = toDate(weekStart);
-    const weekEndDate = toDate(weekEnd);
+    const weekStartDate = toDate(report.week_start);
+    const weekEndDate = toDate(report.week_end);
 
-    const { data: prev, error: pErr } = await supabase
+    // ── Find previous report for WoW baselines ──
+    const { data: prev } = await supabase
       .from("discover_reports")
-      .select("id,week_start,week_end")
+      .select("id")
       .eq("phase", "done")
-      .lt("week_end", weekStart)
+      .lt("week_end", report.week_start)
       .order("week_end", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
     const prevReportId = prev?.id ? String(prev.id) : null;
-    const baselineAvailable = Boolean(prevReportId);
 
-    // Optional best-effort: seed metadata for the top items already referenced by exposure injection.
+    // ── Optional: refresh metadata for top exposure items ──
     if (refreshMetadata && wrRow?.rankings_json?.discoveryExposure?.topByPanel) {
       const topByPanel = Array.isArray(wrRow.rankings_json.discoveryExposure.topByPanel)
-        ? wrRow.rankings_json.discoveryExposure.topByPanel
-        : [];
+        ? wrRow.rankings_json.discoveryExposure.topByPanel : [];
       const codes = Array.from(new Set(topByPanel.map((r: any) => String(r.linkCode)).filter(Boolean))).slice(0, 500);
       if (codes.length) {
         await supabase.functions.invoke("discover-links-metadata-collector", {
@@ -269,117 +110,122 @@ serve(async (req) => {
       }
     }
 
-    const { data: cov, error: covErr } = await supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId });
-    if (covErr) throw new Error(covErr.message);
-    const coverage = cov || {};
-    const reportedIslands = Number(coverage.total || 0);
-    const withTitle = Number(coverage.withTitle || 0);
-    const withImage = Number(coverage.withImageUrl || coverage.withImage || 0);
+    // ══════════════════════════════════════════════════════════
+    // CORE: Call ALL finalize RPCs in parallel (same as collector)
+    // ══════════════════════════════════════════════════════════
+    console.log(`[rebuild] Starting parallel RPCs for report ${reportId}`);
 
-    const { data: newIslandsRows, error: newErr } = await supabase.rpc("report_new_islands_by_launch", {
-      p_report_id: reportId,
-      p_week_start: weekStartDate,
-      p_week_end: weekEndDate,
-      p_limit: 50,
-    });
-    if (newErr) throw new Error(newErr.message);
+    const [
+      kpisRes, rankingsRes, creatorsRes, categoriesRes,
+      distributionsRes, trendingRes, moversRes,
+      newIslandsRes, updatedRes, newCountRes,
+    ] = await Promise.all([
+      supabase.rpc("report_finalize_kpis", { p_report_id: reportId, p_prev_report_id: prevReportId }),
+      supabase.rpc("report_finalize_rankings", { p_report_id: reportId, p_limit: 10 }),
+      supabase.rpc("report_finalize_creators", { p_report_id: reportId, p_limit: 10 }),
+      supabase.rpc("report_finalize_categories", { p_report_id: reportId, p_limit: 15 }),
+      supabase.rpc("report_finalize_distributions", { p_report_id: reportId }),
+      supabase.rpc("report_finalize_trending", { p_report_id: reportId, p_min_islands: 5, p_limit: 20 }),
+      prevReportId
+        ? supabase.rpc("report_finalize_wow_movers", { p_report_id: reportId, p_prev_report_id: prevReportId, p_limit: 10 })
+        : Promise.resolve({ data: { topRisers: [], topDecliners: [] }, error: null }),
+      supabase.rpc("report_new_islands_by_launch", { p_report_id: reportId, p_week_start: weekStartDate, p_week_end: weekEndDate, p_limit: 50 }),
+      supabase.rpc("report_most_updated_islands", { p_report_id: reportId, p_week_start: weekStartDate, p_week_end: weekEndDate, p_limit: 50 }),
+      supabase.rpc("report_new_islands_by_launch_count", { p_report_id: reportId, p_week_start: weekStartDate, p_week_end: weekEndDate }),
+    ]);
 
-    const { data: newIslandsCount, error: newCntErr } = await supabase.rpc("report_new_islands_by_launch_count", {
-      p_report_id: reportId,
-      p_week_start: weekStartDate,
-      p_week_end: weekEndDate,
-    });
-    if (newCntErr) throw new Error(newCntErr.message);
-
-    const { data: updatedRows, error: updErr } = await supabase.rpc("report_most_updated_islands", {
-      p_report_id: reportId,
-      p_week_start: weekStartDate,
-      p_week_end: weekEndDate,
-      p_limit: 50,
-    });
-    if (updErr) throw new Error(updErr.message);
-
-    let deadUniqueRows: any[] = [];
-    if (baselineAvailable) {
-      const { data, error } = await supabase.rpc("report_dead_islands_by_unique_drop", {
-        p_report_id: reportId,
-        p_prev_report_id: prevReportId,
-        p_limit: 50,
-      });
-      if (error) throw new Error(error.message);
-      deadUniqueRows = data || [];
+    // Log RPC errors
+    for (const [name, res] of [
+      ["kpis", kpisRes], ["rankings", rankingsRes], ["creators", creatorsRes],
+      ["categories", categoriesRes], ["distributions", distributionsRes],
+      ["trending", trendingRes], ["movers", moversRes],
+    ] as const) {
+      if ((res as any).error) console.error(`[rebuild] RPC ${name} error:`, (res as any).error.message);
     }
 
-    const oldKpis = (report.platform_kpis || {}) as any;
-    const oldRankings = (report.computed_rankings || {}) as any;
-
-    const patchKpis = {
-      ...oldKpis,
-      baselineAvailable,
-      newMapsThisWeekPublished: Number(newIslandsCount || 0),
-      deadByUniqueDropCount: baselineAvailable ? deadUniqueRows.length : null,
-      metadataCoverage: {
-        reportedIslands,
-        withTitle,
-        withImageUrl: withImage,
-        titlePct: reportedIslands > 0 ? withTitle / reportedIslands : null,
-        imagePct: reportedIslands > 0 ? withImage / reportedIslands : null,
-      },
+    // ── Assemble KPIs ──
+    const platformKPIs = {
+      ...(kpisRes.data || {}),
+      newMapsThisWeekPublished: newCountRes.data != null ? Number(newCountRes.data) : (kpisRes.data?.newMapsThisWeek || 0),
+      baselineAvailable: Boolean(prevReportId),
     };
 
-    const patchRankings = {
-      ...oldRankings,
-      baselineAvailable,
-      topNewIslandsByPlaysPublished: asRankingItems(newIslandsRows as any[], "week_plays"),
-      topNewIslandsByPlayersPublished: asRankingItems(newIslandsRows as any[], "week_unique"),
-      mostUpdatedIslandsThisWeek: asRankingItems(updatedRows as any[], "week_plays"),
-      deadIslandsByUniqueDrop: (deadUniqueRows || []).map((r: any) => ({
-        code: r.island_code,
-        title: r.title || r.island_code,
-        creator: r.creator_code || null,
-        category: "Fortnite UGC",
-        value: Number(r.delta_unique != null ? -Number(r.delta_unique) : 0),
-        name: r.title || r.island_code,
-        prev: Number(r.prev_week_unique || 0),
-        cur: Number(r.week_unique || 0),
-        delta: Number(r.delta_unique || 0),
-      })),
+    // ── Assemble Rankings ──
+    const topNewItems = (newIslandsRes.data || []).map((r: any) => ({
+      code: r.island_code, name: r.title || r.island_code, title: r.title,
+      creator: r.creator_code, category: r.category || "Fortnite UGC", value: r.week_plays || 0,
+    }));
+
+    const mostUpdatedItems = (updatedRes.data || []).map((r: any) => ({
+      code: r.island_code, name: r.title || r.island_code, title: r.title,
+      creator: r.creator_code, category: r.category || "Fortnite UGC", value: r.week_plays || 0,
+    }));
+
+    const computedRankings: any = {
+      ...(rankingsRes.data || {}),
+      ...(creatorsRes.data || {}),
+      ...(categoriesRes.data || {}),
+      ...(distributionsRes.data || {}),
+      ...(trendingRes.data || {}),
+      ...(moversRes.data || {}),
+      topNewIslandsByPlays: topNewItems,
+      topNewIslandsByPlaysPublished: topNewItems,
+      topNewIslandsByCCU: [...topNewItems].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 10),
+      mostUpdatedIslandsThisWeek: mostUpdatedItems,
+      topAvgPeakCCU: (rankingsRes.data || {} as any).topPeakCCU || [],
+      topAvgPeakCCU_UGC: (rankingsRes.data || {} as any).topPeakCCU_UGC || [],
+      baselineAvailable: Boolean(prevReportId),
     };
 
-    await supabase
-      .from("discover_reports")
-      .update({ platform_kpis: patchKpis, computed_rankings: patchRankings })
-      .eq("id", reportId);
+    // ── Save to discover_reports ──
+    await supabase.from("discover_reports").update({
+      platform_kpis: platformKPIs,
+      computed_rankings: computedRankings,
+    }).eq("id", reportId!);
 
-    // Update weekly_reports CMS entry too (if we have it)
+    console.log(`[rebuild] RPCs done. KPIs: totalIslands=${platformKPIs.totalIslands}, active=${platformKPIs.activeIslands}, new=${platformKPIs.newMapsThisWeekPublished}`);
+
+    // ── Update weekly_reports CMS entry ──
     if (weeklyReportId) {
-      const { data: wrExisting, error: wErr } = await supabase
+      // Build evidence packs in parallel
+      const [covRes, histRes, expCovRes, topPanelsRes, breadthRes] = await Promise.all([
+        supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId }),
+        supabase.rpc("report_low_perf_histogram", { p_report_id: reportId }),
+        supabase.rpc("report_exposure_coverage", { p_weekly_report_id: weeklyReportId }),
+        supabase.rpc("discovery_exposure_top_panels", { p_date_from: weekStartDate, p_date_to: weekEndDate, p_limit: 20 }),
+        supabase.rpc("discovery_exposure_breadth_top", { p_date_from: weekStartDate, p_date_to: weekEndDate, p_limit: 20 }),
+      ]);
+
+      const evidence = {
+        dataQuality: {
+          baselineAvailable: Boolean(prevReportId),
+          metadataCoverage: covRes.data || null,
+          exposureCoverage: expCovRes.data || null,
+          lowPerformanceHistogram: histRes.data || null,
+        },
+        newIslands: { topByPlays: topNewItems.slice(0, 20), topByPlayers: topNewItems.slice(0, 20) },
+        updates: { mostUpdated: mostUpdatedItems.slice(0, 20) },
+        exposure: {
+          topPanelsByMinutes: topPanelsRes.data || [],
+          breadthTop: breadthRes.data || [],
+          hasDiscoveryExposure: true,
+        },
+      };
+
+      computedRankings.evidence = evidence;
+
+      const { data: wrExisting } = await supabase
         .from("weekly_reports")
-        .select("id,rankings_json,rebuild_count")
+        .select("id,rebuild_count")
         .eq("id", weeklyReportId)
         .single();
-      if (wErr) throw new Error(wErr.message);
-      const mergedRankings = { ...(wrExisting.rankings_json || {}), ...patchRankings };
 
-      const evidence = await buildEvidence({
-        supabase,
-        reportId: reportId!,
-        weeklyReportId,
-        weekStartDate,
-        weekEndDate,
-        baselineAvailable,
-      });
-      (mergedRankings as any).evidence = evidence;
-
-      await supabase
-        .from("weekly_reports")
-        .update({
-          kpis_json: patchKpis,
-          rankings_json: mergedRankings,
-          rebuild_count: Number((wrExisting as any).rebuild_count || 0) + 1,
-          last_rebuilt_at: new Date().toISOString(),
-        })
-        .eq("id", weeklyReportId);
+      await supabase.from("weekly_reports").update({
+        kpis_json: platformKPIs,
+        rankings_json: computedRankings,
+        rebuild_count: Number(wrExisting?.rebuild_count || 0) + 1,
+        last_rebuilt_at: new Date().toISOString(),
+      }).eq("id", weeklyReportId);
 
       // Audit rebuild run (best-effort)
       try {
@@ -391,43 +237,51 @@ serve(async (req) => {
           ts_end: new Date().toISOString(),
           ok: true,
           summary_json: {
-            baselineAvailable,
-            metadataCoverage: patchKpis.metadataCoverage,
-            newPublishedCount: patchKpis.newMapsThisWeekPublished,
+            baselineAvailable: Boolean(prevReportId),
+            totalIslands: platformKPIs.totalIslands,
+            activeIslands: platformKPIs.activeIslands,
+            newPublishedCount: platformKPIs.newMapsThisWeekPublished,
+            trendingTopics: (trendingRes.data?.trendsByPlays || []).length,
           },
         });
-      } catch (_e) {
-        // ignore
-      }
+      } catch (_e) { /* ignore */ }
     }
 
+    // ── Reinject exposure ──
     if (reinjectExposure && weeklyReportId) {
+      console.log(`[rebuild] Reinjecting exposure for weekly ${weeklyReportId}`);
       await supabase.functions.invoke("discover-exposure-report", { body: { weeklyReportId } });
     }
 
+    // ── Run AI narratives ──
     if (runAi) {
+      console.log(`[rebuild] Running AI for report ${reportId}`);
       await supabase.functions.invoke("discover-report-ai", { body: { reportId } });
     }
 
-    // Ensure status is set to completed after successful rebuild
-    await supabase
-      .from("discover_reports")
-      .update({ status: "completed", phase: "done", progress_pct: 100 })
-      .eq("id", reportId!);
+    // ── Mark as completed ──
+    await supabase.from("discover_reports").update({
+      status: "completed",
+      phase: "done",
+      progress_pct: 100,
+    }).eq("id", reportId!);
+
+    console.log(`[rebuild] Complete.`);
 
     return json({
       success: true,
       reportId,
       weeklyReportId,
-      baselineAvailable,
-      metadataCoverage: patchKpis.metadataCoverage,
-      newPublishedCount: patchKpis.newMapsThisWeekPublished,
-      updatedCount: Array.isArray(updatedRows) ? updatedRows.length : 0,
-      deadUniqueCount: baselineAvailable ? deadUniqueRows.length : null,
+      baselineAvailable: Boolean(prevReportId),
+      totalIslands: platformKPIs.totalIslands,
+      activeIslands: platformKPIs.activeIslands,
+      newPublishedCount: platformKPIs.newMapsThisWeekPublished,
+      trendingTopics: (trendingRes.data?.trendsByPlays || []).length,
       ranAi: runAi,
       reinjectedExposure: reinjectExposure,
     });
   } catch (e) {
+    console.error("[rebuild] Fatal error:", e);
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
