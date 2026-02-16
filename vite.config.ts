@@ -20,6 +20,6 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom", "react/jsx-runtime"],
   },
   optimizeDeps: {
-    include: ["react", "react-dom", "@tanstack/react-query"],
+    include: ["react", "react-dom", "react/jsx-runtime", "@tanstack/react-query", "i18next", "react-i18next", "i18next-browser-languagedetector"],
   },
 }));
