@@ -11,6 +11,25 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    // Auth guard: require authenticated user
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+    const sbUrl = Deno.env.get("SUPABASE_URL")!;
+    const sbAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const sb = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await sb.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { islandCode } = await req.json();
     if (!islandCode) {
       return new Response(JSON.stringify({ error: "islandCode is required" }), {
@@ -18,7 +37,13 @@ serve(async (req) => {
       });
     }
 
-    const code = islandCode.trim();
+    const code = String(islandCode).trim().substring(0, 30);
+    // Validate island code format
+    if (!/^\d{4}-\d{4}-\d{4}$/.test(code) && !/^[a-zA-Z0-9_-]+$/.test(code)) {
+      return new Response(JSON.stringify({ error: "Invalid island code format" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Fetch metadata
     const metaRes = await fetch(`${EPIC_API}/islands/${code}`);

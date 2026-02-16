@@ -570,7 +570,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const supabase = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_SERVICE_ROLE_KEY"));
+    // Auth guard: require service_role key for all modes except those with their own user-level auth
+    const authHeader = req.headers.get("Authorization") || "";
+    const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+    const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
 
     let body: any = {};
     try {
@@ -580,6 +584,14 @@ serve(async (req) => {
     }
 
     const mode: Mode = (body.mode || "orchestrate") as Mode;
+
+    // Modes that use user-level auth (requireAdminOrEditor) handle their own auth
+    const userAuthModes: Mode[] = ["set_paused", "bootstrap_device_auth"];
+    if (!userAuthModes.includes(mode)) {
+      if (authHeader !== `Bearer ${serviceKey}`) {
+        return json({ error: "Forbidden: service_role required" }, 403);
+      }
+    }
 
     if (mode === "config_status") {
       return json({
