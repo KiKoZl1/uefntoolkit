@@ -117,6 +117,18 @@ interface ExposureData {
   targetsTotal: number; targetsOk: number; ticks24h: number; ticksOk: number; ticksFailed: number;
 }
 
+interface LinkGraphData {
+  edgesTotal: number;
+  parentsTotal: number;
+  childrenTotal: number;
+  collectionsSeen24h: number;
+  collectionsResolved24h: number;
+  resolution24hPct: number | null;
+  edgeAgeSeconds: number | null;
+  staleEdges60d: number;
+  collectionsDueNow: number;
+}
+
 interface CronJob {
   name: string; schedule: string; active: boolean;
 }
@@ -200,6 +212,40 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
         action: ageSec != null && ageSec > 3600 ? "⚠️ Verifique os logs do cron 'intel-refresh-5min'." : undefined,
       };
     }
+    case "link_edges_coverage": {
+      const seen = Number(d.collections_seen_24h || 0);
+      const resolved = Number(d.collections_resolved_24h || 0);
+      const pctVal = d.resolution_24h_pct != null ? Number(d.resolution_24h_pct) * 100 : null;
+      if (alert.severity === "ok") return {
+        title: "Rails Resolver Coverage",
+        description: seen === 0
+          ? "Nenhuma collection recente para resolver nas ultimas 24h."
+          : `Cobertura de collections saudavel: ${resolved}/${seen} (${pctVal?.toFixed(1)}%).`,
+      };
+      return {
+        title: "Rails Resolver com Cobertura Baixa",
+        description: `${resolved}/${seen} collections recentes resolvidas (${pctVal?.toFixed(1) || 0}%).`,
+        detail: "As colecoes do Discovery (Homebar/reference/ref_panel) podem aparecer sem expansao completa para ilhas filhas.",
+        action: "Rode backfill_recent_collections e verifique erros do discover-links-metadata-collector.",
+      };
+    }
+    case "link_edges_freshness": {
+      const ageSec = d.edge_age_seconds != null ? Number(d.edge_age_seconds) : null;
+      const stale = Number(d.stale_edges_60d || 0);
+      const ageStr = ageSec == null
+        ? "desconhecida"
+        : ageSec < 60 ? `${ageSec}s` : ageSec < 3600 ? `${Math.round(ageSec / 60)} min` : `${Math.round(ageSec / 3600)}h`;
+      if (alert.severity === "ok") return {
+        title: "Link Graph Freshness",
+        description: `Edges atualizadas (${ageStr}), stale(60d): ${fmt(stale)}.`,
+      };
+      return {
+        title: "Link Graph Desatualizado",
+        description: `Ultima atualizacao de edges: ${ageStr}. stale(60d): ${fmt(stale)}.`,
+        detail: "O grafo parent->child pode estar desatualizado e afetar o render de rails resolvidos no admin/public.",
+        action: "Verifique cron metadata e execute maintenance (cleanup_discover_link_edges).",
+      };
+    }
     default:
       return {
         title: alert.message,
@@ -223,6 +269,9 @@ export default function AdminOverview() {
 
   // Exposure
   const [exposure, setExposure] = useState<ExposureData | null>(null);
+
+  // Rails / Link graph
+  const [linkGraph, setLinkGraph] = useState<LinkGraphData | null>(null);
 
   // Crons
   const [crons, setCrons] = useState<CronJob[]>([]);
@@ -367,6 +416,23 @@ export default function AdminOverview() {
     });
   }, []);
 
+  const fetchLinkGraph = useCallback(async () => {
+    const { data, error } = await supabase.rpc("get_link_graph_stats");
+    if (error || !data) return;
+    const s = data as any;
+    setLinkGraph({
+      edgesTotal: Number(s.edges_total || 0),
+      parentsTotal: Number(s.parents_total || 0),
+      childrenTotal: Number(s.children_total || 0),
+      collectionsSeen24h: Number(s.collections_seen_24h || 0),
+      collectionsResolved24h: Number(s.collections_resolved_24h || 0),
+      resolution24hPct: s.resolution_24h_pct != null ? Number(s.resolution_24h_pct) : null,
+      edgeAgeSeconds: s.edge_age_seconds != null ? Number(s.edge_age_seconds) : null,
+      staleEdges60d: Number(s.stale_edges_60d || 0),
+      collectionsDueNow: Number(s.collections_due_now || 0),
+    });
+  }, []);
+
   const fetchCrons = useCallback(async () => {
     // We can't query cron.job directly from client, use hardcoded known crons with health inference
     const knownCrons: CronJob[] = [
@@ -404,14 +470,14 @@ export default function AdminOverview() {
       setLastRefresh(timeNow());
     };
     const tickSlow = async () => {
-      await Promise.all([fetchCensus(), fetchExposure(), fetchCrons(), fetchReports(), fetchAlerts()]);
+      await Promise.all([fetchCensus(), fetchExposure(), fetchLinkGraph(), fetchCrons(), fetchReports(), fetchAlerts()]);
     };
     tickFast();
     tickSlow();
     const fastId = setInterval(tickFast, 5_000);
     const slowId = setInterval(tickSlow, 30_000);
     return () => { clearInterval(fastId); clearInterval(slowId); };
-  }, [fetchCensus, fetchMeta, fetchExposure, fetchCrons, fetchReports, fetchAlerts]);
+  }, [fetchCensus, fetchMeta, fetchExposure, fetchLinkGraph, fetchCrons, fetchReports, fetchAlerts]);
 
   // ─── Weekly pipeline (preserved logic) ────────────────────
 
@@ -505,6 +571,15 @@ export default function AdminOverview() {
   const dbHealth: HealthStatus = census ? "ok" : "idle";
   const metaHealth: HealthStatus = !meta ? "idle" : meta.total === 0 ? "idle" : (meta.withTitle / meta.total) > 0.9 ? "ok" : (meta.withTitle / meta.total) > 0.5 ? "warn" : "error";
   const exposureHealth: HealthStatus = !exposure ? "idle" : exposure.ticksFailed > 5 ? "error" : exposure.targetsOk > 0 ? "ok" : "warn";
+  const railsHealth: HealthStatus = !linkGraph
+    ? "idle"
+    : linkGraph.collectionsSeen24h === 0
+      ? "idle"
+      : (linkGraph.resolution24hPct || 0) >= 0.85
+        ? "ok"
+        : (linkGraph.resolution24hPct || 0) >= 0.5
+          ? "warn"
+          : "error";
   const reportHealth: HealthStatus = generating ? "ok" : genState.phase === "done" ? "ok" : "idle";
 
   const metaPct = meta && meta.total > 0 ? (meta.withTitle / meta.total) * 100 : 0;
@@ -546,6 +621,7 @@ export default function AdminOverview() {
             <div className="flex items-center gap-1.5"><HealthDot status={dbHealth} label="Database conectada" /><span className="text-muted-foreground">Database</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={exposureHealth} label={`${exposure?.ticksFailed || 0} falhas 24h`} /><span className="text-muted-foreground">Exposure</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={metaHealth} label={`${metaPct.toFixed(1)}% preenchido`} /><span className="text-muted-foreground">Metadata</span></div>
+            <div className="flex items-center gap-1.5"><HealthDot status={railsHealth} label={`${linkGraph?.collectionsResolved24h || 0}/${linkGraph?.collectionsSeen24h || 0} collections resolvidas (24h)`} /><span className="text-muted-foreground">Rails</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={reportHealth} label={generating ? "Em andamento" : "Idle"} /><span className="text-muted-foreground">Report</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={alertStatus} label={`${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status="ok" label="7/7 ativos" /><span className="text-muted-foreground">Crons</span></div>
@@ -715,6 +791,52 @@ export default function AdminOverview() {
             <Link to="/admin/exposure"><ArrowRight className="h-3 w-3 mr-1" /> Ver detalhes do Exposure</Link>
           </Button>
         </div>
+      </div>
+
+      <div>
+        <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
+          <Target className="h-4 w-4" /> Rails Resolver / Link Graph
+        </h2>
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium">
+                  Resolucao 24h: {fmt(linkGraph?.collectionsResolved24h)} / {fmt(linkGraph?.collectionsSeen24h)} collections
+                </span>
+                <span className="text-sm font-mono font-bold">
+                  {linkGraph?.resolution24hPct != null ? `${(linkGraph.resolution24hPct * 100).toFixed(1)}%` : "--"}
+                </span>
+              </div>
+              <Progress value={linkGraph?.resolution24hPct != null ? linkGraph.resolution24hPct * 100 : 0} className="h-3" />
+              <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+                <span>edges total: {fmt(linkGraph?.edgesTotal)}</span>
+                <span>collections due now: {fmt(linkGraph?.collectionsDueNow)}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+              <StatCard icon={Layers} label="Edges" value={fmt(linkGraph?.edgesTotal)} />
+              <StatCard icon={Hash} label="Parents" value={fmt(linkGraph?.parentsTotal)} />
+              <StatCard icon={Hash} label="Children" value={fmt(linkGraph?.childrenTotal)} />
+              <StatCard icon={CalendarClock} label="Seen 24h" value={fmt(linkGraph?.collectionsSeen24h)} />
+              <StatCard icon={CheckCircle2} label="Resolved 24h" value={fmt(linkGraph?.collectionsResolved24h)} color="success" />
+              <StatCard icon={AlertTriangle} label="Stale >60d" value={fmt(linkGraph?.staleEdges60d)} color={linkGraph && linkGraph.staleEdges60d > 10000 ? "warning" : "default"} />
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-xs">
+              <p className="font-semibold text-sm">Notify / Acoes Recomendadas</p>
+              {(linkGraph?.resolution24hPct ?? 0) < 0.5 && (linkGraph?.collectionsSeen24h || 0) > 0 ? (
+                <p className="text-destructive">Cobertura baixa de rails resolvidos. Executar backfill_recent_collections e revisar logs do metadata collector.</p>
+              ) : (
+                <p className="text-muted-foreground">Cobertura de rails dentro do esperado.</p>
+              )}
+              {(linkGraph?.edgeAgeSeconds ?? 0) > 21600 ? (
+                <p className="text-yellow-600">Link graph desatualizado (&gt; 6h). Verifique cron do metadata orchestrate.</p>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Section 5: Cron Jobs ───────────────────────────── */}
