@@ -1,186 +1,133 @@
 
+# Correcao de Bugs e Enriquecimento Visual do Relatorio
 
-# Enriquecimento do Relatorio Semanal: Novos Dados, Metricas e Visual
+## Problemas Identificados
 
-## Resumo
+### 1. Categorias Duplicadas (Walking Dead / Rocket Racing)
+A tabela `discover_report_islands` armazena categorias com casing inconsistente:
+- "Rocket Racing" vs "ROCKET RACING"
+- "The Walking Dead Universe" vs "THE WALKING DEAD UNIVERSE"
 
-Com base na auditoria completa dos dados disponiveis (274k ilhas no cache, 192k registros de metadata com versoes/ratings/SAC, 83k segmentos de exposicao em 104 paineis, 30+ tags, split UEFN/FNC), existem pelo menos **8 novas secoes/metricas** que podem ser criadas sem nenhuma chamada adicional de API -- usando puramente dados que ja estao no banco mas nao sao aproveitados.
+O RPC `report_finalize_categories` agrupa por `category` sem normalizar o casing, resultando em entradas duplicadas nos rankings e no grafico de pizza.
 
----
+**Correcao**: Atualizar o RPC para usar `UPPER()` ou `INITCAP()` na agregacao, unificando as variantes.
 
-## Dados Disponiveis Mas Nao Utilizados
+### 2. "Most Updated" nao mostra numero de atualizacoes
+O RPC `report_most_updated_islands` filtra ilhas cuja `updated_at_epic` caiu na semana, mas nao retorna o campo `version` (numero de versoes/iteracoes). O resultado e um ranking por plays, sem indicar quantas vezes a ilha foi atualizada.
 
-| Fonte | Campo | Volume | Status Atual |
-|-------|-------|--------|-------------|
-| `discover_link_metadata` | `version` (numero de atualizacoes) | 66.878 ilhas | **Nao usado** |
-| `discover_link_metadata` | `ratings` (classificacao etaria) | 66.746 ilhas | **Nao usado** |
-| `discover_link_metadata` | `support_code` (SAC creator) | 66.520 ilhas | **Nao usado** |
-| `discover_link_metadata` | `max_players` / `min_players` | 66.591 ilhas | **Nao usado** |
-| `discover_link_metadata` | `tagline` / `introduction` | 66.639 ilhas | **Nao usado** |
-| `discover_islands_cache` | `published_at_epic` / `updated_at_epic` | 67.180 ilhas | **Nao usado no report** |
-| `discover_islands_cache` | `suppressed_streak` / `reported_streak` | 274k ilhas | Usado parcialmente |
-| `discover_report_islands` | `created_in` (UEFN vs FNC) | 52k por report | **Nao usado** |
-| `discover_report_islands` | `tags` (array completo) | 52k por report | Usado so no NLP |
-| Exposure | `feature_tags` nos segmentos | 83k segmentos | **Nao usado** |
-| Exposure | Panel presence duration vs metrics correlation | 3.515 ilhas expostas | **Nao cruzado** |
+**Correcao**: Alterar o RPC para incluir `lm.version` no SELECT e no resultado. No frontend, exibir o numero de versao como subtitle (ex: "v14 - @Creator").
 
----
+### 3. Epic misturada com UGC
+Ilhas da Epic (creator_code = 'Epic', 'Epic Labs', etc.) aparecem nos mesmos rankings que UGC. Isso distorce metricas reais dos criadores independentes.
 
-## Novas Secoes Propostas
+**Correcao**: 
+- Criar filtro `is_epic_creator` baseado em lista conhecida: `['epic', 'epic labs', 'epic games']`
+- Na secao "Most Updated", separar em dois rankings: "Epic First-Party" e "UGC Creators"
+- Nos rankings de criadores, adicionar badge indicando Epic vs UGC
 
-### Secao 20: Multi-Panel Presence (Ilhas Multi-Painel)
-**Sua ideia**: "Mostrar ilhas que mais entraram em tags/paineis diferentes"
+### 4. Multi-Panel Presence e Panel Loyalty vazios
+O RPC `report_finalize_exposure_analysis` consulta `discovery_exposure_rollup_daily` com datas da semana (Feb 7-14), mas os dados de rollup so existem a partir de Feb 14-15. Resultado: 0 registros encontrados.
 
-- **Metrica**: Contar em quantos paineis DISTINTOS cada ilha apareceu nos ultimos 7 dias
-- **RPC**: Query nos `discovery_exposure_presence_segments` agrupando por `link_code` e contando `DISTINCT panel_name`
-- **Ranking**: Top 10 ilhas com maior diversidade de paineis
-- **Insight**: Ilhas que o algoritmo da Epic distribui em multiplas categorias = alta versatilidade
-- **Visual**: Ranking com barra + badge mostrando os nomes dos paineis
+**Correcao**: Ampliar a janela de busca no RPC para `p_days` dias antes da `week_end` (nao depender de `week_start`). Alternativamente, usar `discovery_exposure_presence_segments` diretamente (que tem dados mais completos) em vez do rollup.
 
-### Secao 21: Panel Loyalty (Residentes de Painel)
-**Sua ideia**: "Mostrar ilhas que mais ficaram na mesma tag/painel"
-
-- **Metrica**: Total de minutos expostos em um UNICO painel (max duration em um so painel)
-- **RPC**: Query nos segmentos somando duracao por ilha+painel, pegando o maior
-- **Ranking**: Top 10 ilhas com maior permanencia em um unico painel
-- **Insight**: "Residentes" do painel = ilhas que dominam uma categoria
-
-### Secao 22: Most Updated Islands (Ilhas Mais Atualizadas)
-**Sua ideia**: "Top ilhas que mais foram atualizadas/versions diferentes"
-
-- **Dados**: Ja temos `mostUpdatedIslandsThisWeek` no rankings_json (campo existe mas nao e exibido!)
-- **Tambem**: Campo `version` no `discover_link_metadata` (13.7k ilhas com v1, 9.1k com v2, etc.)
-- **RPC**: Cruzar ilhas do report com metadata para pegar version + updated_at_epic
-- **Ranking**: Top 10 ilhas com maior numero de versao (mais iteracoes do criador)
-- **KPI**: Media de versoes do ecossistema, % de ilhas com 5+ versoes
-
-### Secao 23: Rookie Creators (Novos Criadores em Destaque)
-**Sua ideia**: "Top novos criadores que mostraram destaque"
-
-- **Metrica**: Criadores cuja `first_seen_at` no cache e desta semana, ranqueados por melhor ilha
-- **RPC**: Filtrar ilhas do report onde `creator_code` aparece pela primeira vez, agregar por criador
-- **Ranking**: Top 10 rookies por plays, CCU, ou retention da melhor ilha
-- **KPI**: Total de novos criadores, media de plays de rookies vs veteranos
-
-### Secao 24: Player Capacity Analysis (Analise por Capacidade)
-- **Dados**: `max_players` disponivel para 66k ilhas (16 players e o mais comum com 19k ilhas)
-- **Metrica**: Performance media por faixa de max_players (Solo, Duo, Squad 4, Party 8-16, Massive 20+)
-- **Visual**: Grafico de barras com plays/retention por faixa de capacidade
-- **Insight**: "Mapas para 16 jogadores tem 2.3x mais retention que mapas solo"
-
-### Secao 25: UEFN vs Fortnite Creative (Ferramenta de Criacao)
-- **Dados**: `created_in` ja coletado (40k UEFN vs 12k FNC no W06)
-- **Metricas**: Plays, retention, CCU, stickiness comparados entre as duas ferramentas
-- **Visual**: Dois cards lado a lado comparando metricas medias
-- **Insight**: "Ilhas UEFN tem 1.5x mais retention D7 que FNC"
+### 5. Thumbnails e melhorias visuais nao implementadas
+O componente `RankingTable` nao possui prop `imageUrl` nem renderiza imagens. As melhorias visuais planejadas (badges ouro/prata/bronze, glassmorphism, gradientes) nao foram aplicadas.
 
 ---
 
-## Enriquecimentos em Secoes Existentes
+## Plano de Implementacao
 
-### Secao 19 (Exposure) - Efficiency Score
-- **Novo**: Cruzar minutos de exposicao no Discovery com plays reais
-- **Metrica**: "Exposure Efficiency" = plays / minutos_expostos
-- **Insight**: Quais ilhas convertem melhor a visibilidade em jogadores reais
+### Fase 1: SQL - Corrigir RPCs (Migration)
 
-### Secao 2 (Trending) - Tag Velocity
-- **Novo**: Alem do NLP nos titulos, analisar quais TAGS oficiais estao crescendo
-- **Dados**: 30+ tags com contagem (just for fun: 17.5k, pvp: 13.2k, free for all: 13k)
-- **Visual**: Adicionar "Tags em Alta" ao lado do "Trends por Plays"
+**1a. Corrigir duplicatas de categoria**
+Atualizar `report_finalize_categories` para normalizar casing com `INITCAP(LOWER(category))`, unificando "ROCKET RACING" e "Rocket Racing" como "Rocket Racing".
 
-### Secao 7 (Creators) - SAC Coverage
-- **Dados**: `support_code` disponivel para 66.5k ilhas
-- **KPI**: % de criadores ativos com codigo SAC (Support-a-Creator)
+**1b. Enriquecer "Most Updated" com version**
+Atualizar `report_most_updated_islands` para incluir `lm.version` no resultado.
 
-### Secao 15 (Category & Tags) - Tag Cloud Visual
-- **Melhoria visual**: Substituir ranking simples por word cloud interativo ou treemap
+**1c. Corrigir Exposure Analysis**
+Atualizar `report_finalize_exposure_analysis` para usar `discovery_exposure_presence_segments` (que tem ~83k registros) em vez de `discovery_exposure_rollup_daily` (que pode nao ter dados na janela da semana).
 
----
+### Fase 2: Frontend - Separacao Epic vs UGC
 
-## Melhorias Visuais
+**2a. Atualizar RankingTable com thumbnails e badges**
+- Adicionar props opcionais: `showImage?: boolean`, `showBadges?: boolean`
+- Renderizar `image_url` como thumbnail 32x32 ao lado do nome
+- Mostrar badge dourado/prata/bronze para top 3
 
-### 1. Island Cards com Imagem
-- Temos `image_url` para 66.874 ilhas
-- Nos rankings, mostrar thumbnail da ilha ao lado do nome
-- Torna o report muito mais visual e profissional
+**2b. Separar Epic vs UGC nas secoes relevantes**
+- Na secao 22 (Most Updated), renderizar dois rankings separados
+- Na secao 7 (Creators), filtrar Epic do ranking UGC
+- Definir lista de creator codes Epic no frontend: `['epic', 'epic labs', 'epic games']`
 
-### 2. Sparkline Mini-Charts nos KPIs
-- Adicionar mini graficos de linha nos KPI cards mostrando tendencia dos ultimos dias
-- Usando dados de probe_date que ja temos
+**2c. Exibir version count no "Most Updated"**
+- Mostrar subtitle como "v{version} - @{creator}" em vez de apenas "@creator"
 
-### 3. Gradientes e Glassmorphism nas Secoes
-- Headers de secao com gradiente sutil baseado na cor da secao
-- Cards com efeito glass para profundidade visual
-- Separadores animados entre secoes
+### Fase 3: Visual Polish
 
-### 4. Badges de Destaque
-- Ilhas no top 3 de qualquer ranking recebem badges visuais (ouro, prata, bronze)
-- Tags coloridas por genero nos rankings
+**3a. Section headers com gradiente**
+Adicionar gradient sutil no `SectionHeader` baseado na cor do icone da secao.
 
-### 5. Comparativo Visual Side-by-Side
-- Para secoes como UEFN vs FNC, usar layout de "versus" com barras espelhadas
-- Estilo infografico de comparacao
+**3b. Badges de destaque**
+Implementar badges visuais (emoji ou SVG) para posicoes 1-3: ouro, prata, bronze.
+
+**3c. Glassmorphism nos cards**
+Aplicar `backdrop-blur` e `bg-white/5` nos Cards para efeito de profundidade.
 
 ---
 
-## Plano Tecnico de Implementacao
+## Detalhes Tecnicos
 
-### Fase 1: Novos RPCs SQL (3 novas funcoes)
+### Migration SQL
 
 ```text
-report_finalize_exposure_analysis(p_report_id, p_days)
-  - Multi-panel count per island
-  - Panel loyalty (max duration single panel)
-  - Exposure efficiency (plays / exposure minutes)
+-- 1. report_finalize_categories: normalizar casing
+-- Substituir GROUP BY category por GROUP BY INITCAP(LOWER(category))
 
-report_finalize_tool_split(p_report_id)
-  - UEFN vs FNC metrics comparison
-  - Avg plays, retention, CCU by created_in
+-- 2. report_most_updated_islands: adicionar version  
+-- Adicionar lm.version ao SELECT e retorno
 
-report_finalize_rookies(p_report_id)
-  - New creators this week
-  - Best performing rookies with their top island
+-- 3. report_finalize_exposure_analysis: usar segments
+-- Trocar discovery_exposure_rollup_daily por 
+-- discovery_exposure_presence_segments com calculo
+-- de EXTRACT(EPOCH FROM (last_seen_ts - start_ts))/60
 ```
 
-### Fase 2: Atualizar Collector/Rebuild
-- Adicionar chamadas dos novos RPCs no `Promise.all` do finalize
-- Salvar resultados em `rankings_json` com chaves novas
-- Enriquecer dados com `version` e `max_players` do link_metadata
+### RankingTable Enhanced
 
-### Fase 3: Atualizar AI Prompt
-- Adicionar descricoes das novas secoes (20-25) no prompt
-- Incluir dados dos novos RPCs no payload enviado para a IA
+```text
+interface RankingItem {
+  name: string;
+  code?: string;
+  value: number;
+  label?: string;
+  subtitle?: string;
+  imageUrl?: string;  // NOVO
+}
 
-### Fase 4: Frontend - Novas Secoes
-- Adicionar secoes 20-25 no `ReportView.tsx`
-- Implementar componente `IslandCard` com thumbnail
-- Implementar componente `ComparisonChart` para UEFN vs FNC
-- Adicionar i18n keys para todas as novas secoes
+interface RankingTableProps {
+  // ... existentes
+  showImage?: boolean;   // NOVO
+  showBadges?: boolean;  // NOVO
+}
+```
 
-### Fase 5: Melhorias Visuais
-- Redesign dos section headers com gradientes
-- Thumbnails nos rankings (RankingTable com prop `showImage`)
-- Badges visuais (ouro/prata/bronze)
-- Glassmorphism nos cards
+### Epic Creator Filter
 
-### Fase 6: Exibir Dados Ja Existentes Mas Nao Mostrados
-- `mostUpdatedIslandsThisWeek` ja existe no rankings_json mas nao tem UI
-- Adicionar imediatamente ao report
+```text
+const EPIC_CREATORS = new Set([
+  'epic', 'epic labs', 'epic games', 'fortnite'
+]);
 
----
+function isEpicCreator(creator: string): boolean {
+  return EPIC_CREATORS.has(creator?.toLowerCase?.() || '');
+}
+```
 
-## Prioridade de Impacto
+### Arquivos a Modificar
 
-| Prioridade | Item | Esforco |
-|-----------|------|---------|
-| P0 | Mostrar `mostUpdatedIslandsThisWeek` (ja existe, so falta UI) | Baixo |
-| P0 | Island thumbnails nos rankings (image_url ja existe) | Medio |
-| P1 | Rookie Creators (secao 23) | Medio |
-| P1 | UEFN vs FNC (secao 25) | Medio |
-| P1 | Multi-Panel Presence (secao 20) | Medio |
-| P2 | Panel Loyalty (secao 21) | Medio |
-| P2 | Player Capacity Analysis (secao 24) | Medio |
-| P2 | Exposure Efficiency cross-reference | Alto |
-| P3 | Melhorias visuais (gradientes, glass, badges) | Medio |
-| P3 | Tag Cloud / Treemap visual | Medio |
-
+1. `supabase/migrations/` - Nova migration para corrigir 3 RPCs
+2. `src/components/discover/RankingTable.tsx` - Thumbnails + badges
+3. `src/components/discover/SectionHeader.tsx` - Gradientes
+4. `src/pages/public/ReportView.tsx` - Separacao Epic/UGC, version display
+5. `supabase/functions/discover-report-rebuild/index.ts` - Passar image_url/version nos items montados
