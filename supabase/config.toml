@@ -27,8 +27,5 @@ verify_jwt = false
 [functions.discover-exposure-timeline]
 verify_jwt = false
 
-[functions.discover-exposure-timeline]
-verify_jwt = false
-
-[functions.discover-report-rebuild]
+[functions.discover-enqueue-gap]
 verify_jwt = false

@@ -326,7 +326,7 @@ serve(async (req) => {
 
       const evidence = await buildEvidence({
         supabase,
-        reportId,
+        reportId: reportId!,
         weeklyReportId,
         weekStartDate,
         weekEndDate,

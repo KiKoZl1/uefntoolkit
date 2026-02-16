@@ -334,7 +334,7 @@ export default function AdminOverview() {
 
   const fetchAlerts = useCallback(async () => {
     const { data, error } = await supabase
-      .from("system_alerts_current")
+      .from("system_alerts_current" as any)
       .select("alert_key,severity,message,details,updated_at")
       .order("alert_key", { ascending: true });
     if (error) return;
