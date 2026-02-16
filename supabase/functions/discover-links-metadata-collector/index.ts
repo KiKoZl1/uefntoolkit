@@ -162,7 +162,7 @@ serve(async (req) => {
     // Auth guard: require service_role key
     const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    if (!authHeader.includes(serviceKey)) {
+    if (authHeader !== `Bearer ${serviceKey}`) {
       return json({ error: "Forbidden: service_role required" }, 403);
     }
 

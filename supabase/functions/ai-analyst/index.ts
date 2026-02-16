@@ -1,13 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const MAX_MESSAGE_LENGTH = 10000;
+const MAX_MESSAGES = 50;
+const MAX_PROMPT_LENGTH = 100000;
+
+function sanitizeMessage(msg: any): { role: string; content: string } | null {
+  if (!msg || typeof msg !== "object") return null;
+  const role = msg.role === "assistant" ? "assistant" : "user";
+  const content = String(msg.content || "").substring(0, MAX_MESSAGE_LENGTH);
+  if (!content.trim()) return null;
+  return { role, content };
+}
+
 const SYSTEM_PROMPT = `Você é um **Analista Sênior de Game Design + Game Analytics** especializado em experiências UGC (Fortnite Creative / UEFN e Roblox).
 
-Você atua como consultor estratégico: lê métricas reais, encontra gargalos estruturais e sugere melhorias **práticas e implementáveis** (onboarding, UX/HUD, pacing, loops, retention hooks, liveops, economia, monetização e “juice”).
+Você atua como consultor estratégico: lê métricas reais, encontra gargalos estruturais e sugere melhorias **práticas e implementáveis** (onboarding, UX/HUD, pacing, loops, retention hooks, liveops, economia, monetização e "juice").
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # IDIOMA (REGRA ABSOLUTA)
@@ -163,23 +176,73 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages, reportData, mode } = await req.json();
+    // Auth guard: require authenticated user
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json();
+    const rawMessages = body.messages;
+    const reportData = body.reportData;
+    const mode = body.mode;
+
+    // Validate mode
+    if (mode !== undefined && mode !== "summary" && mode !== "chat") {
+      return new Response(JSON.stringify({ error: "Invalid mode" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Validate and sanitize messages
+    let sanitizedMessages: { role: string; content: string }[] = [];
+    if (mode !== "summary") {
+      if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+        return new Response(JSON.stringify({ error: "messages array is required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      for (const msg of rawMessages.slice(0, MAX_MESSAGES)) {
+        const s = sanitizeMessage(msg);
+        if (s) sanitizedMessages.push(s);
+      }
+      if (sanitizedMessages.length === 0) {
+        return new Response(JSON.stringify({ error: "No valid messages provided" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     // Build context from report data
     let dataContext = "";
-    if (reportData) {
+    if (reportData && typeof reportData === "object") {
       const { kpis, rankings, distributions, diagnostics } = reportData;
       
-      if (kpis && Object.keys(kpis).length > 0) {
+      if (kpis && typeof kpis === "object" && Object.keys(kpis).length > 0) {
         dataContext += "\n## KPIs do Relatório:\n";
         for (const [k, v] of Object.entries(kpis)) {
           if (v !== null && v !== undefined) dataContext += `- ${k}: ${v}\n`;
         }
       }
 
-      if (rankings && Object.keys(rankings).length > 0) {
+      if (rankings && typeof rankings === "object" && Object.keys(rankings).length > 0) {
         dataContext += "\n## Rankings:\n";
         for (const [k, items] of Object.entries(rankings)) {
           if (Array.isArray(items) && items.length > 0) {
@@ -191,7 +254,7 @@ serve(async (req) => {
         }
       }
 
-      if (distributions && Object.keys(distributions).length > 0) {
+      if (distributions && typeof distributions === "object" && Object.keys(distributions).length > 0) {
         dataContext += "\n## Distribuições:\n";
         for (const [k, items] of Object.entries(distributions)) {
           if (Array.isArray(items) && items.length > 0) {
@@ -217,9 +280,16 @@ serve(async (req) => {
       { role: "system", content: systemWithData },
       ...(mode === "summary" 
         ? [{ role: "user", content: "Gere um resumo executivo completo e detalhado deste relatório, cobrindo todas as áreas com diagnóstico e recomendações acionáveis." }]
-        : messages || []
+        : sanitizedMessages
       ),
     ];
+
+    // Guard against oversized prompts
+    if (JSON.stringify(allMessages).length > MAX_PROMPT_LENGTH) {
+      return new Response(JSON.stringify({ error: "Prompt too large" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
