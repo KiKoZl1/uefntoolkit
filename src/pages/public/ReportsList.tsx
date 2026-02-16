@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Users, Play, Clock, Loader2 } from "lucide-react";
+import { Calendar, Users, Play, Clock, Loader2, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface WeeklyReport {
@@ -60,53 +59,59 @@ export default function ReportsList() {
       </div>
 
       {reports.length === 0 ? (
-        <Card className="text-center py-16">
-          <CardContent>
-            <p className="text-muted-foreground">{t("reports.noReports")}</p>
-          </CardContent>
-        </Card>
+        <div className="text-center py-16 rounded-xl border border-border/50 bg-card">
+          <p className="text-muted-foreground">{t("reports.noReports")}</p>
+        </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {reports.map((r) => {
+        <div className="space-y-4">
+          {reports.map((r, idx) => {
             const kpis = r.kpis_json || {};
+            const isLatest = idx === 0;
             return (
               <Link to={`/reports/${r.public_slug}`} key={r.id}>
-                <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full border-border/50">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="font-display text-base">
-                        {r.title_public || r.week_key}
-                      </CardTitle>
-                      <Badge>{t("common.published")}</Badge>
+                <div className={`group rounded-xl border bg-card p-5 hover:border-primary/30 transition-all cursor-pointer ${isLatest ? "border-primary/20" : "border-border/50"}`}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-display text-lg font-semibold truncate">
+                          {r.title_public || r.week_key}
+                        </h3>
+                        {isLatest && (
+                          <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px]">
+                            Latest
+                          </Badge>
+                        )}
+                      </div>
+                      {r.subtitle_public && (
+                        <p className="text-sm text-muted-foreground mb-1 truncate">{r.subtitle_public}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(r.date_from).toLocaleDateString(locale)} — {new Date(r.date_to).toLocaleDateString(locale)}
+                      </p>
                     </div>
-                    {r.subtitle_public && (
-                      <p className="text-xs text-muted-foreground">{r.subtitle_public}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(r.date_from).toLocaleDateString(locale)} — {new Date(r.date_to).toLocaleDateString(locale)}
-                    </p>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-3 gap-3">
+
+                    <div className="hidden sm:flex items-center gap-6">
                       <div className="text-center">
                         <Users className="h-4 w-4 mx-auto text-primary mb-1" />
-                        <p className="text-xs text-muted-foreground">{t("reports.islands")}</p>
-                        <p className="font-display font-semibold text-sm">{fmt(kpis.activeIslands)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{t("reports.islands")}</p>
+                        <p className="font-display font-bold text-sm">{fmt(kpis.activeIslands)}</p>
                       </div>
                       <div className="text-center">
-                        <Play className="h-4 w-4 mx-auto text-accent mb-1" />
-                        <p className="text-xs text-muted-foreground">{t("reports.plays")}</p>
-                        <p className="font-display font-semibold text-sm">{fmt(kpis.totalPlays)}</p>
+                        <Play className="h-4 w-4 mx-auto text-success mb-1" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{t("reports.plays")}</p>
+                        <p className="font-display font-bold text-sm">{fmt(kpis.totalPlays)}</p>
                       </div>
                       <div className="text-center">
-                        <Clock className="h-4 w-4 mx-auto text-warning mb-1" />
-                        <p className="text-xs text-muted-foreground">{t("reports.minutes")}</p>
-                        <p className="font-display font-semibold text-sm">{fmt(kpis.totalMinutesPlayed)}</p>
+                        <Clock className="h-4 w-4 mx-auto text-info mb-1" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{t("reports.minutes")}</p>
+                        <p className="font-display font-bold text-sm">{fmt(kpis.totalMinutesPlayed)}</p>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
+
+                    <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                  </div>
+                </div>
               </Link>
             );
           })}

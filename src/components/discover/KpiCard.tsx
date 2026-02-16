@@ -1,5 +1,4 @@
 import { LucideIcon, TrendingUp, TrendingDown } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 
 interface KpiCardProps {
   icon: LucideIcon;
@@ -11,22 +10,22 @@ interface KpiCardProps {
 
 export function KpiCard({ icon: Icon, label, value, change, suffix }: KpiCardProps) {
   return (
-    <Card>
-      <CardContent className="pt-4 pb-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon className="h-4 w-4 text-primary" />
-          <span className="text-xs text-muted-foreground">{label}</span>
+    <div className="rounded-lg border border-border/50 bg-card p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10">
+          <Icon className="h-3.5 w-3.5 text-primary" />
         </div>
-        <p className="font-display font-bold text-xl">
-          {value}{suffix}
-        </p>
-        {change != null && change !== 0 && (
-          <div className={`flex items-center gap-1 text-xs mt-1 ${change > 0 ? "text-success" : "text-destructive"}`}>
-            {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            <span>{change > 0 ? "+" : ""}{change.toFixed(1)}%</span>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">{label}</span>
+      </div>
+      <p className="font-display font-bold text-2xl tracking-tight">
+        {value}{suffix}
+      </p>
+      {change != null && change !== 0 && (
+        <div className={`flex items-center gap-1 text-xs mt-1.5 ${change > 0 ? "text-success" : "text-destructive"}`}>
+          {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+          <span className="font-medium">{change > 0 ? "+" : ""}{change.toFixed(1)}% vs last week</span>
+        </div>
+      )}
+    </div>
   );
 }
