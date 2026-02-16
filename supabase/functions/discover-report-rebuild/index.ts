@@ -235,9 +235,9 @@ serve(async (req) => {
     const { data: cov, error: covErr } = await supabase.rpc("report_link_metadata_coverage", { p_report_id: reportId });
     if (covErr) throw new Error(covErr.message);
     const coverage = cov || {};
-    const reportedIslands = Number(coverage.reported_islands || 0);
-    const withTitle = Number(coverage.with_title || 0);
-    const withImage = Number(coverage.with_image_url || 0);
+    const reportedIslands = Number(coverage.total || 0);
+    const withTitle = Number(coverage.withTitle || 0);
+    const withImage = Number(coverage.withImageUrl || coverage.withImage || 0);
 
     const { data: newIslandsRows, error: newErr } = await supabase.rpc("report_new_islands_by_launch", {
       p_report_id: reportId,
