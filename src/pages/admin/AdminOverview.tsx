@@ -982,7 +982,7 @@ export default function AdminOverview() {
               <StatCard icon={Layers} label="Edges" value={fmt(linkGraph?.edgesTotal)} />
               <StatCard icon={Hash} label="Parents" value={fmt(linkGraph?.parentsTotal)} />
               <StatCard icon={Hash} label="Children" value={fmt(linkGraph?.childrenTotal)} />
-              <StatCard icon={CalendarClock} label="Resolvíveis" value={fmt(linkGraph?.collectionsSeen24h)} sub="playlist_* + set_*" />
+              <StatCard icon={CalendarClock} label="Resolvíveis" value={fmt(linkGraph?.collectionsSeen24h)} sub="set_* only" />
               <StatCard icon={CheckCircle2} label="Resolved 24h" value={fmt(linkGraph?.collectionsResolved24h)} color="success" />
               <StatCard icon={EyeOff} label="Reference" value={fmt(linkGraph?.referenceCollections)} sub="API não suporta" />
               <StatCard icon={AlertTriangle} label="Stale >60d" value={fmt(linkGraph?.staleEdges60d)} color={linkGraph && linkGraph.staleEdges60d > 10000 ? "warning" : "default"} />
