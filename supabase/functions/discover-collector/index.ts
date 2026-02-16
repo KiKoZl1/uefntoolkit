@@ -545,7 +545,7 @@ serve(async (req) => {
     // Auth guard: require service_role key
     const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    if (!authHeader.includes(serviceKey)) {
+    if (authHeader !== `Bearer ${serviceKey}`) {
       return new Response(JSON.stringify({ error: "Forbidden: service_role required" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
