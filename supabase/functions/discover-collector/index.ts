@@ -78,17 +78,83 @@ function avgRetentionCalc(retArr: any[] | undefined, key: string): number {
   return valid.reduce((s: number, r: any) => s + r[key], 0) / valid.length;
 }
 
-const TREND_KEYWORDS = [
-  "squid game", "zombie", "1v1", "tycoon", "survival", "horror", "deathrun",
-  "box fight", "zone wars", "gun game", "hide and seek", "prop hunt",
-  "roleplay", "rp", "parkour", "obby", "simulator", "battle royale",
-  "build fight", "free build", "ffa", "pvp", "pve", "escape room",
-  "murder mystery", "race", "dropper", "red vs blue", "capture the flag",
-  "bed wars", "sky wars", "prison", "cops", "heist", "fashion show",
-  "quiz", "trivia", "music", "concert", "dance", "among us",
-  "sniper", "aim trainer", "warmup", "practice", "edit course",
-  "lego", "rocket racing", "fall guys", "tmnt", "walking dead",
-];
+// Dynamic NLP stopwords for trend detection (no more hardcoded keywords)
+const TREND_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "in", "on", "at", "to", "for", "is", "it",
+  "by", "with", "from", "up", "out", "if", "my", "no", "not", "but", "all", "new",
+  "your", "you", "me", "we", "us", "so", "do", "be", "am", "are", "was", "get",
+  "has", "had", "how", "its", "let", "may", "our", "own", "say", "she", "too",
+  "use", "way", "who", "did", "got", "may", "old", "see", "now", "man", "day",
+  "any", "few", "big", "per", "try", "ask",
+  // Fortnite generic terms to skip
+  "fortnite", "map", "island", "game", "mode", "v2", "v3", "v4", "2.0", "3.0",
+  "chapter", "season", "update", "beta", "alpha", "test", "pro", "mega", "ultra",
+  "super", "extreme", "ultimate", "best", "top", "epic", "new", "updated",
+]);
+
+function extractTrendingNgrams(
+  islands: any[],
+  maxResults = 30,
+): Array<{ name: string; keyword: string; islands: number; totalPlays: number; totalPlayers: number; peakCCU: number; avgD1: number; value: number }> {
+  const ngramMap: Record<string, { islands: Set<string>; totalPlays: number; totalPlayers: number; peakCCU: number; sumD1: number; d1Count: number }> = {};
+
+  for (const isl of islands) {
+    const title = (isl.title || "").toLowerCase();
+    // Clean title: remove emojis, special chars, normalize
+    const cleaned = title.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+    const words = cleaned.split(" ").filter((w: string) => w.length >= 2 && !TREND_STOPWORDS.has(w));
+
+    const seen = new Set<string>();
+
+    // 1-grams
+    for (const w of words) {
+      if (w.length < 3) continue;
+      if (!seen.has(w)) {
+        seen.add(w);
+        if (!ngramMap[w]) ngramMap[w] = { islands: new Set(), totalPlays: 0, totalPlayers: 0, peakCCU: 0, sumD1: 0, d1Count: 0 };
+        const t = ngramMap[w];
+        t.islands.add(isl.island_code);
+        t.totalPlays += isl.week_plays || 0;
+        t.totalPlayers += isl.week_unique || 0;
+        t.peakCCU = Math.max(t.peakCCU, isl.week_peak_ccu_max || 0);
+        if ((isl.week_d1_avg || 0) > 0) { t.sumD1 += isl.week_d1_avg; t.d1Count++; }
+      }
+    }
+
+    // 2-grams
+    for (let i = 0; i < words.length - 1; i++) {
+      if (words[i].length < 2 || words[i + 1].length < 2) continue;
+      const bigram = `${words[i]} ${words[i + 1]}`;
+      if (!seen.has(bigram)) {
+        seen.add(bigram);
+        if (!ngramMap[bigram]) ngramMap[bigram] = { islands: new Set(), totalPlays: 0, totalPlayers: 0, peakCCU: 0, sumD1: 0, d1Count: 0 };
+        const t = ngramMap[bigram];
+        t.islands.add(isl.island_code);
+        t.totalPlays += isl.week_plays || 0;
+        t.totalPlayers += isl.week_unique || 0;
+        t.peakCCU = Math.max(t.peakCCU, isl.week_peak_ccu_max || 0);
+        if ((isl.week_d1_avg || 0) > 0) { t.sumD1 += isl.week_d1_avg; t.d1Count++; }
+      }
+    }
+  }
+
+  // Score: frequency weighted by plays (sqrt to avoid extreme dominance)
+  return Object.entries(ngramMap)
+    .filter(([_, t]) => t.islands.size >= 5) // at least 5 islands
+    .map(([keyword, t]) => ({
+      name: keyword.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+      keyword,
+      islands: t.islands.size,
+      totalPlays: t.totalPlays,
+      totalPlayers: t.totalPlayers,
+      peakCCU: t.peakCCU,
+      avgD1: t.d1Count > 0 ? t.sumD1 / t.d1Count : 0,
+      value: t.totalPlays,
+      label: `${t.islands.size} islands · ${t.totalPlays >= 1_000_000 ? (t.totalPlays / 1_000_000).toFixed(1) + "M" : t.totalPlays >= 1_000 ? (t.totalPlays / 1_000).toFixed(1) + "K" : t.totalPlays} plays`,
+    }))
+    .sort((a, b) => b.totalPlays - a.totalPlays)
+    .slice(0, maxResults);
+}
 
 const METRICS_V2_DEFAULTS = {
   workers: 4,
@@ -1634,10 +1700,10 @@ serve(async (req) => {
         deadCount: deadIslands.length,
       };
 
-      // Rankings helper
-      const topN = (arr: any[], key: string, n: number) =>
+      // Rankings helper — now with label and subtitle support
+      const topN = (arr: any[], key: string, n: number, opts?: { label?: (i: any) => string; subtitle?: (i: any) => string; filter?: (i: any) => boolean }) =>
         [...arr]
-          .filter((i) => i[key] != null && Number(i[key]) > 0)
+          .filter((i) => i[key] != null && Number(i[key]) > 0 && (!opts?.filter || opts.filter(i)))
           .sort((a, b) => Number(b[key]) - Number(a[key]))
           .slice(0, n)
           .map((i) => ({
@@ -1647,6 +1713,8 @@ serve(async (req) => {
             category: i.category || "Fortnite UGC",
             value: Number(i[key]),
             name: i.title || i.name || i.creator_code || i.island_code || i.code,
+            ...(opts?.label ? { label: opts.label(i) } : {}),
+            ...(opts?.subtitle ? { subtitle: opts.subtitle(i) } : {}),
           }));
 
       // UGC filter
@@ -1712,48 +1780,33 @@ serve(async (req) => {
         .map(([tag, count]) => ({ name: tag, tag, value: count, count }));
 
       // Derived metrics
-      const enriched = islands.map((i: any) => ({
-        ...i,
-        island_code: i.island_code,
-        playsPerPlayer: (i.week_unique || 0) > 0 ? (i.week_plays || 0) / i.week_unique : 0,
-        favPer100: (i.week_unique || 0) > 0 ? ((i.week_favorites || 0) / i.week_unique) * 100 : 0,
-        recPer100: (i.week_unique || 0) > 0 ? ((i.week_recommends || 0) / i.week_unique) * 100 : 0,
-        favToPlayRatio: (i.week_plays || 0) > 0 ? (i.week_favorites || 0) / i.week_plays : 0,
-        recToPlayRatio: (i.week_plays || 0) > 0 ? (i.week_recommends || 0) / i.week_plays : 0,
-        retentionAdjD1: (i.week_minutes_per_player_avg || 0) * (i.week_d1_avg || 0),
-        retentionAdjD7: (i.week_minutes_per_player_avg || 0) * (i.week_d7_avg || 0),
-      }));
+      const enriched = islands.map((i: any) => {
+        const wp = i.week_plays || 0;
+        const wu = i.week_unique || 0;
+        const wf = i.week_favorites || 0;
+        const wr = i.week_recommends || 0;
+        const wm = i.week_minutes || 0;
+        const wmpp = i.week_minutes_per_player_avg || 0;
+        const wd1 = i.week_d1_avg || 0;
+        const wd7 = i.week_d7_avg || 0;
+        return {
+          ...i,
+          island_code: i.island_code,
+          playsPerPlayer: wu > 0 ? wp / wu : 0,
+          favPer100: wu > 0 ? (wf / wu) * 100 : 0,
+          recPer100: wu > 0 ? (wr / wu) * 100 : 0,
+          favToPlayRatio: wp > 0 ? wf / wp : 0,
+          recToPlayRatio: wp > 0 ? wr / wp : 0,
+          retentionAdjD1: wmpp * wd1,
+          retentionAdjD7: wmpp * wd7,
+          minutesPerFavorite: wf > 0 ? wm / wf : 0,
+          stickinessD1: wp * wmpp * wd1,
+          stickinessD7: wp * wmpp * wd7,
+        };
+      });
 
-      // Trend detection
-      const trendMap: Record<string, any> = {};
-      for (const isl of enriched) {
-        const titleLower = (isl.title || "").toLowerCase();
-        for (const kw of TREND_KEYWORDS) {
-          if (titleLower.includes(kw)) {
-            if (!trendMap[kw]) trendMap[kw] = { keyword: kw, islands: 0, totalPlays: 0, totalPlayers: 0, peakCCU: 0, avgD1: 0, d1Count: 0 };
-            const t = trendMap[kw];
-            t.islands++;
-            t.totalPlays += isl.week_plays || 0;
-            t.totalPlayers += isl.week_unique || 0;
-            t.peakCCU = Math.max(t.peakCCU, isl.week_peak_ccu_max || 0);
-            if ((isl.week_d1_avg || 0) > 0) { t.avgD1 += isl.week_d1_avg; t.d1Count++; }
-          }
-        }
-      }
-      const trendingTopics = Object.values(trendMap)
-        .map((t: any) => ({
-          name: t.keyword.charAt(0).toUpperCase() + t.keyword.slice(1),
-          keyword: t.keyword,
-          islands: t.islands,
-          totalPlays: t.totalPlays,
-          totalPlayers: t.totalPlayers,
-          peakCCU: t.peakCCU,
-          avgD1: t.d1Count > 0 ? t.avgD1 / t.d1Count : 0,
-          value: t.totalPlays,
-        }))
-        .filter((t: any) => t.islands >= 3)
-        .sort((a: any, b: any) => b.totalPlays - a.totalPlays)
-        .slice(0, 20);
+      // Dynamic NLP Trend detection (replaces hardcoded TREND_KEYWORDS)
+      const trendingTopics = extractTrendingNgrams(enriched, 20);
 
       // Top risers / decliners (by delta_plays)
       const withDeltas = islandsWithDelta.filter((i) => i.delta_plays != null);
@@ -1790,47 +1843,126 @@ serve(async (req) => {
         .sort((a, b) => b.value - a.value)
         .slice(0, 10);
 
+      // --- Histogram Builders ---
+      const buildHistogram = (arr: any[], key: string, buckets: number[]) => {
+        const hist: any[] = buckets.map((b, i) => ({
+          range: i === buckets.length - 1 ? `${b * 100}%+` : `${b * 100}-${buckets[i + 1] * 100}%`,
+          count: 0
+        }));
+        for (const item of arr) {
+          const val = Number(item[key] || 0);
+          for (let i = 0; i < buckets.length; i++) {
+            if (val >= buckets[i] && (i === buckets.length - 1 || val < buckets[i + 1])) {
+              hist[i].count++;
+              break;
+            }
+          }
+        }
+        return hist;
+      };
+
+      const retentionDistributionD1 = buildHistogram(enriched, "week_d1_avg", [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
+      const retentionDistributionD7 = buildHistogram(enriched, "week_d7_avg", [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
+      
+      const lowPerfBuckets = [0, 50, 100, 500];
+      const lowPerfHistogram = lowPerfBuckets.map((b, i) => ({
+        range: i === lowPerfBuckets.length - 1 ? `<${b}` : `<${lowPerfBuckets[i + 1]}`,
+        count: 0
+      }));
+      for (const i of failedIslands) {
+        const u = i.week_unique || 0;
+        if (u < 50) lowPerfHistogram[0].count++;
+        else if (u < 100) lowPerfHistogram[1].count++;
+        else if (u < 500) lowPerfHistogram[2].count++;
+      }
+
+      // --- New Rankings with Quality Filters ---
+      const fmtPct = (v: any) => `${(Number(v.value) * 100).toFixed(1)}%`;
+      const fmtNum = (v: any) => Number(v.value).toLocaleString();
+      const fmtMin = (v: any) => `${Number(v.value).toFixed(1)} min`;
+
       const computedRankings = {
-        topPeakCCU: topN(enriched, "week_peak_ccu_max", 10),
-        topPeakCCU_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "week_peak_ccu_max", 10),
-        topUniquePlayers: topN(enriched, "week_unique", 10),
-        topTotalPlays: topN(enriched, "week_plays", 10),
-        topMinutesPlayed: topN(enriched, "week_minutes", 10),
-        topRetentionD1: topN(enriched, "week_d1_avg", 10),
-        topRetentionD7: topN(enriched, "week_d7_avg", 10),
-        topD1_UGC: topN(ugcIslands, "week_d1_avg", 10),
-        topD7_UGC: topN(ugcIslands, "week_d7_avg", 10),
-        topCreatorsByPlays: topN(creators, "totalPlays", 10),
-        topCreatorsByPlayers: topN(creators, "uniquePlayers", 10),
-        topCreatorsByMinutes: topN(creators, "minutesPlayed", 10),
-        topCreatorsByCCU: topN(creators, "peakCCU", 10),
-        topCreatorsByD1: topN(creators, "avgD1", 10),
-        topCreatorsByD7: topN(creators, "avgD7", 10),
-        topAvgMinutesPerPlayer: topN(enriched, "week_minutes_per_player_avg", 10),
-        topFavorites: topN(enriched, "week_favorites", 10),
-        topRecommendations: topN(enriched, "week_recommends", 10),
-        topPlaysPerPlayer: topN(enriched, "playsPerPlayer", 10),
-        topFavsPer100: topN(enriched, "favPer100", 10),
-        topRecPer100: topN(enriched, "recPer100", 10),
-        topRetentionAdjD1: topN(enriched, "retentionAdjD1", 10),
-        topRetentionAdjD7: topN(enriched, "retentionAdjD7", 10),
+        topPeakCCU: topN(enriched, "week_peak_ccu_max", 10, { label: fmtNum, subtitle: (i) => i.creator_code }),
+        topPeakCCU_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "week_peak_ccu_max", 10, { label: fmtNum, subtitle: (i) => i.creator_code }),
+        topAvgPeakCCU: topN(enriched, "week_peak_ccu_max", 10, { label: fmtNum, subtitle: (i) => i.creator_code }), // Using max as proxy for avg peak for now until avg metric available
+        topAvgPeakCCU_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "week_peak_ccu_max", 10, { label: fmtNum, subtitle: (i) => i.creator_code }),
+        
+        topUniquePlayers: topN(enriched, "week_unique", 10, { label: fmtNum }),
+        topTotalPlays: topN(enriched, "week_plays", 10, { label: fmtNum }),
+        topMinutesPlayed: topN(enriched, "week_minutes", 10, { label: (v) => `${(v.value / 1000000).toFixed(1)}M min` }),
+        
+        // Quality Filter: >= 1000 plays AND >= 500 unique players
+        topAvgMinutesPerPlayer: topN(enriched, "week_minutes_per_player_avg", 10, { 
+          filter: (i) => i.week_plays >= 1000 && i.week_unique >= 500,
+          label: fmtMin,
+          subtitle: (i) => `${i.week_plays?.toLocaleString()} plays`
+        }),
+
+        // Retention: >= 50 unique players (min sample)
+        topRetentionD1: topN(enriched, "week_d1_avg", 10, { 
+          filter: (i) => i.week_unique >= 50,
+          label: fmtPct 
+        }),
+        topRetentionD7: topN(enriched, "week_d7_avg", 10, { 
+          filter: (i) => i.week_unique >= 50,
+          label: fmtPct 
+        }),
+
+        topStickinessD1: topN(enriched, "stickinessD1", 10, { label: (i) => Number(i.value).toLocaleString() }),
+        topStickinessD7: topN(enriched, "stickinessD7", 10, { label: (i) => Number(i.value).toLocaleString() }),
+        topStickinessD1_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "stickinessD1", 10),
+        topStickinessD7_UGC: topN(ugcIslands.map((i: any) => ({ ...i, ...enriched.find((e: any) => e.island_code === i.island_code) })), "stickinessD7", 10),
+
+        topCreatorsByPlays: topN(creators, "totalPlays", 10, { label: fmtNum }),
+        topCreatorsByPlayers: topN(creators, "uniquePlayers", 10, { label: fmtNum }),
+        topCreatorsByMinutes: topN(creators, "minutesPlayed", 10, { label: (v) => `${(v.value / 1000000).toFixed(0)}M` }),
+        topCreatorsByCCU: topN(creators, "peakCCU", 10, { label: fmtNum }),
+        
+        topFavorites: topN(enriched, "week_favorites", 10, { label: fmtNum }),
+        topRecommendations: topN(enriched, "week_recommends", 10, { label: fmtNum }),
+        
+        // Efficiency: >= 1000 plays
+        topPlaysPerPlayer: topN(enriched, "playsPerPlayer", 10, { 
+          filter: (i) => i.week_plays >= 1000,
+          label: (v) => v.value.toFixed(2)
+        }),
+        topFavsPer100: topN(enriched, "favPer100", 10, { 
+          filter: (i) => i.week_unique >= 100 && i.week_favorites >= 10,
+          label: (v) => v.value.toFixed(1) + "%"
+        }),
+        topRecPer100: topN(enriched, "recPer100", 10, { 
+          filter: (i) => i.week_unique >= 100 && i.week_recommends >= 25,
+          label: (v) => v.value.toFixed(1) + "%"
+        }),
+        topFavsPerPlay: topN(enriched, "favToPlayRatio", 10, { filter: (i) => i.week_plays >= 1000, label: (v) => v.value.toFixed(4) }),
+        topRecsPerPlay: topN(enriched, "recToPlayRatio", 10, { filter: (i) => i.week_plays >= 1000, label: (v) => v.value.toFixed(4) }),
+
+        // Retention-Adjusted: >= 1000 plays & >= 500 uniques
+        topRetentionAdjD1: topN(enriched, "retentionAdjD1", 10, { 
+          filter: (i) => i.week_plays >= 1000 && i.week_unique >= 500,
+          label: (v) => v.value.toFixed(1)
+        }),
+        topRetentionAdjD7: topN(enriched, "retentionAdjD7", 10, { 
+          filter: (i) => i.week_plays >= 1000 && i.week_unique >= 500,
+          label: (v) => v.value.toFixed(1)
+        }),
+
+        topWeeklyGrowth: topRisers.slice(0, 10), // Placeholder for now, using risers
+
         categoryShare: categories.sort((a: any, b: any) => b.totalPlays - a.totalPlays).slice(0, 15),
         categoryPopularity: Object.fromEntries(
           categories.sort((a: any, b: any) => b.maps - a.maps).slice(0, 10).map((c: any) => [c.title || c.category, c.maps])
         ),
-        topCategoriesByPlays: topN(categories, "totalPlays", 10),
-        topCategoriesByPlayers: topN(categories, "uniquePlayers", 10),
+        topCategoriesByPlays: topN(categories, "totalPlays", 10, { label: fmtNum }),
         topTags,
-        topFavsPerPlay: topN(enriched, "favToPlayRatio", 10),
-        topRecsPerPlay: topN(enriched, "recToPlayRatio", 10),
         trendingTopics,
-        // Prefer Links metadata "launch date" when available; fallback to cache first_seen_at.
-        topNewIslandsByPlays: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_plays", 10),
-        topNewIslandsByPlayers: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_unique", 10),
-        topNewIslandsByCCU: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_peak_ccu_max", 10),
-        topNewIslandsByPlaysPublished: topN((newIslandsByLaunchRows || []) as any[], "week_plays", 10),
-        topNewIslandsByPlayersPublished: topN((newIslandsByLaunchRows || []) as any[], "week_unique", 10),
-        mostUpdatedIslandsThisWeek: topN((mostUpdatedRows || []) as any[], "week_plays", 20),
+        
+        // Metadata rankings
+        topNewIslandsByPlays: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_plays", 10, { label: fmtNum, subtitle: (i) => i.creator_code }),
+        topNewIslandsByPlayers: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_unique", 10, { label: fmtNum }),
+        topNewIslandsByCCU: topN((newIslandsByLaunchRows?.length ? newIslandsByLaunchRows : newIslandsReported) as any[], "week_peak_ccu_max", 10, { label: fmtNum }),
+        mostUpdatedIslandsThisWeek: topN((mostUpdatedRows || []) as any[], "week_plays", 20, { label: fmtNum }),
+        
         failedIslandsList: failedIslands
           .sort((a: any, b: any) => (a.week_unique || 0) - (b.week_unique || 0))
           .slice(0, 10)
@@ -1841,13 +1973,19 @@ serve(async (req) => {
             category: i.category,
             value: i.week_unique || 0,
             name: i.title || i.island_code,
+            label: `${i.week_unique} players`
           })),
-        // Phase 2 new rankings
+          
         topRisers,
         topDecliners,
         breakouts,
         revivedIslands: revivedIslands.sort((a, b) => b.value - a.value).slice(0, 10),
         deadIslands: deadIslands.sort((a, b) => b.value - a.value).slice(0, 10),
+        
+        // Distributions
+        retentionDistributionD1,
+        retentionDistributionD7,
+        lowPerfHistogram
       };
 
       // Update discover_islands cache (metadata only — metrics already written in metrics mode)

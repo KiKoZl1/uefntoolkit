@@ -151,7 +151,7 @@ Sections:
 
     // ── Step 1: Generate English narratives ──
     const sectionProps: Record<string, any> = {};
-    for (let i = 1; i <= 14; i++) {
+    for (let i = 1; i <= 19; i++) {
       sectionProps[`section${i}`] = {
         type: "object",
         properties: {

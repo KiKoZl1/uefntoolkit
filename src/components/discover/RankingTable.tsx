@@ -6,6 +6,7 @@ interface RankingItem {
   code?: string;
   value: number;
   label?: string;
+  subtitle?: string;
 }
 
 interface RankingTableProps {
@@ -44,8 +45,13 @@ export function RankingTable({ title, icon: Icon, items, valueFormatter = defaul
             </span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-0.5">
-                <span className="text-xs font-medium truncate">{item.name}</span>
-                <span className="text-xs font-display font-semibold ml-2 whitespace-nowrap">
+                <div className="flex flex-col min-w-0 mr-2">
+                  <span className="text-xs font-medium truncate">{item.name}</span>
+                  {item.subtitle && (
+                    <span className="text-[10px] text-muted-foreground truncate">{item.subtitle}</span>
+                  )}
+                </div>
+                <span className="text-xs font-display font-semibold whitespace-nowrap">
                   {item.label || valueFormatter(item.value)}
                 </span>
               </div>

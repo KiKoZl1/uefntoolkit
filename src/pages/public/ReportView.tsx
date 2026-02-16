@@ -3,15 +3,16 @@ import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { KpiCard } from "@/components/discover/KpiCard";
 import { RankingTable } from "@/components/discover/RankingTable";
 import { SectionHeader } from "@/components/discover/SectionHeader";
 import { AiNarrative } from "@/components/discover/AiNarrative";
+import { DistributionChart } from "@/components/discover/DistributionChart";
 import {
   ArrowLeft, Activity, Users, Play, Clock, TrendingUp, TrendingDown, Star, ThumbsUp,
-  BarChart3, Crown, Map as MapIcon, Layers, Zap, Target, PieChart, Tags, Sparkles,
-  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, Share2, Copy, EyeOff,
+  BarChart3, Crown, Map as MapIcon, Layers, Zap, Target, Tags, Sparkles,
+  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, Copy, EyeOff,
+  Magnet
 } from "lucide-react";
 import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
 import {
@@ -124,15 +125,13 @@ export default function ReportView() {
 
   const getNarrative = (sectionNum: number): string | null => {
     const sectionKey = `section${sectionNum}`;
-    // Editor override always takes priority
     const edited = editorSections[sectionKey];
     if (edited) return edited;
 
     const ai = aiSections[sectionKey];
     if (!ai) return null;
 
-    // Pick locale-specific narrative if available (e.g. narrative_pt_BR)
-    const localeKey = i18n.language.replace("-", "_"); // "pt-BR" → "pt_BR"
+    const localeKey = i18n.language.replace("-", "_");
     if (localeKey !== "en" && ai[`narrative_${localeKey}`]) {
       return ai[`narrative_${localeKey}`];
     }
@@ -193,8 +192,6 @@ export default function ReportView() {
         <KpiCard icon={Users} label={t("kpis.creators")} value={fmt(kpis.totalCreators)} />
         <KpiCard icon={Sparkles} label={t("kpis.newMaps")} value={fmt(kpis.newMapsThisWeek)} />
         <KpiCard icon={UserPlus} label={t("kpis.newCreators")} value={fmt(kpis.newCreatorsThisWeek)} />
-        <KpiCard icon={HeartPulse} label={t("kpis.revived")} value={fmt(kpis.revivedCount)} />
-        <KpiCard icon={Skull} label={t("kpis.dead")} value={fmt(kpis.deadCount)} />
       </div>
       <AiNarrative text={getNarrative(1)} />
 
@@ -220,84 +217,146 @@ export default function ReportView() {
         <KpiCard icon={BarChart3} label={t("kpis.avgCCU")} value={fmt(kpis.avgCCUPerMap)} />
         <KpiCard icon={Clock} label={t("kpis.avgDuration")} value={fmt(kpis.avgPlayDuration)} suffix=" min" />
       </div>
-      <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topPeakCCU")} icon={BarChart3} items={rankings.topPeakCCU || []} />
-        <RankingTable title={t("rankings.topUniquePlayers")} icon={Users} items={rankings.topUniquePlayers || []} />
-      </div>
       <AiNarrative text={getNarrative(3)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 4 */}
-      <SectionHeader icon={Sparkles} number={4} title={t("reportSections.s4Title")} description={t("reportSections.s4Desc")} />
+      {/* Section 4 (Peak CCU) */}
+      <SectionHeader icon={BarChart3} number={4} title={t("reportSections.s4Title")} description={t("reportSections.s4Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topNewByPlays")} icon={Play} items={rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []} />
-        <RankingTable title={t("rankings.topNewByPlayers")} icon={Users} items={rankings.topNewIslandsByPlayersPublished || rankings.topNewIslandsByPlayers || []} />
+        <RankingTable title={t("rankings.topPeakCCU")} icon={BarChart3} items={rankings.topPeakCCU || []} />
+        <RankingTable title={t("rankings.topPeakCCU_UGC")} icon={BarChart3} items={rankings.topPeakCCU_UGC || []} />
       </div>
-      {rankings.mostUpdatedIslandsThisWeek?.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <RankingTable title={t("rankings.mostUpdated")} icon={Zap} items={rankings.mostUpdatedIslandsThisWeek || []} />
-        </div>
-      )}
       <AiNarrative text={getNarrative(4)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 5 */}
-      <SectionHeader icon={TrendingUp} number={5} title={t("reportSections.s5Title")} description={t("reportSections.s5Desc")} />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <KpiCard icon={TrendingUp} label={t("kpis.avgD1")} value={pct(kpis.avgRetentionD1)} />
-        <KpiCard icon={TrendingUp} label={t("kpis.avgD7")} value={pct(kpis.avgRetentionD7)} />
-        <KpiCard icon={Star} label={t("kpis.favToPlay")} value={pct(kpis.favToPlayRatio)} />
-        <KpiCard icon={ThumbsUp} label={t("kpis.recToPlay")} value={pct(kpis.recToPlayRatio)} />
-      </div>
+      {/* Section 5 (New Islands) */}
+      <SectionHeader icon={Sparkles} number={5} title={t("reportSections.s5Title")} description={t("reportSections.s5Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topD1")} icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(Number(v))} />
-        <RankingTable title={t("rankings.topD7")} icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topNewByPlays")} icon={Play} items={rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []} />
+        <RankingTable title={t("rankings.topNewByCCU")} icon={BarChart3} items={rankings.topNewIslandsByCCU || []} />
       </div>
       <AiNarrative text={getNarrative(5)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 6 */}
-      <SectionHeader icon={Crown} number={6} title={t("reportSections.s6Title")} description={t("reportSections.s6Desc")} />
-      <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topCreatorsByPlays")} icon={Play} items={rankings.topCreatorsByPlays || []} />
-        <RankingTable title={t("rankings.topCreatorsByMinutes")} icon={Clock} items={rankings.topCreatorsByMinutes || []} />
+      {/* Section 6 (Retention & Loyalty) */}
+      <SectionHeader icon={TrendingUp} number={6} title={t("reportSections.s6Title")} description={t("reportSections.s6Desc")} />
+      <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 mb-4">
+        <KpiCard icon={TrendingUp} label={t("kpis.avgD1")} value={pct(kpis.avgRetentionD1)} />
+        <KpiCard icon={TrendingUp} label={t("kpis.avgD7")} value={pct(kpis.avgRetentionD7)} />
       </div>
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topD1")} icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topD7")} icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(Number(v))} />
+      </div>
+      {rankings.retentionDistributionD1 && (
+        <div className="grid md:grid-cols-2 gap-4 mb-4">
+          <DistributionChart title={t("rankings.retentionDistribution") + " (D1)"} data={rankings.retentionDistributionD1} />
+          <DistributionChart title={t("rankings.retentionDistribution") + " (D7)"} data={rankings.retentionDistributionD7} />
+        </div>
+      )}
       <AiNarrative text={getNarrative(6)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 7 */}
-      <SectionHeader icon={MapIcon} number={7} title={t("reportSections.s7Title")} description={t("reportSections.s7Desc")} />
+      {/* Section 7 (Creator Performance) */}
+      <SectionHeader icon={Crown} number={7} title={t("reportSections.s7Title")} description={t("reportSections.s7Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topAvgMinutes")} icon={Clock} items={rankings.topAvgMinutesPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
-        <RankingTable title={t("rankings.topFavorites")} icon={Star} items={rankings.topFavorites || []} />
+        <RankingTable title={t("rankings.topCreatorsByPlays")} icon={Play} items={rankings.topCreatorsByPlays || []} />
+        <RankingTable title={t("rankings.topCreatorsByMinutes")} icon={Clock} items={rankings.topCreatorsByMinutes || []} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topCreatorsByPlayers")} icon={Users} items={rankings.topCreatorsByPlayers || []} />
+        <RankingTable title={t("rankings.topCreatorsByCCU")} icon={BarChart3} items={rankings.topCreatorsByCCU || []} />
       </div>
       <AiNarrative text={getNarrative(7)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 8 */}
-      <SectionHeader icon={AlertTriangle} number={8} title={t("reportSections.s8Title")} description={t("reportSections.s8Desc")} />
-      <KpiCard icon={AlertTriangle} label={t("kpis.lowPerf")} value={fmt(kpis.failedIslands)} />
+      {/* Section 8 (Map Quality) */}
+      <SectionHeader icon={MapIcon} number={8} title={t("reportSections.s8Title")} description={t("reportSections.s8Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topAvgMinutes")} icon={Clock} items={rankings.topAvgMinutesPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
+        <RankingTable title={t("rankings.topMinutesPlayed")} icon={Clock} items={rankings.topMinutesPlayed || []} />
+      </div>
       <AiNarrative text={getNarrative(8)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 9 */}
-      <SectionHeader icon={Target} number={9} title={t("reportSections.s9Title")} description={t("reportSections.s9Desc")} />
-      <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.playsPerPlayer")} icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(2)} />
-        <RankingTable title={t("rankings.favsPer100")} icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => Number(v).toFixed(2)} />
+      {/* Section 9 (Low Performance) */}
+      <SectionHeader icon={AlertTriangle} number={9} title={t("reportSections.s9Title")} description={t("reportSections.s9Desc")} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <KpiCard icon={AlertTriangle} label={t("kpis.lowPerf")} value={fmt(kpis.failedIslands)} />
+          {rankings.lowPerfHistogram && (
+            <div className="mt-4">
+              <DistributionChart title={t("rankings.lowPerfHistogram")} data={rankings.lowPerfHistogram} barColor="#ef4444" />
+            </div>
+          )}
+        </div>
+        <RankingTable title={t("rankings.lowEngagement")} icon={AlertTriangle} items={rankings.failedIslandsList || []} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(9)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 10 */}
-      <SectionHeader icon={Layers} number={10} title={t("reportSections.s10Title")} description={t("reportSections.s10Desc")} />
+      {/* Section 10 (Plays per Player) */}
+      <SectionHeader icon={Zap} number={10} title={t("reportSections.s10Title")} description={t("reportSections.s10Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.playsPerPlayer")} icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(2)} />
+      </div>
+      <AiNarrative text={getNarrative(10)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 11 (Advocacy) */}
+      <SectionHeader icon={Target} number={11} title={t("reportSections.s11Title")} description={t("reportSections.s11Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.favsPer100")} icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
+        <RankingTable title={t("rankings.recsPer100")} icon={ThumbsUp} items={rankings.topRecPer100 || []} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
+      </div>
+      <AiNarrative text={getNarrative(11)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 12 (Efficiency) */}
+      <SectionHeader icon={Zap} number={12} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topFavsPerPlay")} icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topRecsPerPlay")} icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+      </div>
+      <AiNarrative text={getNarrative(12)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 13 (Stickiness) */}
+      <SectionHeader icon={Magnet} number={13} title={t("reportSections.s13Title")} description={t("reportSections.s13Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topStickinessD1")} icon={Magnet} items={rankings.topStickinessD1 || []} />
+        <RankingTable title={t("rankings.topStickinessD7")} icon={Magnet} items={rankings.topStickinessD7 || []} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topStickinessD1_UGC")} icon={Magnet} items={rankings.topStickinessD1_UGC || []} />
+        <RankingTable title={t("rankings.topStickinessD7_UGC")} icon={Magnet} items={rankings.topStickinessD7_UGC || []} />
+      </div>
+      <AiNarrative text={getNarrative(13)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 14 (Retention Adj Engagement) */}
+      <SectionHeader icon={Target} number={14} title={t("reportSections.s14Title")} description={t("reportSections.s14Desc")} />
+      <div className="grid md:grid-cols-2 gap-4 mb-4">
+        <RankingTable title={t("rankings.topRetentionAdjD1")} icon={Target} items={rankings.topRetentionAdjD1 || []} valueFormatter={(v) => Number(v).toFixed(1)} />
+        <RankingTable title={t("rankings.topRetentionAdjD7")} icon={Target} items={rankings.topRetentionAdjD7 || []} valueFormatter={(v) => Number(v).toFixed(1)} />
+      </div>
+      <AiNarrative text={getNarrative(14)} />
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 15 (Category) */}
+      <SectionHeader icon={Layers} number={15} title={t("reportSections.s10Title")} description={t("reportSections.s10Desc")} />
       {categoryData.length > 0 && (
         <div className="mb-4">
           <ResponsiveContainer width="100%" height={300}>
@@ -318,32 +377,31 @@ export default function ReportView() {
         <RankingTable title={t("rankings.topCategories")} icon={Tags} items={rankings.topCategoriesByPlays || []} />
         <RankingTable title={t("rankings.topTags")} icon={Tags} items={rankings.topTags || []} />
       </div>
-      <AiNarrative text={getNarrative(10)} />
+      <AiNarrative text={getNarrative(15)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 11 */}
-      <SectionHeader icon={Zap} number={11} title={t("reportSections.s11Title")} description={t("reportSections.s11Desc")} />
+      {/* Section 16 (Growth/Breakouts) */}
+      <SectionHeader icon={Rocket} number={16} title={t("reportSections.s16Title")} description={t("reportSections.s16Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topFavsPerPlay")} icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
-        <RankingTable title={t("rankings.topRecsPerPlay")} icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topWeeklyGrowth")} icon={Rocket} items={rankings.topWeeklyGrowth || []} barColor="bg-success" />
       </div>
-      <AiNarrative text={getNarrative(11)} />
+      <AiNarrative text={getNarrative(16)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 12 */}
-      <SectionHeader icon={Rocket} number={12} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
+      {/* Section 17 (Risers) */}
+      <SectionHeader icon={TrendingUp} number={17} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
         <RankingTable title={t("rankings.topRisers")} icon={TrendingUp} items={rankings.topRisers || []} barColor="bg-success" />
         <RankingTable title={t("rankings.topDecliners")} icon={TrendingDown} items={rankings.topDecliners || []} barColor="bg-destructive" />
       </div>
-      <AiNarrative text={getNarrative(12)} />
+      <AiNarrative text={getNarrative(17)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 13 */}
-      <SectionHeader icon={HeartPulse} number={13} title={t("reportSections.s13Title")} description={t("reportSections.s13Desc")} />
+      {/* Section 18 (Lifecycle) */}
+      <SectionHeader icon={HeartPulse} number={18} title={t("reportSections.s13Title")} description={t("reportSections.s13Desc")} />
       <div className="grid grid-cols-2 gap-3 mb-4">
         <KpiCard icon={HeartPulse} label={t("kpis.revived")} value={fmt(kpis.revivedCount)} />
         <KpiCard icon={Skull} label={t("kpis.dead")} value={fmt(kpis.deadCount)} />
@@ -352,15 +410,15 @@ export default function ReportView() {
         <RankingTable title={t("rankings.revivedIslands")} icon={HeartPulse} items={rankings.revivedIslands || []} barColor="bg-success" />
         <RankingTable title={t("rankings.deadIslands")} icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
       </div>
-      <AiNarrative text={getNarrative(13)} />
+      <AiNarrative text={getNarrative(18)} />
 
       {exposure?.profiles?.length > 0 && (
         <>
           <div className="border-t border-border my-8" />
           <TooltipProvider>
-            <SectionHeader icon={EyeOff} number={14} title={t("reportSections.s14Title")} description={t("reportSections.s14Desc")} />
+            <SectionHeader icon={EyeOff} number={19} title={t("reportSections.s14Title")} description={t("reportSections.s14Desc")} />
             <DiscoveryExposureSection exposure={exposure} weeklyReportId={report.id} t={t} locale={locale} fmtDateTime={fmtDateTime} />
-            <AiNarrative text={getNarrative(14)} />
+            <AiNarrative text={getNarrative(19)} />
           </TooltipProvider>
         </>
       )}
@@ -393,7 +451,7 @@ function DiscoveryExposureSection({ exposure, weeklyReportId, t, locale, fmtDate
     if (!opts.find((p: any) => String(p.panelName) === panelName)) {
       setPanelName(opts[0]?.panelName || "");
     }
-  }, [profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profileId]);
 
   const segs = activeTimeline.filter((s: any) => String(s.targetId) === profileId && String(s.panelName) === panelName);
   const segsByRank = new Map<number, any[]>();
@@ -423,7 +481,6 @@ function DiscoveryExposureSection({ exposure, weeklyReportId, t, locale, fmtDate
     setNextOffset(null);
     if (rankMax <= 10) return;
     fetchFull();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rankMax, profileId, panelName, weeklyReportId]);
 
   const topRows = topByPanel
