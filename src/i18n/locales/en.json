@@ -176,7 +176,9 @@
     "s25Title": "UEFN vs Fortnite Creative",
     "s25Desc": "Tool comparison: which development environment produces better results",
     "s26Title": "Exposure Efficiency",
-    "s26Desc": "Which islands convert Discovery panel exposure into actual plays best"
+    "s26Desc": "Which islands convert Discovery panel exposure into actual plays best",
+    "s27Title": "Discovery Pollution",
+    "s27Desc": "Creators flooding the ecosystem with duplicate or spam islands this week"
   },
   "kpis": {
     "activeIslands": "Active Islands",

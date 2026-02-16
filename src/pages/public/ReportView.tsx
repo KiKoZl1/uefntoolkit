@@ -13,7 +13,7 @@ import {
   ArrowLeft, Activity, Users, Play, Clock, TrendingUp, TrendingDown, Star, ThumbsUp,
   BarChart3, Crown, Map as MapIcon, Layers, Zap, Target, Tags, Sparkles,
   AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, Copy, EyeOff,
-  Magnet, Grid3X3, Anchor, RefreshCw, Baby, UsersRound, Wrench, Crosshair
+  Magnet, Grid3X3, Anchor, RefreshCw, Baby, UsersRound, Wrench, Crosshair, Ban
 } from "lucide-react";
 import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
 import {
@@ -729,6 +729,60 @@ export default function ReportView() {
             ))}
           </div>
           <AiNarrative text={getNarrative(26)} />
+        </>
+      )}
+
+      <div className="border-t border-border my-8" />
+
+      {/* Section 27 (Discovery Pollution) */}
+      {rankings.discoveryPollution?.length > 0 && (
+        <>
+          <SectionHeader icon={Ban} number={27} title={t("reportSections.s27Title")} description={t("reportSections.s27Desc")} />
+          <Card className="backdrop-blur-sm bg-card/80 border-border/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Ban className="h-4 w-4 text-destructive" />
+                {t("reportSections.s27Title")} (7d)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(rankings.discoveryPollution || []).map((item: any, idx: number) => {
+                const isTop = item.spam_score >= 100;
+                return (
+                  <details key={idx} className="group">
+                    <summary className="flex items-center gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                      <span className={`text-xs font-mono w-6 text-center shrink-0 ${isTop ? "text-destructive font-bold" : "text-muted-foreground"}`}>
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium truncate block">
+                          @{item.creator_code}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground truncate block">
+                          clusters: {item.duplicate_clusters_7d} · islands: {item.duplicate_islands_7d} · over min: {item.duplicates_over_min}
+                        </span>
+                      </div>
+                      <span className={`text-xs font-display font-semibold whitespace-nowrap ${isTop ? "text-destructive" : "text-primary"}`}>
+                        Score {item.spam_score}
+                      </span>
+                      <span className="text-muted-foreground text-xs group-open:rotate-90 transition-transform">▶</span>
+                    </summary>
+                    {Array.isArray(item.sample_titles) && item.sample_titles.length > 0 && (
+                      <div className="mt-2 ml-9 space-y-1">
+                        {item.sample_titles.map((title: string, ti: number) => (
+                          <div key={ti} className="text-[11px] text-muted-foreground flex items-center gap-2">
+                            <span className="w-4 text-center font-mono">{ti + 1}</span>
+                            <span className="truncate">{title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </details>
+                );
+              })}
+            </CardContent>
+          </Card>
+          <AiNarrative text={getNarrative(27)} />
         </>
       )}
     </div>

@@ -277,6 +277,24 @@ serve(async (req) => {
 
       computedRankings.evidence = evidence;
 
+      // ── Fetch pollution data ──
+      const { data: pollutionRows } = await supabase
+        .from("discovery_public_pollution_creators_now")
+        .select("*")
+        .order("spam_score", { ascending: false })
+        .limit(30);
+      if (pollutionRows && pollutionRows.length > 0) {
+        computedRankings.discoveryPollution = pollutionRows.map((r: any) => ({
+          creator_code: r.creator_code,
+          spam_score: r.spam_score,
+          duplicate_clusters_7d: r.duplicate_clusters_7d,
+          duplicate_islands_7d: r.duplicate_islands_7d,
+          duplicates_over_min: r.duplicates_over_min,
+          sample_titles: r.sample_titles || [],
+          as_of: r.as_of,
+        }));
+      }
+
       const { data: wrExisting } = await supabase
         .from("weekly_reports")
         .select("id,rebuild_count")
