@@ -367,6 +367,51 @@ export type Database = {
         }
         Relationships: []
       }
+      discover_lookup_pipeline_runs: {
+        Row: {
+          category_leaders_count: number | null
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          error_type: string | null
+          has_discovery_signals: boolean | null
+          has_internal_card: boolean | null
+          has_weekly_performance: boolean | null
+          id: number
+          island_code: string
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          category_leaders_count?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_type?: string | null
+          has_discovery_signals?: boolean | null
+          has_internal_card?: boolean | null
+          has_weekly_performance?: boolean | null
+          id?: never
+          island_code?: string
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          category_leaders_count?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_type?: string | null
+          has_discovery_signals?: boolean | null
+          has_internal_card?: boolean | null
+          has_weekly_performance?: boolean | null
+          id?: never
+          island_code?: string
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       discover_report_islands: {
         Row: {
           category: string | null
@@ -1676,6 +1721,10 @@ export type Database = {
         Args: { p_days?: number; p_delete_batch?: number }
         Returns: Json
       }
+      cleanup_discover_lookup_pipeline_runs: {
+        Args: { p_days?: number; p_delete_batch?: number }
+        Returns: Json
+      }
       compute_discovery_exposure_rollup_daily: {
         Args: { p_date: string }
         Returns: number
@@ -1761,6 +1810,11 @@ export type Database = {
       }
       get_link_card: { Args: { p_link_code: string }; Returns: Json }
       get_link_graph_stats: { Args: never; Returns: Json }
+      get_lookup_pipeline_error_breakdown: {
+        Args: { p_hours?: number; p_limit?: number }
+        Returns: Json
+      }
+      get_lookup_pipeline_stats: { Args: never; Returns: Json }
       get_metadata_pipeline_stats: { Args: never; Returns: Json }
       get_panel_display_name: {
         Args: { p_panel_name: string }
