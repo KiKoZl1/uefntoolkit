@@ -327,6 +327,9 @@ export default function AdminOverview() {
   const [enqueueLoading, setEnqueueLoading] = useState(false);
   const [metaFlash, setMetaFlash] = useState(false);
 
+  // Backfill collections
+  const [backfillLoading, setBackfillLoading] = useState(false);
+
   const addLog = useCallback((msg: string) => {
     setLogs(p => [...p.slice(-80), { time: timeNow(), message: msg }]);
   }, []);
@@ -461,6 +464,28 @@ export default function AdminOverview() {
       collectionsDueNow: Number(s.collections_due_now || 0),
     });
   }, []);
+
+  const handleBackfillCollections = useCallback(async () => {
+    setBackfillLoading(true);
+    try {
+      const res = await supabase.functions.invoke("discover-links-metadata-collector", {
+        body: { mode: "backfill_recent_collections", lookbackHours: 72, maxCodes: 5000, dueWithinMinutes: 0 },
+      });
+      if (res.error) throw new Error(res.error.message);
+      const d = res.data || {};
+      toast({
+        title: "Backfill disparado",
+        description: `${fmt(d.enqueued || d.inserted || 0)} collections enfileiradas. ${d.message || ""}`,
+      });
+      addLog(`Backfill collections: ${JSON.stringify(d)}`);
+      await fetchLinkGraph();
+    } catch (e: any) {
+      toast({ title: "Erro no backfill", description: e.message, variant: "destructive" });
+      addLog(`Backfill erro: ${e.message}`);
+    } finally {
+      setBackfillLoading(false);
+    }
+  }, [toast, addLog, fetchLinkGraph]);
 
   const fetchCrons = useCallback(async () => {
     // We can't query cron.job directly from client, use hardcoded known crons with health inference
@@ -863,6 +888,12 @@ export default function AdminOverview() {
               {(linkGraph?.edgeAgeSeconds ?? 0) > 21600 ? (
                 <p className="text-yellow-600">Link graph desatualizado (&gt; 6h). Verifique cron do metadata orchestrate.</p>
               ) : null}
+              <div className="pt-1.5 border-t flex items-center justify-end">
+                <Button size="sm" variant="outline" onClick={handleBackfillCollections} disabled={backfillLoading} className="text-xs">
+                  {backfillLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Zap className="h-3 w-3 mr-1" />}
+                  Backfill Collections (72h)
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
