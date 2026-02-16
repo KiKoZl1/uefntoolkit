@@ -226,7 +226,7 @@ serve(async (req) => {
     }
 
     const budgetMs = Number(body.budgetMs ?? 45_000);
-    const maxItems = Math.min(200, Math.max(1, Number(body.maxItems ?? 200)));
+    const maxItems = Math.min(1000, Math.max(1, Number(body.maxItems ?? 500)));
 
     const startedAt = Date.now();
     const now = new Date();
