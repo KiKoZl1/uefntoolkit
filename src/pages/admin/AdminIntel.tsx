@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, RefreshCw } from "lucide-react";
 
 export default function AdminIntel() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
+
   const [loading, setLoading] = useState(true);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [premiumCount, setPremiumCount] = useState<number>(0);
@@ -40,14 +44,14 @@ export default function AdminIntel() {
 
   useEffect(() => {
     loadCounts();
-    const t = setInterval(loadCounts, 60_000);
-    return () => clearInterval(t);
+    const interval = setInterval(loadCounts, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   const asOfLabel = useMemo(() => {
     if (!asOf) return "—";
-    return new Date(asOf).toLocaleString("pt-BR");
-  }, [asOf]);
+    return new Date(asOf).toLocaleString(locale);
+  }, [asOf, locale]);
 
   if (loading) {
     return (
@@ -61,14 +65,12 @@ export default function AdminIntel() {
     <div className="px-6 py-10 max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold">Intel</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Snapshots públicos (Premium Now, Emerging, Pollution). Atualiza via cron a cada 5 min.
-          </p>
+          <h1 className="font-display text-2xl font-bold">{t("adminIntel.title")}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t("adminIntel.subtitle")}</p>
         </div>
         <Button onClick={refreshNow} disabled={refreshing} className="gap-2">
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Refresh agora
+          {t("adminIntel.refreshNow")}
         </Button>
       </div>
 
@@ -82,7 +84,7 @@ export default function AdminIntel() {
       {lastResult && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Último refresh (resultado)</CardTitle>
+            <CardTitle className="text-sm font-medium">{t("adminIntel.lastRefreshResult")}</CardTitle>
           </CardHeader>
           <CardContent>
             <pre className="text-xs whitespace-pre-wrap bg-muted/40 border rounded-md p-3 overflow-auto">
@@ -94,20 +96,13 @@ export default function AdminIntel() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">Notas</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("adminIntel.notesTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
-          <p>
-            Estes snapshots são publicáveis porque ficam em tabelas dedicadas com RLS permitindo SELECT público, sem expor
-            os dados internos de Exposure (ticks/raw/segments).
-          </p>
-          <p>
-            Se quiser limitar abuso, dá para exigir um header/token interno no modo <span className="font-mono">intel_refresh</span>{" "}
-            e colocar esse token só no cron. Hoje o refresh é barato (tabelas pequenas), mas é uma melhoria fácil.
-          </p>
+          <p>{t("adminIntel.notesP1")}</p>
+          <p>{t("adminIntel.notesP2")}</p>
         </CardContent>
       </Card>
     </div>
   );
 }
-

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,13 +56,10 @@ function fmtNum(n: number | null | undefined): string {
   return n.toLocaleString("en-US");
 }
 
-function surfaceLabel(s: string): string {
-  if (s === "CreativeDiscoverySurface_Frontend") return "Frontend";
-  if (s === "CreativeDiscoverySurface_Browse") return "Browse";
-  return s;
-}
-
 export default function DiscoverLive() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
+
   const [loading, setLoading] = useState(true);
   const [premium, setPremium] = useState<PremiumRow[]>([]);
   const [emerging, setEmerging] = useState<EmergingRow[]>([]);
@@ -150,28 +148,24 @@ export default function DiscoverLive() {
   return (
     <div className="px-6 py-12 max-w-6xl mx-auto space-y-8">
       <div className="flex flex-col gap-2">
-        <h1 className="font-display text-3xl font-bold">Discovery Live</h1>
-        <p className="text-muted-foreground">
-          Painéis premium ao vivo, emergentes e sinais de poluição do Discovery (atualizado automaticamente).
-        </p>
+        <h1 className="font-display text-3xl font-bold">{t("discover.title")}</h1>
+        <p className="text-muted-foreground">{t("discover.subtitle")}</p>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="secondary" className="font-mono">
-            as_of: {asOf ? asOf.toLocaleString("pt-BR") : "—"}
+            as_of: {asOf ? asOf.toLocaleString(locale) : "—"}
           </Badge>
         </div>
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">Filtro</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("common.filter")}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Região</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("common.region")}</p>
             <Select value={region} onValueChange={setRegion}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {["NAE", "EU", "BR", "ASIA"].map((r) => (
                   <SelectItem key={r} value={r}>{r}</SelectItem>
@@ -180,11 +174,9 @@ export default function DiscoverLive() {
             </Select>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Surface</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("common.surface")}</p>
             <Select value={surface} onValueChange={setSurface}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="CreativeDiscoverySurface_Frontend">Frontend</SelectItem>
                 <SelectItem value="CreativeDiscoverySurface_Browse">Browse</SelectItem>
@@ -192,11 +184,9 @@ export default function DiscoverLive() {
             </Select>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Panel (premium)</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("discover.panelPremium")}</p>
             <Select value={panelName} onValueChange={setPanelName}>
-              <SelectTrigger>
-                <SelectValue placeholder="—" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent>
                 {panels.map((p) => (
                   <SelectItem key={p.name} value={p.name}>{p.display}</SelectItem>
@@ -211,12 +201,12 @@ export default function DiscoverLive() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Eye className="h-4 w-4" /> Premium Now
+              <Eye className="h-4 w-4" /> {t("discover.premiumNow")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {premiumInPanel.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem dados para este filtro.</p>
+              <p className="text-sm text-muted-foreground">{t("discover.noDataFilter")}</p>
             ) : (
               premiumInPanel.map((r) => (
                 <div key={`${r.panel_name}:${r.rank}`} className="flex items-center justify-between gap-3">
@@ -228,7 +218,7 @@ export default function DiscoverLive() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-muted-foreground">CCU</p>
+                    <p className="text-xs text-muted-foreground">{t("common.ccu")}</p>
                     <p className="font-display font-semibold">{fmtNum(r.ccu)}</p>
                   </div>
                 </div>
@@ -240,20 +230,20 @@ export default function DiscoverLive() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" /> Emerging (24h)
+              <TrendingUp className="h-4 w-4" /> {t("discover.emerging")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {emergingRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem dados para este filtro.</p>
+              <p className="text-sm text-muted-foreground">{t("discover.noDataFilter")}</p>
             ) : (
               emergingRows.map((r) => (
                 <div key={r.link_code} className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.title || r.link_code}</p>
                     <p className="text-[11px] text-muted-foreground truncate">
-                      {r.creator_code ? `@${r.creator_code}` : r.link_code_type} · first_seen{" "}
-                      {new Date(r.first_seen_at).toLocaleString("pt-BR")}
+                      {r.creator_code ? `@${r.creator_code}` : r.link_code_type} · {t("discover.firstSeen")}{" "}
+                      {new Date(r.first_seen_at).toLocaleString(locale)}
                     </p>
                     <p className="text-[11px] text-muted-foreground truncate">
                       6h: {fmtNum(r.minutes_6h)}m · 24h: {fmtNum(r.minutes_24h)}m · panels: {fmtNum(r.panels_24h)} · premium:{" "}
@@ -261,7 +251,7 @@ export default function DiscoverLive() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Score</p>
+                    <p className="text-xs text-muted-foreground">{t("common.score")}</p>
                     <p className="font-display font-semibold">{fmtNum(Math.round(r.score))}</p>
                   </div>
                 </div>
@@ -274,12 +264,12 @@ export default function DiscoverLive() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4" /> Discovery Pollution (7d)
+            <AlertTriangle className="h-4 w-4" /> {t("discover.pollution")}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid md:grid-cols-2 gap-4">
           {pollutionRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sem dados.</p>
+            <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
           ) : (
             pollutionRows.map((r) => (
               <div key={r.creator_code} className="rounded-md border p-3">
@@ -287,12 +277,12 @@ export default function DiscoverLive() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">@{r.creator_code}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      clusters: {fmtNum(r.duplicate_clusters_7d)} · islands: {fmtNum(r.duplicate_islands_7d)} · over_min:{" "}
+                      {t("common.clusters")}: {fmtNum(r.duplicate_clusters_7d)} · {t("common.islands")}: {fmtNum(r.duplicate_islands_7d)} · {t("common.overMin")}:{" "}
                       {fmtNum(r.duplicates_over_min)}
                     </p>
                   </div>
                   <Badge variant="secondary" className="font-mono">
-                    score {fmtNum(Math.round(r.spam_score))}
+                    {t("common.score")} {fmtNum(Math.round(r.spam_score))}
                   </Badge>
                 </div>
                 {Array.isArray(r.sample_titles) && r.sample_titles.length > 0 && (
@@ -312,4 +302,3 @@ export default function DiscoverLive() {
     </div>
   );
 }
-

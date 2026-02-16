@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,15 +15,14 @@ import { ArrowLeft, Save, Globe, EyeOff, Loader2, Upload, Image, ChevronDown, Bo
 import ReactMarkdown from "react-markdown";
 import { ReportPreview } from "@/components/admin/ReportPreview";
 
-const SECTION_NAMES = [
-  "Core Activity", "Trending Topics", "Player Engagement", "Novas Ilhas",
-  "Retention & Loyalty", "Creator Performance", "Map Quality", "Low Performance",
-  "Ratios & Derived", "Categories & Tags", "Efficiency", "Risers & Decliners", "Island Lifecycle",
-  "Discovery Exposure",
+const SECTION_KEYS = [
+  "s1Title", "s2Title", "s3Title", "s4Title", "s5Title", "s6Title", "s7Title",
+  "s8Title", "s9Title", "s10Title", "s11Title", "s12Title", "s13Title", "s14Title",
 ];
 
 export default function AdminReportEditor() {
   const { id } = useParams<{ id: string }>();
+  const { t } = useTranslation();
   const [report, setReport] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,9 +65,9 @@ export default function AdminReportEditor() {
     } as any).eq("id", id);
     setSaving(false);
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Salvo!" });
+      toast({ title: t("admin.saved") });
     }
   };
 
@@ -80,7 +80,7 @@ export default function AdminReportEditor() {
     }).eq("id", id);
     if (!error) {
       setReport({ ...report, status: newStatus });
-      toast({ title: newStatus === "published" ? "Publicado!" : "Despublicado" });
+      toast({ title: newStatus === "published" ? t("admin.published") : t("admin.unpublished") });
     }
   };
 
@@ -92,10 +92,10 @@ export default function AdminReportEditor() {
     });
     setRebuilding(false);
     if (error) {
-      toast({ title: "Erro ao regenerar", description: error.message, variant: "destructive" });
+      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Regenerado!", description: `baseline=${data?.baselineAvailable ? "yes" : "no"} · metadataTitlePct=${Math.round((data?.metadataCoverage?.titlePct || 0) * 100)}%` });
+    toast({ title: t("admin.regenerated"), description: `baseline=${data?.baselineAvailable ? "yes" : "no"} · metadataTitlePct=${Math.round((data?.metadataCoverage?.titlePct || 0) * 100)}%` });
     const { data: refreshed } = await supabase.from("weekly_reports").select("*").eq("id", id).single();
     if (refreshed) setReport(refreshed);
   };
@@ -108,14 +108,14 @@ export default function AdminReportEditor() {
     const path = `covers/${id}.${ext}`;
     const { error } = await supabase.storage.from("report-assets").upload(path, file, { upsert: true });
     if (error) {
-      toast({ title: "Erro no upload", description: error.message, variant: "destructive" });
+      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
       setUploading(false);
       return;
     }
     const { data: urlData } = supabase.storage.from("report-assets").getPublicUrl(path);
     setCoverUrl(urlData.publicUrl);
     setUploading(false);
-    toast({ title: "Capa enviada!" });
+    toast({ title: t("admin.coverSent") });
   };
 
   const updateSection = (num: number, text: string) => {
@@ -142,7 +142,7 @@ export default function AdminReportEditor() {
   };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (!report) return <div className="p-6 text-center text-muted-foreground">Report não encontrado</div>;
+  if (!report) return <div className="p-6 text-center text-muted-foreground">{t("admin.reportNotFound")}</div>;
 
   const aiSections = report.ai_sections_json || {};
 
@@ -150,46 +150,38 @@ export default function AdminReportEditor() {
     <div className="p-6 max-w-5xl mx-auto pb-20">
       <div className="flex items-center justify-between mb-6">
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/admin/reports"><ArrowLeft className="h-4 w-4 mr-1" /> Voltar</Link>
+          <Link to="/admin/reports"><ArrowLeft className="h-4 w-4 mr-1" /> {t("admin.backBtn")}</Link>
         </Button>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSave} disabled={saving}>
-            <Save className="h-4 w-4 mr-1" /> {saving ? "Salvando..." : "Salvar"}
+            <Save className="h-4 w-4 mr-1" /> {saving ? t("common.saving") : t("common.save")}
           </Button>
           <Button variant="outline" onClick={handleRebuild} disabled={rebuilding}>
             <RefreshCw className={"h-4 w-4 mr-1 " + (rebuilding ? "animate-spin" : "")} />
-            {rebuilding ? "Regenerando..." : "Regenerar (DB-only)"}
+            {rebuilding ? t("admin.regenerating") : t("admin.regenerateDb")}
           </Button>
           <Button variant={report.status === "published" ? "destructive" : "default"} onClick={togglePublish}>
-            {report.status === "published" ? <><EyeOff className="h-4 w-4 mr-1" /> Despublicar</> : <><Globe className="h-4 w-4 mr-1" /> Publicar</>}
+            {report.status === "published" ? <><EyeOff className="h-4 w-4 mr-1" /> {t("admin.unpublish")}</> : <><Globe className="h-4 w-4 mr-1" /> {t("admin.publish")}</>}
           </Button>
         </div>
       </div>
 
       <Tabs defaultValue="edit" className="w-full">
         <TabsList className="mb-6">
-          <TabsTrigger value="edit">✏️ Editar</TabsTrigger>
-          <TabsTrigger value="preview">👁️ Preview</TabsTrigger>
+          <TabsTrigger value="edit">{t("admin.editTab")}</TabsTrigger>
+          <TabsTrigger value="preview">{t("admin.previewTab")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="edit">
           <div className="space-y-6">
-            {/* Cover Image */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Imagem de Capa</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-lg">{t("admin.coverImage")}</CardTitle></CardHeader>
               <CardContent>
                 <div className="flex items-start gap-4">
                   {coverUrl ? (
                     <div className="relative group">
                       <img src={coverUrl} alt="Cover" className="h-32 w-56 object-cover rounded-lg border" />
-                      <button
-                        onClick={() => setCoverUrl("")}
-                        className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        ×
-                      </button>
+                      <button onClick={() => setCoverUrl("")} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                     </div>
                   ) : (
                     <div className="h-32 w-56 rounded-lg border-2 border-dashed border-muted-foreground/30 flex items-center justify-center">
@@ -199,51 +191,41 @@ export default function AdminReportEditor() {
                   <div className="space-y-2">
                     <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
                     <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                      <Upload className="h-4 w-4 mr-1" /> {uploading ? "Enviando..." : "Upload capa"}
+                      <Upload className="h-4 w-4 mr-1" /> {uploading ? t("admin.uploading") : t("admin.uploadCover")}
                     </Button>
-                    <p className="text-xs text-muted-foreground">Recomendado: 1200×400px, JPG/PNG</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.coverRecommended")}</p>
                     <div className="flex items-center gap-2">
-                      <Input
-                        value={coverUrl}
-                        onChange={(e) => setCoverUrl(e.target.value)}
-                        placeholder="Ou cole uma URL de imagem..."
-                        className="text-xs h-8"
-                      />
+                      <Input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder={t("admin.coverUrlPlaceholder")} className="text-xs h-8" />
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Public Info */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Informações Públicas</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-lg">{t("admin.publicInfo")}</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Título Público</Label>
+                  <Label>{t("admin.publicTitle")}</Label>
                   <Input value={titlePublic} onChange={(e) => setTitlePublic(e.target.value)} placeholder="Fortnite Discovery - Semana X/2026" />
                 </div>
                 <div>
-                  <Label>Subtítulo</Label>
-                  <Input value={subtitlePublic} onChange={(e) => setSubtitlePublic(e.target.value)} placeholder="Destaques da semana..." />
+                  <Label>{t("admin.subtitle")}</Label>
+                  <Input value={subtitlePublic} onChange={(e) => setSubtitlePublic(e.target.value)} />
                 </div>
                 <div>
-                  <Label>Nota Editorial (Markdown)</Label>
-                  <Textarea value={editorNote} onChange={(e) => setEditorNote(e.target.value)} rows={4} placeholder="Comentários e observações da equipe editorial..." />
+                  <Label>{t("admin.editorNoteLabel")}</Label>
+                  <Textarea value={editorNote} onChange={(e) => setEditorNote(e.target.value)} rows={4} placeholder={t("admin.editorNotePlaceholder")} />
                   {editorNote && (
                     <div className="mt-2 rounded-md border p-3 bg-muted/30">
-                      <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">Preview</p>
-                      <div className="prose prose-sm max-w-none text-foreground/80">
-                        <ReactMarkdown>{editorNote}</ReactMarkdown>
-                      </div>
+                      <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">{t("admin.preview")}</p>
+                      <div className="prose prose-sm max-w-none text-foreground/80"><ReactMarkdown>{editorNote}</ReactMarkdown></div>
                     </div>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Badge variant={report.status === "published" ? "default" : "secondary"}>
-                    {report.status === "published" ? "Publicado" : "Draft"}
+                    {report.status === "published" ? t("common.published") : t("common.draft")}
                   </Badge>
                   <span>Slug: {report.public_slug}</span>
                   <span>·</span>
@@ -252,9 +234,9 @@ export default function AdminReportEditor() {
               </CardContent>
             </Card>
 
-            {/* Sections */}
-            {SECTION_NAMES.map((name, idx) => {
+            {SECTION_KEYS.map((key, idx) => {
               const num = idx + 1;
+              const sectionName = t(`reportSections.${key}`);
               const aiText = aiSections[`section${num}`]?.narrative || "";
               const editorText = editorSections[`section${num}`] || "";
               const showPreview = sectionPreviews[num];
@@ -262,53 +244,35 @@ export default function AdminReportEditor() {
               return (
                 <Card key={num}>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">Seção {num}: {name}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{t("admin.sectionLabel")} {num}: {sectionName}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {aiText && (
                       <Collapsible>
                         <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
                           <ChevronDown className="h-3 w-3" />
-                          Texto da IA (original)
+                          {t("admin.aiText")}
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <div className="bg-muted/50 rounded-md p-3 text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto mt-1">
-                            {aiText}
-                          </div>
+                          <div className="bg-muted/50 rounded-md p-3 text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto mt-1">{aiText}</div>
                         </CollapsibleContent>
                       </Collapsible>
                     )}
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <Label className="text-xs">Texto editado (sobrescreve IA se preenchido)</Label>
+                        <Label className="text-xs">{t("admin.editedText")}</Label>
                         <div className="flex items-center gap-1">
-                          <button onClick={() => insertMarkdown(num, "**", "**")} className="p-1 rounded hover:bg-muted" title="Bold">
-                            <Bold className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
-                          <button onClick={() => insertMarkdown(num, "*", "*")} className="p-1 rounded hover:bg-muted" title="Italic">
-                            <Italic className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
-                          <button onClick={() => insertMarkdown(num, "[", "](url)")} className="p-1 rounded hover:bg-muted" title="Link">
-                            <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
-                          <button onClick={() => toggleSectionPreview(num)} className={`p-1 rounded hover:bg-muted ${showPreview ? 'bg-muted' : ''}`} title="Preview">
-                            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
+                          <button onClick={() => insertMarkdown(num, "**", "**")} className="p-1 rounded hover:bg-muted" title="Bold"><Bold className="h-3.5 w-3.5 text-muted-foreground" /></button>
+                          <button onClick={() => insertMarkdown(num, "*", "*")} className="p-1 rounded hover:bg-muted" title="Italic"><Italic className="h-3.5 w-3.5 text-muted-foreground" /></button>
+                          <button onClick={() => insertMarkdown(num, "[", "](url)")} className="p-1 rounded hover:bg-muted" title="Link"><Link2 className="h-3.5 w-3.5 text-muted-foreground" /></button>
+                          <button onClick={() => toggleSectionPreview(num)} className={`p-1 rounded hover:bg-muted ${showPreview ? 'bg-muted' : ''}`} title="Preview"><Eye className="h-3.5 w-3.5 text-muted-foreground" /></button>
                         </div>
                       </div>
-                      <Textarea
-                        id={`section-editor-${num}`}
-                        value={editorText}
-                        onChange={(e) => updateSection(num, e.target.value)}
-                        rows={4}
-                        placeholder="Deixe vazio para usar o texto da IA..."
-                      />
+                      <Textarea id={`section-editor-${num}`} value={editorText} onChange={(e) => updateSection(num, e.target.value)} rows={4} placeholder={t("admin.editedPlaceholder")} />
                       {showPreview && editorText && (
                         <div className="mt-2 rounded-md border p-3 bg-muted/30">
-                          <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">Preview Markdown</p>
-                          <div className="prose prose-sm max-w-none text-foreground/80">
-                            <ReactMarkdown>{editorText}</ReactMarkdown>
-                          </div>
+                          <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">{t("admin.previewMarkdown")}</p>
+                          <div className="prose prose-sm max-w-none text-foreground/80"><ReactMarkdown>{editorText}</ReactMarkdown></div>
                         </div>
                       )}
                     </div>
@@ -322,7 +286,7 @@ export default function AdminReportEditor() {
         <TabsContent value="preview">
           <div className="border rounded-xl p-6 bg-background">
             <div className="flex items-center gap-2 mb-4">
-              <Badge variant="outline" className="text-xs">Preview — Como o público verá</Badge>
+              <Badge variant="outline" className="text-xs">{t("admin.previewPublic")}</Badge>
             </div>
             <ReportPreview
               report={report}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,21 +47,13 @@ function hashHue(s: string): number {
   return h % 360;
 }
 
-function fmtDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("pt-BR", { hour12: false });
-  } catch {
-    return iso;
-  }
-}
-
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
   const num = Number(n);
   if (isNaN(num)) return "—";
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
   if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
-  if (Number.isInteger(num)) return num.toLocaleString("pt-BR");
+  if (Number.isInteger(num)) return num.toLocaleString("en-US");
   return num.toFixed(2);
 }
 
@@ -87,9 +80,15 @@ interface WeeklyReport {
 
 export default function ReportView() {
   const { slug } = useParams<{ slug: string }>();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
   const [report, setReport] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+
+  const fmtDateTime = (iso: string): string => {
+    try { return new Date(iso).toLocaleString(locale, { hour12: false }); } catch { return iso; }
+  };
 
   useEffect(() => {
     if (!slug) return;
@@ -109,9 +108,9 @@ export default function ReportView() {
   if (!report) {
     return (
       <div className="p-6 text-center py-20">
-        <p className="text-muted-foreground mb-4">Report não encontrado</p>
+        <p className="text-muted-foreground mb-4">{t("reports.notFound")}</p>
         <Button variant="outline" asChild>
-          <Link to="/reports"><ArrowLeft className="h-4 w-4 mr-2" /> Ver todos</Link>
+          <Link to="/reports"><ArrowLeft className="h-4 w-4 mr-2" /> {t("reports.viewAll")}</Link>
         </Button>
       </div>
     );
@@ -132,7 +131,7 @@ export default function ReportView() {
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
-    toast({ title: "Link copiado!" });
+    toast({ title: t("common.linkCopied") });
   };
 
   const categoryData = rankings.categoryPopularity
@@ -144,162 +143,151 @@ export default function ReportView() {
 
   return (
     <div className="px-6 py-8 max-w-6xl mx-auto pb-20">
-      {/* Cover Image */}
       {(report as any).cover_image_url && (
         <div className="rounded-xl overflow-hidden mb-6 max-h-64">
           <img src={(report as any).cover_image_url} alt="Report cover" className="w-full h-64 object-cover" />
         </div>
       )}
 
-      {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
           <Button variant="ghost" size="sm" className="mb-2" asChild>
-            <Link to="/reports"><ArrowLeft className="h-4 w-4 mr-1" /> Todos os reports</Link>
+            <Link to="/reports"><ArrowLeft className="h-4 w-4 mr-1" /> {t("reports.allReports")}</Link>
           </Button>
           <h1 className="font-display text-3xl font-bold">{report.title_public || report.week_key}</h1>
           {report.subtitle_public && <p className="text-muted-foreground mt-1">{report.subtitle_public}</p>}
           <p className="text-sm text-muted-foreground mt-1">
-            {new Date(report.date_from).toLocaleDateString("pt-BR")} — {new Date(report.date_to).toLocaleDateString("pt-BR")}
+            {new Date(report.date_from).toLocaleDateString(locale)} — {new Date(report.date_to).toLocaleDateString(locale)}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleCopyLink}>
-            <Copy className="h-4 w-4 mr-1" /> Copiar link
+            <Copy className="h-4 w-4 mr-1" /> {t("common.copyLink")}
           </Button>
         </div>
       </div>
 
-      {/* Editor Note */}
       {report.editor_note && (
         <div className="rounded-xl border border-accent/30 bg-accent/5 p-6 mb-8">
-          <p className="text-xs font-semibold text-accent uppercase tracking-wider mb-2">Nota Editorial</p>
+          <p className="text-xs font-semibold text-accent uppercase tracking-wider mb-2">{t("reports.editorNote")}</p>
           <div className="prose prose-sm max-w-none text-foreground/80">
             <ReactMarkdown>{report.editor_note}</ReactMarkdown>
           </div>
         </div>
       )}
 
-      {/* Section 1: Core Activity */}
-      <SectionHeader icon={Activity} number={1} title="Core Activity Metrics" description="Visão geral da atividade do ecossistema Discovery" />
+      {/* Section 1 */}
+      <SectionHeader icon={Activity} number={1} title={t("reportSections.s1Title")} description={t("reportSections.s1Desc")} />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-        <KpiCard icon={MapIcon} label="Ilhas Ativas" value={fmt(kpis.activeIslands)} change={kpis.wowActiveIslands} />
-        <KpiCard icon={Users} label="Criadores" value={fmt(kpis.totalCreators)} />
-        <KpiCard icon={Sparkles} label="Novos Mapas" value={fmt(kpis.newMapsThisWeek)} />
-        <KpiCard icon={UserPlus} label="Novos Criadores" value={fmt(kpis.newCreatorsThisWeek)} />
-        <KpiCard icon={HeartPulse} label="Revividas" value={fmt(kpis.revivedCount)} />
-        <KpiCard icon={Skull} label="Morreram" value={fmt(kpis.deadCount)} />
+        <KpiCard icon={MapIcon} label={t("kpis.activeIslands")} value={fmt(kpis.activeIslands)} change={kpis.wowActiveIslands} />
+        <KpiCard icon={Users} label={t("kpis.creators")} value={fmt(kpis.totalCreators)} />
+        <KpiCard icon={Sparkles} label={t("kpis.newMaps")} value={fmt(kpis.newMapsThisWeek)} />
+        <KpiCard icon={UserPlus} label={t("kpis.newCreators")} value={fmt(kpis.newCreatorsThisWeek)} />
+        <KpiCard icon={HeartPulse} label={t("kpis.revived")} value={fmt(kpis.revivedCount)} />
+        <KpiCard icon={Skull} label={t("kpis.dead")} value={fmt(kpis.deadCount)} />
       </div>
       <AiNarrative text={getNarrative(1)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 2: Trending Topics */}
-      <SectionHeader icon={Flame} number={2} title="Trending Topics" description="Tendências emergentes detectadas por palavras-chave" />
+      {/* Section 2 */}
+      <SectionHeader icon={Flame} number={2} title={t("reportSections.s2Title")} description={t("reportSections.s2Desc")} />
       {rankings.trendingTopics?.length > 0 && (
         <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <RankingTable title="Trends por Plays" icon={Flame} items={rankings.trendingTopics || []} />
+          <RankingTable title={t("rankings.trendsByPlays")} icon={Flame} items={rankings.trendingTopics || []} />
         </div>
       )}
       <AiNarrative text={getNarrative(2)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 3: Engagement */}
-      <SectionHeader icon={Play} number={3} title="Player Engagement" description="Engajamento dos jogadores" />
+      {/* Section 3 */}
+      <SectionHeader icon={Play} number={3} title={t("reportSections.s3Title")} description={t("reportSections.s3Desc")} />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-        <KpiCard icon={Play} label="Total Plays" value={fmt(kpis.totalPlays)} change={kpis.wowTotalPlays} />
-        <KpiCard icon={Clock} label="Total Minutos" value={fmt(kpis.totalMinutesPlayed)} change={kpis.wowTotalMinutes} />
-        <KpiCard icon={Users} label="Total Players" value={fmt(kpis.totalUniquePlayers)} change={kpis.wowTotalPlayers} />
-        <KpiCard icon={BarChart3} label="Avg CCU/Map" value={fmt(kpis.avgCCUPerMap)} />
-        <KpiCard icon={Clock} label="Avg Duração" value={fmt(kpis.avgPlayDuration)} suffix=" min" />
+        <KpiCard icon={Play} label={t("kpis.totalPlays")} value={fmt(kpis.totalPlays)} change={kpis.wowTotalPlays} />
+        <KpiCard icon={Clock} label={t("kpis.totalMinutes")} value={fmt(kpis.totalMinutesPlayed)} change={kpis.wowTotalMinutes} />
+        <KpiCard icon={Users} label={t("kpis.totalPlayers")} value={fmt(kpis.totalUniquePlayers)} change={kpis.wowTotalPlayers} />
+        <KpiCard icon={BarChart3} label={t("kpis.avgCCU")} value={fmt(kpis.avgCCUPerMap)} />
+        <KpiCard icon={Clock} label={t("kpis.avgDuration")} value={fmt(kpis.avgPlayDuration)} suffix=" min" />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top 10 Peak CCU" icon={BarChart3} items={rankings.topPeakCCU || []} />
-        <RankingTable title="Top 10 Unique Players" icon={Users} items={rankings.topUniquePlayers || []} />
+        <RankingTable title={t("rankings.topPeakCCU")} icon={BarChart3} items={rankings.topPeakCCU || []} />
+        <RankingTable title={t("rankings.topUniquePlayers")} icon={Users} items={rankings.topUniquePlayers || []} />
       </div>
       <AiNarrative text={getNarrative(3)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 4: New Islands */}
-      <SectionHeader icon={Sparkles} number={4} title="Novas Ilhas da Semana" description="Lançadas esta semana (por data de publish da Epic)" />
+      {/* Section 4 */}
+      <SectionHeader icon={Sparkles} number={4} title={t("reportSections.s4Title")} description={t("reportSections.s4Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable
-          title="Top Novas por Plays"
-          icon={Play}
-          items={rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []}
-        />
-        <RankingTable
-          title="Top Novas por Players"
-          icon={Users}
-          items={rankings.topNewIslandsByPlayersPublished || rankings.topNewIslandsByPlayers || []}
-        />
+        <RankingTable title={t("rankings.topNewByPlays")} icon={Play} items={rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []} />
+        <RankingTable title={t("rankings.topNewByPlayers")} icon={Users} items={rankings.topNewIslandsByPlayersPublished || rankings.topNewIslandsByPlayers || []} />
       </div>
       {rankings.mostUpdatedIslandsThisWeek?.length > 0 && (
         <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <RankingTable title="Mais Atualizadas (semana)" icon={Zap} items={rankings.mostUpdatedIslandsThisWeek || []} />
+          <RankingTable title={t("rankings.mostUpdated")} icon={Zap} items={rankings.mostUpdatedIslandsThisWeek || []} />
         </div>
       )}
       <AiNarrative text={getNarrative(4)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 5: Retention */}
-      <SectionHeader icon={TrendingUp} number={5} title="Retention & Loyalty" description="Retenção D1/D7 e fidelidade" />
+      {/* Section 5 */}
+      <SectionHeader icon={TrendingUp} number={5} title={t("reportSections.s5Title")} description={t("reportSections.s5Desc")} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <KpiCard icon={TrendingUp} label="Avg D1" value={pct(kpis.avgRetentionD1)} />
-        <KpiCard icon={TrendingUp} label="Avg D7" value={pct(kpis.avgRetentionD7)} />
-        <KpiCard icon={Star} label="Fav-to-Play" value={pct(kpis.favToPlayRatio)} />
-        <KpiCard icon={ThumbsUp} label="Rec-to-Play" value={pct(kpis.recToPlayRatio)} />
+        <KpiCard icon={TrendingUp} label={t("kpis.avgD1")} value={pct(kpis.avgRetentionD1)} />
+        <KpiCard icon={TrendingUp} label={t("kpis.avgD7")} value={pct(kpis.avgRetentionD7)} />
+        <KpiCard icon={Star} label={t("kpis.favToPlay")} value={pct(kpis.favToPlayRatio)} />
+        <KpiCard icon={ThumbsUp} label={t("kpis.recToPlay")} value={pct(kpis.recToPlayRatio)} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top D1 Retention" icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(Number(v))} />
-        <RankingTable title="Top D7 Retention" icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topD1")} icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topD7")} icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(Number(v))} />
       </div>
       <AiNarrative text={getNarrative(5)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 6: Creator Performance */}
-      <SectionHeader icon={Crown} number={6} title="Creator Performance" description="Ranking dos melhores criadores" />
+      {/* Section 6 */}
+      <SectionHeader icon={Crown} number={6} title={t("reportSections.s6Title")} description={t("reportSections.s6Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top Creators por Plays" icon={Play} items={rankings.topCreatorsByPlays || []} />
-        <RankingTable title="Top Creators por Minutes" icon={Clock} items={rankings.topCreatorsByMinutes || []} />
+        <RankingTable title={t("rankings.topCreatorsByPlays")} icon={Play} items={rankings.topCreatorsByPlays || []} />
+        <RankingTable title={t("rankings.topCreatorsByMinutes")} icon={Clock} items={rankings.topCreatorsByMinutes || []} />
       </div>
       <AiNarrative text={getNarrative(6)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 7: Map Quality */}
-      <SectionHeader icon={MapIcon} number={7} title="Map-Level Quality" description="Qualidade individual das ilhas" />
+      {/* Section 7 */}
+      <SectionHeader icon={MapIcon} number={7} title={t("reportSections.s7Title")} description={t("reportSections.s7Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top Avg Minutes/Player" icon={Clock} items={rankings.topAvgMinutesPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
-        <RankingTable title="Top Favoritos" icon={Star} items={rankings.topFavorites || []} />
+        <RankingTable title={t("rankings.topAvgMinutes")} icon={Clock} items={rankings.topAvgMinutesPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
+        <RankingTable title={t("rankings.topFavorites")} icon={Star} items={rankings.topFavorites || []} />
       </div>
       <AiNarrative text={getNarrative(7)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 8: Low Performance */}
-      <SectionHeader icon={AlertTriangle} number={8} title="Ilhas com Baixa Performance" description="Ilhas com menos de 500 jogadores" />
-      <KpiCard icon={AlertTriangle} label="Ilhas c/ Baixa Perf." value={fmt(kpis.failedIslands)} />
+      {/* Section 8 */}
+      <SectionHeader icon={AlertTriangle} number={8} title={t("reportSections.s8Title")} description={t("reportSections.s8Desc")} />
+      <KpiCard icon={AlertTriangle} label={t("kpis.lowPerf")} value={fmt(kpis.failedIslands)} />
       <AiNarrative text={getNarrative(8)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 9: Ratios */}
-      <SectionHeader icon={Target} number={9} title="Ratios & Derived" description="Métricas derivadas" />
+      {/* Section 9 */}
+      <SectionHeader icon={Target} number={9} title={t("reportSections.s9Title")} description={t("reportSections.s9Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Plays / Unique Player" icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(2)} />
-        <RankingTable title="Favorites / 100 Players" icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => Number(v).toFixed(2)} />
+        <RankingTable title={t("rankings.playsPerPlayer")} icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(2)} />
+        <RankingTable title={t("rankings.favsPer100")} icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => Number(v).toFixed(2)} />
       </div>
       <AiNarrative text={getNarrative(9)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 10: Categories */}
-      <SectionHeader icon={Layers} number={10} title="Category & Tag Analytics" description="Popularidade por categoria" />
+      {/* Section 10 */}
+      <SectionHeader icon={Layers} number={10} title={t("reportSections.s10Title")} description={t("reportSections.s10Desc")} />
       {categoryData.length > 0 && (
         <div className="mb-4">
           <ResponsiveContainer width="100%" height={300}>
@@ -317,42 +305,42 @@ export default function ReportView() {
         </div>
       )}
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top Categories" icon={Tags} items={rankings.topCategoriesByPlays || []} />
-        <RankingTable title="Top Tags" icon={Tags} items={rankings.topTags || []} />
+        <RankingTable title={t("rankings.topCategories")} icon={Tags} items={rankings.topCategoriesByPlays || []} />
+        <RankingTable title={t("rankings.topTags")} icon={Tags} items={rankings.topTags || []} />
       </div>
       <AiNarrative text={getNarrative(10)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 11: Efficiency */}
-      <SectionHeader icon={Zap} number={11} title="Efficiency Metrics" description="Conversão e eficiência" />
+      {/* Section 11 */}
+      <SectionHeader icon={Zap} number={11} title={t("reportSections.s11Title")} description={t("reportSections.s11Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="Top Favorites/Play" icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
-        <RankingTable title="Top Recommends/Play" icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topFavsPerPlay")} icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topRecsPerPlay")} icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
       </div>
       <AiNarrative text={getNarrative(11)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 12: Risers & Decliners */}
-      <SectionHeader icon={Rocket} number={12} title="Risers & Decliners" description="Maiores variações WoW" />
+      {/* Section 12 */}
+      <SectionHeader icon={Rocket} number={12} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="🚀 Top Risers" icon={TrendingUp} items={rankings.topRisers || []} barColor="bg-success" />
-        <RankingTable title="📉 Top Decliners" icon={TrendingDown} items={rankings.topDecliners || []} barColor="bg-destructive" />
+        <RankingTable title={t("rankings.topRisers")} icon={TrendingUp} items={rankings.topRisers || []} barColor="bg-success" />
+        <RankingTable title={t("rankings.topDecliners")} icon={TrendingDown} items={rankings.topDecliners || []} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(12)} />
 
       <div className="border-t border-border my-8" />
 
-      {/* Section 13: Lifecycle */}
-      <SectionHeader icon={HeartPulse} number={13} title="Island Lifecycle" description="Ilhas revividas e mortas" />
+      {/* Section 13 */}
+      <SectionHeader icon={HeartPulse} number={13} title={t("reportSections.s13Title")} description={t("reportSections.s13Desc")} />
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <KpiCard icon={HeartPulse} label="Revividas" value={fmt(kpis.revivedCount)} />
-        <KpiCard icon={Skull} label="Morreram" value={fmt(kpis.deadCount)} />
+        <KpiCard icon={HeartPulse} label={t("kpis.revived")} value={fmt(kpis.revivedCount)} />
+        <KpiCard icon={Skull} label={t("kpis.dead")} value={fmt(kpis.deadCount)} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title="🔄 Revividas" icon={HeartPulse} items={rankings.revivedIslands || []} barColor="bg-success" />
-        <RankingTable title="💀 Mortas" icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
+        <RankingTable title={t("rankings.revivedIslands")} icon={HeartPulse} items={rankings.revivedIslands || []} barColor="bg-success" />
+        <RankingTable title={t("rankings.deadIslands")} icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(13)} />
 
@@ -360,13 +348,8 @@ export default function ReportView() {
         <>
           <div className="border-t border-border my-8" />
           <TooltipProvider>
-              <SectionHeader
-                icon={EyeOff}
-                number={14}
-                title="Discovery Exposure"
-                description="Timeline por panel (rank #1..#10) a partir do Discovery 24/7"
-              />
-            <DiscoveryExposureSection exposure={exposure} weeklyReportId={report.id} />
+            <SectionHeader icon={EyeOff} number={14} title={t("reportSections.s14Title")} description={t("reportSections.s14Desc")} />
+            <DiscoveryExposureSection exposure={exposure} weeklyReportId={report.id} t={t} locale={locale} fmtDateTime={fmtDateTime} />
             <AiNarrative text={getNarrative(14)} />
           </TooltipProvider>
         </>
@@ -375,7 +358,7 @@ export default function ReportView() {
   );
 }
 
-function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any; weeklyReportId: string }) {
+function DiscoveryExposureSection({ exposure, weeklyReportId, t, locale, fmtDateTime }: { exposure: any; weeklyReportId: string; t: any; locale: string; fmtDateTime: (iso: string) => string }) {
   const profiles = Array.isArray(exposure?.profiles) ? exposure.profiles : [];
   const panels = Array.isArray(exposure?.panels) ? exposure.panels : [];
   const embeddedTimeline = Array.isArray(exposure?.panelRankTimeline) ? exposure.panelRankTimeline : [];
@@ -415,15 +398,7 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
     setLoadingFull(true);
     const off = append ? (nextOffset || 0) : 0;
     const { data, error } = await supabase.functions.invoke("discover-exposure-timeline", {
-      body: {
-        weeklyReportId,
-        targetId: profileId,
-        panelName,
-        rankMin: 1,
-        rankMax,
-        offset: off,
-        limit: 20000,
-      },
+      body: { weeklyReportId, targetId: profileId, panelName, rankMin: 1, rankMax, offset: off, limit: 20000 },
     });
     setLoadingFull(false);
     if (error) return;
@@ -456,47 +431,37 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">Config</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("common.config")}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Perfil</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("common.profile")}</p>
             <Select value={profileId} onValueChange={setProfileId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um perfil" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {profiles.map((p: any) => (
-                  <SelectItem key={p.targetId} value={p.targetId}>
-                    {profileLabel(p)}
-                  </SelectItem>
+                  <SelectItem key={p.targetId} value={p.targetId}>{profileLabel(p)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Panel</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("common.panel")}</p>
             <Select value={panelName} onValueChange={setPanelName}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um panel" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {panelOptions.map((p: any) => (
-                  <SelectItem key={p.panelName} value={p.panelName}>
-                    {p.panelDisplayName || p.panelName}
-                  </SelectItem>
+                  <SelectItem key={p.panelName} value={p.panelName}>{p.panelDisplayName || p.panelName}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Ranks</p>
+            <p className="text-xs text-muted-foreground mb-1">{t("common.ranks")}</p>
             <Select value={String(rankMax)} onValueChange={(v) => setRankMax(Number(v))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione o limite de ranks" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="10">#1..#10 (embutido)</SelectItem>
+                <SelectItem value="10">#1..#10 {t("common.embedded")}</SelectItem>
                 <SelectItem value="50">#1..#50</SelectItem>
                 <SelectItem value="100">#1..#100</SelectItem>
                 <SelectItem value="250">#1..#250</SelectItem>
@@ -506,11 +471,11 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
             {rankMax > 10 && (
               <div className="flex items-center justify-between mt-2">
                 <Button size="sm" variant="outline" onClick={() => fetchFull()} disabled={loadingFull}>
-                  {loadingFull ? "Carregando..." : "Recarregar"}
+                  {loadingFull ? t("common.loading") : t("common.reload")}
                 </Button>
                 {nextOffset != null && (
                   <Button size="sm" variant="outline" onClick={() => fetchFull({ append: true })} disabled={loadingFull}>
-                    Carregar mais
+                    {t("common.loadMore")}
                   </Button>
                 )}
               </div>
@@ -522,7 +487,7 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
       {topRows.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Top 3 (minutos expostos)</CardTitle>
+            <CardTitle className="text-sm font-medium">{t("rankings.top3MinutesExposed")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {topRows.map((r: any, idx: number) => (
@@ -567,22 +532,17 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
                           <UITooltipTrigger asChild>
                             <div
                               className="absolute top-0 bottom-0 rounded-sm cursor-pointer"
-                              style={{
-                                left: `${Math.max(0, left)}%`,
-                                width: `${Math.min(100, width)}%`,
-                                backgroundColor: color,
-                                opacity: 0.9,
-                              }}
+                              style={{ left: `${Math.max(0, left)}%`, width: `${Math.min(100, width)}%`, backgroundColor: color, opacity: 0.9 }}
                             />
                           </UITooltipTrigger>
                           <UITooltipContent side="top" className="max-w-xs">
                             <div className="space-y-1">
                               <p className="text-xs font-semibold">{s.title || s.linkCode}</p>
                               <p className="text-[11px] text-muted-foreground">
-                                {fmtDateTime(s.start)} â†’ {fmtDateTime(s.end)} ({fmt(Number(s.durationMinutes || 0))} min)
+                                {fmtDateTime(s.start)} → {fmtDateTime(s.end)} ({fmt(Number(s.durationMinutes || 0))} min)
                               </p>
                               <p className="text-[11px] text-muted-foreground">
-                                Rank #{rank} â€¢ CCU max {s.ccuMax != null ? fmt(Number(s.ccuMax)) : "â€”"} â€¢{" "}
+                                Rank #{rank} • CCU max {s.ccuMax != null ? fmt(Number(s.ccuMax)) : "—"} •{" "}
                                 {s.creatorCode ? `@${s.creatorCode}` : s.linkCodeType}
                               </p>
                             </div>
