@@ -11,19 +11,35 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth guard: require service_role key
-    const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    if (authHeader !== `Bearer ${serviceKey}`) {
-      return new Response(JSON.stringify({ error: "Forbidden: service_role required" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      serviceKey
-    );
+    // Dual auth: accept service_role key OR admin/editor JWT
+    const authHeader = req.headers.get("Authorization") || "";
+    if (authHeader === `Bearer ${serviceKey}`) {
+      // service_role — OK
+    } else {
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!token) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: u, error: uErr } = await supabase.auth.getUser(token);
+      if (uErr || !u?.user?.id) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: roles } = await supabase
+        .from("user_roles").select("role").eq("user_id", u.user.id)
+        .in("role", ["admin", "editor"]).limit(1);
+      if (!roles || roles.length === 0) {
+        return new Response(JSON.stringify({ error: "Forbidden: admin/editor required" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Parse optional maxIslands from body (default: 50000 per invocation)
     let maxIslands = 50_000;
