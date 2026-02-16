@@ -1918,6 +1918,38 @@ serve(async (req) => {
               p_limit: 20,
             });
 
+            let collectionResolution: any = null;
+            try {
+              const rangeStart = `${weekStartDate}T00:00:00.000Z`;
+              const rangeEnd = `${weekEndDate}T00:00:00.000Z`;
+              const { data: collSegs } = await supabase
+                .from("discovery_exposure_rank_segments")
+                .select("link_code")
+                .eq("link_code_type", "collection")
+                .lt("start_ts", rangeEnd)
+                .or(`end_ts.is.null,end_ts.gt.${rangeStart}`)
+                .limit(50000);
+              const collectionsSeen = Array.from(new Set((collSegs || []).map((r: any) => String(r.link_code))));
+              let resolvedCollections = 0;
+              if (collectionsSeen.length) {
+                const { data: edges } = await supabase
+                  .from("discover_link_edges")
+                  .select("parent_link_code")
+                  .in("parent_link_code", collectionsSeen);
+                const withEdges = new Set((edges || []).map((r: any) => String(r.parent_link_code)));
+                resolvedCollections = withEdges.size;
+              }
+              collectionResolution = {
+                collectionsSeen: collectionsSeen.length,
+                resolvedCollections,
+                coveragePct: collectionsSeen.length > 0
+                  ? Number(((resolvedCollections / collectionsSeen.length) * 100).toFixed(1))
+                  : null,
+              };
+            } catch {
+              collectionResolution = null;
+            }
+
             const evidence = {
               dataQuality: {
                 baselineAvailable: Boolean(platformKPIs?.baselineAvailable),
@@ -1935,6 +1967,7 @@ serve(async (req) => {
               exposure: {
                 topPanelsByMinutes: topPanels || [],
                 breadthTop: breadth || [],
+                collectionResolution,
                 // Deep details stay inside rankings_json.discoveryExposure
                 hasDiscoveryExposure: true,
               },

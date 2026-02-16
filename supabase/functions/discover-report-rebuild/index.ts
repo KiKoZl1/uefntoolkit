@@ -154,6 +154,43 @@ async function buildEvidence(args: {
     } catch (_e) {
       // ignore
     }
+
+    // How much of collection containers can be expanded into child links (Homebar/reference/ref_panel).
+    try {
+      const rangeStart = `${weekStartDate}T00:00:00.000Z`;
+      const rangeEnd = `${weekEndDate}T00:00:00.000Z`;
+      const { data: collSegs, error: collErr } = await supabase
+        .from("discovery_exposure_rank_segments")
+        .select("link_code")
+        .eq("link_code_type", "collection")
+        .lt("start_ts", rangeEnd)
+        .or(`end_ts.is.null,end_ts.gt.${rangeStart}`)
+        .limit(50000);
+      if (!collErr) {
+        const collectionsSeen = Array.from(new Set((collSegs || []).map((r: any) => String(r.link_code))));
+        let resolvedCollections = 0;
+        if (collectionsSeen.length) {
+          const { data: edges, error: eErr } = await supabase
+            .from("discover_link_edges")
+            .select("parent_link_code")
+            .in("parent_link_code", collectionsSeen);
+          if (!eErr) {
+            const withEdges = new Set((edges || []).map((r: any) => String(r.parent_link_code)));
+            resolvedCollections = withEdges.size;
+          }
+        }
+        const coveragePct = collectionsSeen.length > 0
+          ? Number(((resolvedCollections / collectionsSeen.length) * 100).toFixed(1))
+          : null;
+        evidence.exposure.collectionResolution = {
+          collectionsSeen: collectionsSeen.length,
+          resolvedCollections,
+          coveragePct,
+        };
+      }
+    } catch (_e) {
+      // ignore
+    }
   }
 
   return evidence;

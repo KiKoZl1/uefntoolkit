@@ -380,6 +380,7 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
   const panels = Array.isArray(exposure?.panels) ? exposure.panels : [];
   const embeddedTimeline = Array.isArray(exposure?.panelRankTimeline) ? exposure.panelRankTimeline : [];
   const topByPanel = Array.isArray(exposure?.topByPanel) ? exposure.topByPanel : [];
+  const resolvedCollections = Array.isArray(exposure?.resolvedCollections) ? exposure.resolvedCollections : [];
 
   const rangeStart = new Date(exposure?.meta?.rangeStart || "").getTime();
   const rangeEnd = new Date(exposure?.meta?.rangeEnd || "").getTime();
@@ -444,6 +445,11 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
     .filter((r: any) => String(r.targetId) === profileId && String(r.panelName) === panelName)
     .sort((a: any, b: any) => Number(b.minutesExposed || 0) - Number(a.minutesExposed || 0))
     .slice(0, 3);
+
+  const resolvedRows = resolvedCollections
+    .filter((r: any) => String(r.targetId || "") === profileId && String(r.panelName || "") === panelName)
+    .sort((a: any, b: any) => Number(a.rank || 99999) - Number(b.rank || 99999))
+    .slice(0, 8);
 
   const profileLabel = (p: any) => {
     const surface = p.surfaceName === "CreativeDiscoverySurface_Frontend" ? "Discovery"
@@ -536,6 +542,47 @@ function DiscoveryExposureSection({ exposure, weeklyReportId }: { exposure: any;
                 <div className="text-xs font-display font-semibold whitespace-nowrap">
                   {fmt(Number(r.minutesExposed || 0))} min
                 </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {resolvedRows.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Collections Resolvidas (Rail)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {resolvedRows.map((row: any, idx: number) => (
+              <div key={`${row.linkCode}:${idx}`} className="rounded-md border p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">
+                      #{row.rank ?? "-"} {row.panelDisplayName || row.panelName || ""}
+                    </p>
+                    <p className="text-sm font-medium truncate">{row.title || row.linkCode}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {row.creatorCode ? `@${row.creatorCode}` : "collection"} • {row.linkCode}
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                    children {Number(row.childrenCount || 0)}
+                  </div>
+                </div>
+                {Array.isArray(row.children) && row.children.length > 0 && (
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {row.children.slice(0, 8).map((child: any) => (
+                      <div key={child.linkCode} className="rounded border p-2">
+                        <p className="text-xs font-medium truncate">{child.title || child.linkCode}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">
+                          {child.creatorCode ? `@${child.creatorCode}` : child.linkCode}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">CCU {fmt(child.ccu)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>

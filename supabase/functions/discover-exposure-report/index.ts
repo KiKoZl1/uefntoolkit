@@ -146,6 +146,9 @@ serve(async (req) => {
     const allCodes = Array.from(
       new Set(rankSegs.map((s) => String(s.link_code))),
     );
+    const collectionCodes = Array.from(
+      new Set(rankSegs.filter((s) => String(s.link_code_type) === "collection").map((s) => String(s.link_code))),
+    );
 
     // Canonical card metadata (islands + collections)
     const linkMeta = new Map<string, { title: string | null; creator_code: string | null; image_url: string | null }>();
@@ -239,6 +242,111 @@ serve(async (req) => {
       };
     });
 
+    // Resolve collection containers (reference_*, ref_panel_*, set_*) to child links.
+    const currentCcuMap = new Map<string, number | null>();
+    for (const s of rankSegs) {
+      const code = String(s.link_code);
+      const ccu = s.ccu_end ?? s.ccu_max ?? null;
+      const n = ccu != null ? Number(ccu) : null;
+      if (!currentCcuMap.has(code)) currentCcuMap.set(code, n);
+      else if (n != null && currentCcuMap.get(code) != null) currentCcuMap.set(code, Math.max(currentCcuMap.get(code)!, n));
+      else if (n != null && currentCcuMap.get(code) == null) currentCcuMap.set(code, n);
+    }
+
+    const edgesByParent = new Map<string, any[]>();
+    if (collectionCodes.length) {
+      const { data: edges } = await supabase
+        .from("discover_link_edges")
+        .select("parent_link_code,child_link_code,edge_type,sort_order,last_seen_at")
+        .in("parent_link_code", collectionCodes);
+      for (const e of edges || []) {
+        const p = String((e as any).parent_link_code);
+        const arr = edgesByParent.get(p) || [];
+        arr.push(e);
+        edgesByParent.set(p, arr);
+      }
+    }
+
+    const childCodes = Array.from(
+      new Set(Array.from(edgesByParent.values()).flat().map((e: any) => String(e.child_link_code))),
+    );
+    if (childCodes.length) {
+      for (let i = 0; i < childCodes.length; i += 1000) {
+        const chunk = childCodes.slice(i, i + 1000);
+        const { data, error } = await supabase
+          .from("discover_link_metadata")
+          .select("link_code,title,support_code,image_url")
+          .in("link_code", chunk);
+        if (error) throw new Error(error.message);
+        for (const r of data || []) {
+          if (!linkMeta.has(String(r.link_code))) {
+            linkMeta.set(String(r.link_code), {
+              title: r.title ?? null,
+              creator_code: (r as any).support_code ?? null,
+              image_url: (r as any).image_url ?? null,
+            });
+          }
+        }
+      }
+    }
+
+    const resolvedCollections: any[] = [];
+    const segByCode = new Map<string, any[]>();
+    for (const s of rankSegs) {
+      const code = String(s.link_code);
+      const arr = segByCode.get(code) || [];
+      arr.push(s);
+      segByCode.set(code, arr);
+    }
+
+    for (const parentCode of collectionCodes) {
+      const edges = (edgesByParent.get(parentCode) || []).slice().sort((a: any, b: any) => {
+        const ea = String(a.edge_type || "");
+        const eb = String(b.edge_type || "");
+        const pa = ea === "default_sub_link_code" ? 0 : ea === "sub_link_code" ? 1 : ea === "related_link" ? 2 : 9;
+        const pb = eb === "default_sub_link_code" ? 0 : eb === "sub_link_code" ? 1 : eb === "related_link" ? 2 : 9;
+        if (pa !== pb) return pa - pb;
+        const sa = a.sort_order == null ? 999999 : Number(a.sort_order);
+        const sb = b.sort_order == null ? 999999 : Number(b.sort_order);
+        if (sa !== sb) return sa - sb;
+        return String(a.child_link_code).localeCompare(String(b.child_link_code));
+      });
+
+      const parentSeg = (segByCode.get(parentCode) || [])[0] || null;
+      const parentMeta = linkMeta.get(parentCode);
+      const seen = new Set<string>();
+      const children = [];
+      for (const e of edges) {
+        const child = String((e as any).child_link_code);
+        if (!child || seen.has(child)) continue;
+        seen.add(child);
+        const m = linkMeta.get(child);
+        children.push({
+          linkCode: child,
+          title: m?.title ?? child,
+          creatorCode: m?.creator_code ?? null,
+          imageUrl: m?.image_url ?? null,
+          ccu: currentCcuMap.get(child) ?? null,
+          edgeType: (e as any).edge_type ?? null,
+          sortOrder: (e as any).sort_order ?? null,
+        });
+        if (children.length >= 20) break;
+      }
+
+      resolvedCollections.push({
+        linkCode: parentCode,
+        title: parentMeta?.title ?? parentCode,
+        creatorCode: parentMeta?.creator_code ?? null,
+        imageUrl: parentMeta?.image_url ?? null,
+        panelName: parentSeg?.panel_name ?? null,
+        panelDisplayName: panelMetaByKey.get(`${parentSeg?.target_id}|||${parentSeg?.panel_name}`)?.panelDisplayName ?? null,
+        targetId: parentSeg?.target_id ?? null,
+        rank: parentSeg?.rank != null ? Number(parentSeg.rank) : null,
+        children,
+        childrenCount: children.length,
+      });
+    }
+
     const panelRankTimeline: any[] = rankSegs.map((s: any) => {
       const start = String(s.start_ts);
       const end = s.end_ts ? String(s.end_ts) : String(s.last_seen_ts || s.start_ts);
@@ -276,6 +384,7 @@ serve(async (req) => {
       panelSummaries,
       topByPanel,
       panelRankTimeline,
+      resolvedCollections,
     };
 
     const existing = (wr.rankings_json || {}) as any;

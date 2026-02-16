@@ -659,6 +659,7 @@ serve(async (req) => {
 
       // V1 cleanup piggyback: link metadata events retention (best-effort)
       let linkMetaCleanup: any = null;
+      let linkEdgesCleanup: any = null;
       try {
         const { data: cData, error: cErr } = await supabase.rpc("cleanup_discover_link_metadata_events", {
           p_days: 90,
@@ -669,7 +670,18 @@ serve(async (req) => {
         // ignore
       }
 
-      return json({ success: true, maintenance: data, linkMetaCleanup });
+      // V1.1 cleanup piggyback: link graph edge retention (best-effort)
+      try {
+        const { data: eData, error: eErr } = await supabase.rpc("cleanup_discover_link_edges", {
+          p_days: 60,
+          p_delete_batch: deleteBatch != null && isFinite(deleteBatch) ? deleteBatch : undefined,
+        });
+        if (!eErr) linkEdgesCleanup = eData;
+      } catch (_e) {
+        // ignore
+      }
+
+      return json({ success: true, maintenance: data, linkMetaCleanup, linkEdgesCleanup });
     }
 
     if (mode === "intel_refresh") {

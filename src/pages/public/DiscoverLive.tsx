@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,7 +11,6 @@ type PremiumRow = {
   surface_name: string;
   panel_name: string;
   panel_display_name: string | null;
-  panel_type: string | null;
   rank: number;
   link_code: string;
   link_code_type: string;
@@ -29,7 +28,6 @@ type EmergingRow = {
   first_seen_at: string;
   minutes_6h: number;
   minutes_24h: number;
-  best_rank_24h: number | null;
   panels_24h: number;
   premium_panels_24h: number;
   reentries_24h: number;
@@ -48,17 +46,47 @@ type PollutionRow = {
   sample_titles: string[] | null;
 };
 
+type RailChild = {
+  linkCode: string;
+  title: string;
+  imageUrl: string | null;
+  creatorCode: string | null;
+  ccu: number | null;
+  edgeType: string | null;
+};
+
+type RailItem = {
+  rank: number;
+  linkCode: string;
+  linkCodeType: string;
+  title: string;
+  imageUrl: string | null;
+  creatorCode: string | null;
+  ccu: number | null;
+  children?: RailChild[];
+};
+
+type Rail = {
+  panelName: string;
+  panelDisplayName: string;
+  items: RailItem[];
+};
+
+type PremiumViewItem = {
+  rank: number;
+  title: string;
+  linkCode: string;
+  linkCodeType: string;
+  creatorCode: string | null;
+  ccu: number | null;
+  children?: RailChild[];
+};
+
 function fmtNum(n: number | null | undefined): string {
-  if (n == null) return "—";
+  if (n == null) return "-";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
   return n.toLocaleString("en-US");
-}
-
-function surfaceLabel(s: string): string {
-  if (s === "CreativeDiscoverySurface_Frontend") return "Frontend";
-  if (s === "CreativeDiscoverySurface_Browse") return "Browse";
-  return s;
 }
 
 export default function DiscoverLive() {
@@ -67,8 +95,13 @@ export default function DiscoverLive() {
   const [emerging, setEmerging] = useState<EmergingRow[]>([]);
   const [pollution, setPollution] = useState<PollutionRow[]>([]);
 
+  const [rails, setRails] = useState<Rail[]>([]);
+  const [railsLoading, setRailsLoading] = useState(false);
+  const [railsError, setRailsError] = useState<string | null>(null);
+
   const [region, setRegion] = useState<string>("NAE");
   const [surface, setSurface] = useState<string>("CreativeDiscoverySurface_Frontend");
+  const [panelName, setPanelName] = useState<string>("");
 
   async function load() {
     setLoading(true);
@@ -77,10 +110,38 @@ export default function DiscoverLive() {
       (supabase as any).from("discovery_public_emerging_now").select("*").limit(5000),
       (supabase as any).from("discovery_public_pollution_creators_now").select("*").limit(2000),
     ]);
-    if (p.data) setPremium(p.data as any);
-    if (e.data) setEmerging(e.data as any);
-    if (pol.data) setPollution(pol.data as any);
+
+    if (p.data) setPremium(p.data as PremiumRow[]);
+    if (e.data) setEmerging(e.data as EmergingRow[]);
+    if (pol.data) setPollution(pol.data as PollutionRow[]);
     setLoading(false);
+  }
+
+  async function loadRails() {
+    setRailsLoading(true);
+    setRailsError(null);
+
+    const { data, error } = await supabase.functions.invoke("discover-rails-resolver", {
+      body: {
+        region,
+        surfaceName: surface,
+        maxPanels: 24,
+        maxItemsPerPanel: 60,
+        maxChildrenPerCollection: 24,
+        includeChildren: true,
+      },
+    });
+
+    if (error) {
+      setRails([]);
+      setRailsError(error.message || "Erro ao carregar rails");
+      setRailsLoading(false);
+      return;
+    }
+
+    const rows = Array.isArray((data as any)?.rails) ? ((data as any).rails as Rail[]) : [];
+    setRails(rows);
+    setRailsLoading(false);
   }
 
   useEffect(() => {
@@ -88,6 +149,12 @@ export default function DiscoverLive() {
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    loadRails();
+    const t = setInterval(loadRails, 60_000);
+    return () => clearInterval(t);
+  }, [region, surface]);
 
   const asOf = useMemo(() => {
     const ts = premium[0]?.as_of || emerging[0]?.as_of || pollution[0]?.as_of || null;
@@ -103,7 +170,7 @@ export default function DiscoverLive() {
       });
   }, [premium, region, surface]);
 
-  const panels = useMemo(() => {
+  const panelsFromPremium = useMemo(() => {
     const map = new Map<string, { name: string; display: string }>();
     for (const r of premiumRows) {
       const display = r.panel_display_name || r.panel_name;
@@ -112,18 +179,57 @@ export default function DiscoverLive() {
     return Array.from(map.values());
   }, [premiumRows]);
 
-  const [panelName, setPanelName] = useState<string>("");
+  const panelOptions = useMemo(() => {
+    if (rails.length > 0) {
+      return rails.map((r) => ({
+        name: r.panelName,
+        display: r.panelDisplayName || r.panelName,
+      }));
+    }
+    return panelsFromPremium;
+  }, [rails, panelsFromPremium]);
+
   useEffect(() => {
-    if (panels.length === 0) {
+    if (panelOptions.length === 0) {
       setPanelName("");
       return;
     }
-    if (!panelName || !panels.find((p) => p.name === panelName)) setPanelName(panels[0].name);
-  }, [panels]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!panelName || !panelOptions.find((p) => p.name === panelName)) {
+      setPanelName(panelOptions[0].name);
+    }
+  }, [panelOptions, panelName]);
 
   const premiumInPanel = useMemo(() => {
     return premiumRows.filter((r) => r.panel_name === panelName).sort((a, b) => a.rank - b.rank).slice(0, 20);
   }, [premiumRows, panelName]);
+
+  const selectedRail = useMemo(() => {
+    if (!panelName) return null;
+    return rails.find((r) => r.panelName === panelName) || null;
+  }, [rails, panelName]);
+
+  const premiumViewItems = useMemo<PremiumViewItem[]>(() => {
+    if (selectedRail?.items?.length) {
+      return selectedRail.items.slice(0, 20).map((it) => ({
+        rank: it.rank,
+        title: it.title || it.linkCode,
+        linkCode: it.linkCode,
+        linkCodeType: it.linkCodeType,
+        creatorCode: it.creatorCode || null,
+        ccu: it.ccu ?? null,
+        children: Array.isArray(it.children) ? it.children.slice(0, 8) : undefined,
+      }));
+    }
+
+    return premiumInPanel.map((r) => ({
+      rank: r.rank,
+      title: r.title || r.link_code,
+      linkCode: r.link_code,
+      linkCodeType: r.link_code_type,
+      creatorCode: r.creator_code || null,
+      ccu: r.ccu ?? null,
+    }));
+  }, [selectedRail, premiumInPanel]);
 
   const emergingRows = useMemo(() => {
     return emerging
@@ -152,11 +258,11 @@ export default function DiscoverLive() {
       <div className="flex flex-col gap-2">
         <h1 className="font-display text-3xl font-bold">Discovery Live</h1>
         <p className="text-muted-foreground">
-          Painéis premium ao vivo, emergentes e sinais de poluição do Discovery (atualizado automaticamente).
+          Paineis premium ao vivo, emergentes e sinais de poluicao do Discovery (atualizado automaticamente).
         </p>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="secondary" className="font-mono">
-            as_of: {asOf ? asOf.toLocaleString("pt-BR") : "—"}
+            as_of: {asOf ? asOf.toLocaleString("pt-BR") : "-"}
           </Badge>
         </div>
       </div>
@@ -167,18 +273,21 @@ export default function DiscoverLive() {
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Região</p>
+            <p className="text-xs text-muted-foreground mb-1">Regiao</p>
             <Select value={region} onValueChange={setRegion}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {["NAE", "EU", "BR", "ASIA"].map((r) => (
-                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
           <div>
             <p className="text-xs text-muted-foreground mb-1">Surface</p>
             <Select value={surface} onValueChange={setSurface}>
@@ -191,15 +300,18 @@ export default function DiscoverLive() {
               </SelectContent>
             </Select>
           </div>
+
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Panel (premium)</p>
+            <p className="text-xs text-muted-foreground mb-1">Panel</p>
             <Select value={panelName} onValueChange={setPanelName}>
               <SelectTrigger>
-                <SelectValue placeholder="—" />
+                <SelectValue placeholder="-" />
               </SelectTrigger>
               <SelectContent>
-                {panels.map((p) => (
-                  <SelectItem key={p.name} value={p.name}>{p.display}</SelectItem>
+                {panelOptions.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>
+                    {p.display}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -213,24 +325,47 @@ export default function DiscoverLive() {
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Eye className="h-4 w-4" /> Premium Now
             </CardTitle>
+            {railsError && (
+              <p className="text-xs text-muted-foreground">
+                rails resolver indisponivel, exibindo fallback da snapshot.
+              </p>
+            )}
           </CardHeader>
-          <CardContent className="space-y-2">
-            {premiumInPanel.length === 0 ? (
+          <CardContent className="space-y-3">
+            {railsLoading ? (
+              <p className="text-sm text-muted-foreground">Carregando rail resolvido...</p>
+            ) : premiumViewItems.length === 0 ? (
               <p className="text-sm text-muted-foreground">Sem dados para este filtro.</p>
             ) : (
-              premiumInPanel.map((r) => (
-                <div key={`${r.panel_name}:${r.rank}`} className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-mono text-muted-foreground">#{r.rank}</p>
-                    <p className="text-sm font-medium truncate">{r.title || r.link_code}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {r.creator_code ? `@${r.creator_code}` : r.link_code_type} · {r.panel_display_name || r.panel_name}
-                    </p>
+              premiumViewItems.map((item) => (
+                <div key={`${panelName}:${item.rank}:${item.linkCode}`} className="rounded-md border p-2 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-mono text-muted-foreground">#{item.rank}</p>
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {item.creatorCode ? `@${item.creatorCode}` : item.linkCodeType} - {item.linkCode}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">CCU</p>
+                      <p className="font-display font-semibold">{fmtNum(item.ccu)}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">CCU</p>
-                    <p className="font-display font-semibold">{fmtNum(r.ccu)}</p>
-                  </div>
+
+                  {Array.isArray(item.children) && item.children.length > 0 && (
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {item.children.map((c) => (
+                        <div key={c.linkCode} className="rounded border p-2">
+                          <p className="text-xs font-medium truncate">{c.title || c.linkCode}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {c.creatorCode ? `@${c.creatorCode}` : c.linkCode}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">CCU {fmtNum(c.ccu)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -252,12 +387,10 @@ export default function DiscoverLive() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.title || r.link_code}</p>
                     <p className="text-[11px] text-muted-foreground truncate">
-                      {r.creator_code ? `@${r.creator_code}` : r.link_code_type} · first_seen{" "}
-                      {new Date(r.first_seen_at).toLocaleString("pt-BR")}
+                      {r.creator_code ? `@${r.creator_code}` : r.link_code_type} - first_seen {new Date(r.first_seen_at).toLocaleString("pt-BR")}
                     </p>
                     <p className="text-[11px] text-muted-foreground truncate">
-                      6h: {fmtNum(r.minutes_6h)}m · 24h: {fmtNum(r.minutes_24h)}m · panels: {fmtNum(r.panels_24h)} · premium:{" "}
-                      {fmtNum(r.premium_panels_24h)} · reentries: {fmtNum(r.reentries_24h)}
+                      6h: {fmtNum(r.minutes_6h)}m - 24h: {fmtNum(r.minutes_24h)}m - panels: {fmtNum(r.panels_24h)} - premium: {fmtNum(r.premium_panels_24h)} - reentries: {fmtNum(r.reentries_24h)}
                     </p>
                   </div>
                   <div className="text-right">
@@ -287,8 +420,7 @@ export default function DiscoverLive() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">@{r.creator_code}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      clusters: {fmtNum(r.duplicate_clusters_7d)} · islands: {fmtNum(r.duplicate_islands_7d)} · over_min:{" "}
-                      {fmtNum(r.duplicates_over_min)}
+                      clusters: {fmtNum(r.duplicate_clusters_7d)} - islands: {fmtNum(r.duplicate_islands_7d)} - over_min: {fmtNum(r.duplicates_over_min)}
                     </p>
                   </div>
                   <Badge variant="secondary" className="font-mono">
@@ -312,4 +444,3 @@ export default function DiscoverLive() {
     </div>
   );
 }
-

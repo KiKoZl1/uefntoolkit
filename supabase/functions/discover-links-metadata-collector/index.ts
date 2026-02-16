@@ -9,10 +9,11 @@ const corsHeaders = {
 
 const EPIC_ACCOUNT_OAUTH_TOKEN = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token";
 const EPIC_LINKS_MNEMONIC_BASE = "https://links-public-service-live.ol.epicgames.com/links/api/fn/mnemonic";
+const EPIC_LINKS_MNEMONIC_RELATED_BASE = "https://links-public-service-live.ol.epicgames.com/links/api/fn/mnemonic";
 
 const ISLAND_CODE_RE = /^\d{4}-\d{4}-\d{4}$/;
 
-type Mode = "orchestrate" | "refresh_link_codes" | "config_status";
+type Mode = "orchestrate" | "refresh_link_codes" | "backfill_recent_collections" | "config_status";
 
 function json(res: unknown, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -136,6 +137,142 @@ function extractFields(payload: any) {
   };
 }
 
+function isLikelyLinkCode(v: string): boolean {
+  return ISLAND_CODE_RE.test(v) ||
+    v.startsWith("playlist_") ||
+    v.startsWith("set_") ||
+    v.startsWith("reference_") ||
+    v.startsWith("ref_panel_") ||
+    v.startsWith("experience_");
+}
+
+type RelatedEdge = {
+  parent_link_code: string;
+  child_link_code: string;
+  edge_type: string;
+  sort_order: number | null;
+  source: string;
+  last_seen_at: string;
+  updated_at: string;
+  metadata?: any;
+};
+
+function parseRelatedPayload(parentCode: string, payload: any, nowIso: string): {
+  edges: RelatedEdge[];
+  metadataRows: any[];
+  discoveredCodes: string[];
+} {
+  const edges: RelatedEdge[] = [];
+  const metadataRowsMap = new Map<string, any>();
+  const discovered = new Set<string>();
+
+  const putMeta = (linkObj: any) => {
+    if (!linkObj || typeof linkObj !== "object") return;
+    const code = String(linkObj.mnemonic || "");
+    if (!code) return;
+    discovered.add(code);
+
+    const linkCodeType = ISLAND_CODE_RE.test(code) ? "island" : "collection";
+    const f = extractFields(linkObj);
+
+    metadataRowsMap.set(code, {
+      link_code: code,
+      link_code_type: linkCodeType,
+      namespace: f.namespace,
+      link_type: f.linkType,
+      account_id: f.accountId,
+      creator_name: f.creatorName,
+      support_code: f.supportCode,
+      title: f.title,
+      tagline: f.tagline,
+      introduction: f.introduction,
+      locale: f.locale,
+      image_url: f.imageUrl,
+      image_urls: f.imageUrls,
+      extra_image_urls: f.extraImageUrls,
+      video_vuid: f.videoVuid,
+      max_players: f.maxPlayers,
+      min_players: f.minPlayers,
+      max_social_party_size: f.maxSocialPartySize,
+      ratings: f.ratings,
+      version: f.version,
+      created_at_epic: f.createdAtEpic,
+      published_at_epic: f.publishedAtEpic,
+      updated_at_epic: f.updatedAtEpic,
+      last_activated_at_epic: f.lastActivatedAtEpic,
+      moderation_status: f.moderationStatus,
+      link_state: f.linkState,
+      discovery_intent: f.discoveryIntent,
+      active: f.active,
+      disabled: f.disabled,
+      last_fetched_at: nowIso,
+      last_error: null,
+      raw: {},
+      updated_at: nowIso,
+    });
+  };
+
+  const pushEdge = (childCodeRaw: unknown, edgeType: string, sortOrder: number | null = null) => {
+    const childCode = String(childCodeRaw || "").trim();
+    if (!childCode || childCode === parentCode || !isLikelyLinkCode(childCode)) return;
+    discovered.add(childCode);
+    edges.push({
+      parent_link_code: parentCode,
+      child_link_code: childCode,
+      edge_type: edgeType,
+      sort_order: sortOrder,
+      source: "links_related",
+      last_seen_at: nowIso,
+      updated_at: nowIso,
+    });
+  };
+
+  // Requested mnemonic may come as a full link object at top-level.
+  if (payload?.mnemonic) putMeta(payload);
+
+  // Related links map.
+  if (payload?.links && typeof payload.links === "object") {
+    let idx = 0;
+    for (const code of Object.keys(payload.links)) {
+      pushEdge(code, "related_link", idx++);
+      putMeta(payload.links[code]);
+    }
+  }
+
+  // Parents relation.
+  if (Array.isArray(payload?.parentLinks)) {
+    let idx = 0;
+    for (const p of payload.parentLinks) {
+      const code = String(p?.mnemonic || "");
+      pushEdge(code, "parent_link", idx++);
+      putMeta(p);
+    }
+  }
+
+  // Parse child hints from metadata.
+  const meta = payload?.metadata || (payload?.links?.[parentCode]?.metadata ?? null);
+  if (meta && typeof meta === "object") {
+    if (Array.isArray(meta.sub_link_codes)) {
+      meta.sub_link_codes.forEach((c: any, i: number) => pushEdge(c, "sub_link_code", i));
+    }
+    if (meta.default_sub_link_code) {
+      pushEdge(meta.default_sub_link_code, "default_sub_link_code", 0);
+    }
+    if (meta.fallback_links && typeof meta.fallback_links === "object") {
+      let idx = 0;
+      for (const v of Object.values(meta.fallback_links)) {
+        pushEdge(v, "fallback_link", idx++);
+      }
+    }
+  }
+
+  return {
+    edges,
+    metadataRows: Array.from(metadataRowsMap.values()),
+    discoveredCodes: Array.from(discovered),
+  };
+}
+
 function nextDueFromSignals(args: { isPremiumNow: boolean; lastSeenAt: string | null; now: Date }): Date {
   const { isPremiumNow, lastSeenAt, now } = args;
   if (isPremiumNow) return new Date(now.getTime() + 60 * 60 * 1000);
@@ -208,6 +345,57 @@ serve(async (req) => {
       });
       if (error) return json({ success: false, error: error.message }, 500);
       return json({ success: true, mode, enqueued: data, submitted: linkCodes.length, dueWithinMinutes });
+    }
+
+    if (mode === "backfill_recent_collections") {
+      const lookbackHoursRaw = Number(body.lookbackHours ?? 72);
+      const maxCodesRaw = Number(body.maxCodes ?? 5000);
+      const dueWithinMinutesRaw = Number(body.dueWithinMinutes ?? 0);
+      const lookbackHours = isFinite(lookbackHoursRaw) ? Math.max(1, Math.min(24 * 30, lookbackHoursRaw)) : 72;
+      const maxCodes = isFinite(maxCodesRaw) ? Math.max(1, Math.min(20000, maxCodesRaw)) : 5000;
+      const dueWithinMinutes = isFinite(dueWithinMinutesRaw)
+        ? Math.max(0, Math.min(24 * 60, dueWithinMinutesRaw))
+        : 0;
+
+      const sinceIso = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
+      const { data: segs, error: sErr } = await supabase
+        .from("discovery_exposure_rank_segments")
+        .select("link_code")
+        .eq("link_code_type", "collection")
+        .gte("last_seen_ts", sinceIso)
+        .order("last_seen_ts", { ascending: false })
+        .limit(maxCodes * 2);
+      if (sErr) return json({ success: false, error: sErr.message }, 500);
+
+      const codes = Array.from(
+        new Set((segs || []).map((r: any) => String(r.link_code)).filter(Boolean)),
+      ).slice(0, maxCodes);
+
+      if (!codes.length) {
+        return json({
+          success: true,
+          mode,
+          lookbackHours,
+          dueWithinMinutes,
+          found: 0,
+          enqueued: { inserted: 0, updated: 0 },
+        });
+      }
+
+      const { data, error } = await supabase.rpc("enqueue_discover_link_metadata", {
+        p_link_codes: codes,
+        p_due_within_minutes: dueWithinMinutes,
+      });
+      if (error) return json({ success: false, error: error.message }, 500);
+
+      return json({
+        success: true,
+        mode,
+        lookbackHours,
+        dueWithinMinutes,
+        found: codes.length,
+        enqueued: data,
+      });
     }
 
     // mode=orchestrate
@@ -306,6 +494,9 @@ serve(async (req) => {
     const updates: any[] = [];
     const events: any[] = [];
     const results: any[] = [];
+    const edgeMapByParent = new Map<string, RelatedEdge[]>();
+    const relatedMetaMap = new Map<string, any>();
+    const relatedCodesToEnqueue = new Set<string>();
 
     for (const code of codes) {
       if (Date.now() - startedAt > budgetMs - 1500) break;
@@ -416,6 +607,43 @@ serve(async (req) => {
         updated_at: now.toISOString(),
       });
 
+      // Resolve related graph for collections/reference/set/playlist so Homebar-like containers can be expanded.
+      if (linkCodeType === "collection") {
+        try {
+          const relatedRes = await fetchJson(
+            `${EPIC_LINKS_MNEMONIC_RELATED_BASE}/${encodeURIComponent(code)}/related`,
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${auth.accessToken}`,
+                Accept: "application/json",
+              },
+              timeoutMs: 20000,
+            },
+          );
+          if (relatedRes.ok && relatedRes.json && typeof relatedRes.json === "object") {
+            const parsed = parseRelatedPayload(code, relatedRes.json, now.toISOString());
+            edgeMapByParent.set(code, parsed.edges);
+            for (const row of parsed.metadataRows) {
+              if (!row?.link_code || row.link_code === code) continue;
+              relatedMetaMap.set(String(row.link_code), row);
+            }
+            for (const rc of parsed.discoveredCodes) {
+              if (rc && rc !== code) relatedCodesToEnqueue.add(rc);
+            }
+          } else {
+            results.push({
+              linkCode: code,
+              relatedOk: false,
+              relatedStatus: relatedRes.status,
+              relatedCorrelationId: epicCorrelationIdFromHeaders(relatedRes.headers),
+            });
+          }
+        } catch (_e) {
+          // Ignore related failures: base metadata still succeeded.
+        }
+      }
+
       results.push({ linkCode: code, ok: true, status: 200, correlationId, premiumNow: premiumNow.has(code) });
 
       // Write-back (islands only) for legacy cache consumers (best-effort).
@@ -455,12 +683,54 @@ serve(async (req) => {
       if (error) return json({ success: false, error: error.message }, 500);
     }
 
+    // Opportunistically upsert metadata from /related payloads to speed up coverage.
+    const relatedMetaRows = Array.from(relatedMetaMap.values());
+    for (let i = 0; i < relatedMetaRows.length; i += 200) {
+      const chunk = relatedMetaRows.slice(i, i + 200);
+      const { error } = await supabase.from("discover_link_metadata").upsert(chunk, { onConflict: "link_code" });
+      if (error) {
+        // best-effort only
+        console.warn("related metadata upsert warning:", error.message);
+        break;
+      }
+    }
+
+    // Keep link graph edges current for each processed parent.
+    for (const [parentCode, edges] of edgeMapByParent.entries()) {
+      try {
+        await supabase.from("discover_link_edges").delete().eq("parent_link_code", parentCode);
+        if (edges.length) {
+          for (let i = 0; i < edges.length; i += 500) {
+            const chunk = edges.slice(i, i + 500);
+            await supabase.from("discover_link_edges").insert(chunk);
+          }
+        }
+      } catch (e) {
+        console.warn("discover_link_edges upsert warning:", e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // Ensure discovered child codes get scheduled too.
+    if (relatedCodesToEnqueue.size) {
+      try {
+        await supabase.rpc("enqueue_discover_link_metadata", {
+          p_link_codes: Array.from(relatedCodesToEnqueue),
+          p_due_within_minutes: 60,
+        });
+      } catch (_e) {
+        // ignore
+      }
+    }
+
     return json({
       success: true,
       mode,
       claimed: true,
       processed: updates.length,
       events: events.length,
+      edges_parents: edgeMapByParent.size,
+      related_meta_rows: relatedMetaRows.length,
+      related_codes_enqueued: relatedCodesToEnqueue.size,
       duration_ms: Date.now() - startedAt,
       sample: results.slice(0, 10),
     });

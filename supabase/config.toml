@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.discover-enqueue-gap]
 verify_jwt = false
+
+[functions.discover-rails-resolver]
+verify_jwt = false
