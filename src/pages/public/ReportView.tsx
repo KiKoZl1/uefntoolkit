@@ -123,9 +123,19 @@ export default function ReportView() {
   const exposure = rankings.discoveryExposure || null;
 
   const getNarrative = (sectionNum: number): string | null => {
-    const edited = editorSections[`section${sectionNum}`];
+    const sectionKey = `section${sectionNum}`;
+    // Editor override always takes priority
+    const edited = editorSections[sectionKey];
     if (edited) return edited;
-    const ai = aiSections[`section${sectionNum}`];
+
+    const ai = aiSections[sectionKey];
+    if (!ai) return null;
+
+    // Pick locale-specific narrative if available (e.g. narrative_pt_BR)
+    const localeKey = i18n.language.replace("-", "_"); // "pt-BR" → "pt_BR"
+    if (localeKey !== "en" && ai[`narrative_${localeKey}`]) {
+      return ai[`narrative_${localeKey}`];
+    }
     return ai?.narrative || null;
   };
 
