@@ -229,8 +229,8 @@ export default function ReportView() {
       {/* Section 4 (Peak CCU) */}
       <SectionHeader icon={BarChart3} number={4} title={t("reportSections.s4Title")} description={t("reportSections.s4Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topPeakCCU")} icon={BarChart3} items={rankings.topPeakCCU || []} />
-        <RankingTable title={t("rankings.topPeakCCU_UGC")} icon={BarChart3} items={rankings.topPeakCCU_UGC || []} />
+        <RankingTable title={t("rankings.topPeakCCU")} icon={BarChart3} showImage showBadges items={(rankings.topPeakCCU || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
+        <RankingTable title={t("rankings.topPeakCCU_UGC")} icon={BarChart3} showImage showBadges items={(rankings.topPeakCCU_UGC || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
       </div>
       <AiNarrative text={getNarrative(4)} />
 
@@ -239,8 +239,8 @@ export default function ReportView() {
       {/* Section 5 (New Islands) */}
       <SectionHeader icon={Sparkles} number={5} title={t("reportSections.s5Title")} description={t("reportSections.s5Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topNewByPlays")} icon={Play} items={rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []} />
-        <RankingTable title={t("rankings.topNewByCCU")} icon={BarChart3} items={rankings.topNewIslandsByCCU || []} />
+        <RankingTable title={t("rankings.topNewByPlays")} icon={Play} showImage showBadges items={(rankings.topNewIslandsByPlaysPublished || rankings.topNewIslandsByPlays || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
+        <RankingTable title={t("rankings.topNewByCCU")} icon={BarChart3} showImage items={(rankings.topNewIslandsByCCU || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
       </div>
       <AiNarrative text={getNarrative(5)} />
 
@@ -253,8 +253,8 @@ export default function ReportView() {
         <KpiCard icon={TrendingUp} label={t("kpis.avgD7")} value={pct(kpis.avgRetentionD7)} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topD1")} icon={TrendingUp} items={rankings.topRetentionD1 || []} valueFormatter={(v) => pct(Number(v))} />
-        <RankingTable title={t("rankings.topD7")} icon={TrendingUp} items={rankings.topRetentionD7 || []} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topD1")} icon={TrendingUp} showImage items={(rankings.topRetentionD1 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => pct(Number(v))} />
+        <RankingTable title={t("rankings.topD7")} icon={TrendingUp} showImage items={(rankings.topRetentionD7 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => pct(Number(v))} />
       </div>
       {rankings.retentionDistributionD1 && (
         <div className="grid md:grid-cols-2 gap-4 mb-4">
@@ -287,8 +287,8 @@ export default function ReportView() {
       {/* Section 8 (Map Quality) */}
       <SectionHeader icon={MapIcon} number={8} title={t("reportSections.s8Title")} description={t("reportSections.s8Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topAvgMinutes")} icon={Clock} items={rankings.topAvgMinutesPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
-        <RankingTable title={t("rankings.topMinutesPlayed")} icon={Clock} items={rankings.topMinutesPlayed || []} />
+        <RankingTable title={t("rankings.topAvgMinutes")} icon={Clock} showImage items={(rankings.topAvgMinutesPerPlayer || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(1) + " min"} />
+        <RankingTable title={t("rankings.topMinutesPlayed")} icon={Clock} showImage items={(rankings.topMinutesPlayed || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
       </div>
       <AiNarrative text={getNarrative(8)} />
 
@@ -305,7 +305,7 @@ export default function ReportView() {
             </div>
           )}
         </div>
-        <RankingTable title={t("rankings.lowEngagement")} icon={AlertTriangle} items={rankings.failedIslandsList || []} barColor="bg-destructive" />
+        <RankingTable title={t("rankings.lowEngagement")} icon={AlertTriangle} showImage items={(rankings.failedIslandsList || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(9)} />
 
@@ -314,7 +314,7 @@ export default function ReportView() {
       {/* Section 10 (Plays per Player) */}
       <SectionHeader icon={Zap} number={10} title={t("reportSections.s10Title")} description={t("reportSections.s10Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.playsPerPlayer")} icon={Zap} items={rankings.topPlaysPerPlayer || []} valueFormatter={(v) => Number(v).toFixed(2)} />
+        <RankingTable title={t("rankings.playsPerPlayer")} icon={Zap} showImage items={(rankings.topPlaysPerPlayer || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(2)} />
       </div>
       <AiNarrative text={getNarrative(10)} />
 
@@ -323,8 +323,8 @@ export default function ReportView() {
       {/* Section 11 (Advocacy) */}
       <SectionHeader icon={Target} number={11} title={t("reportSections.s11Title")} description={t("reportSections.s11Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.favsPer100")} icon={Star} items={rankings.topFavsPer100 || []} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
-        <RankingTable title={t("rankings.recsPer100")} icon={ThumbsUp} items={rankings.topRecPer100 || []} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
+        <RankingTable title={t("rankings.favsPer100")} icon={Star} showImage items={(rankings.topFavsPer100 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
+        <RankingTable title={t("rankings.recsPer100")} icon={ThumbsUp} showImage items={(rankings.topRecPer100 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(2) + "%"} />
       </div>
       <AiNarrative text={getNarrative(11)} />
 
@@ -333,8 +333,8 @@ export default function ReportView() {
       {/* Section 12 (Efficiency) */}
       <SectionHeader icon={Zap} number={12} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topFavsPerPlay")} icon={Star} items={rankings.topFavsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
-        <RankingTable title={t("rankings.topRecsPerPlay")} icon={ThumbsUp} items={rankings.topRecsPerPlay || []} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topFavsPerPlay")} icon={Star} showImage items={(rankings.topFavsPerPlay || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(4)} />
+        <RankingTable title={t("rankings.topRecsPerPlay")} icon={ThumbsUp} showImage items={(rankings.topRecsPerPlay || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(4)} />
       </div>
       <AiNarrative text={getNarrative(12)} />
 
@@ -343,12 +343,12 @@ export default function ReportView() {
       {/* Section 13 (Stickiness) */}
       <SectionHeader icon={Magnet} number={13} title={t("reportSections.s13Title")} description={t("reportSections.s13Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topStickinessD1")} icon={Magnet} items={rankings.topStickinessD1 || []} />
-        <RankingTable title={t("rankings.topStickinessD7")} icon={Magnet} items={rankings.topStickinessD7 || []} />
+        <RankingTable title={t("rankings.topStickinessD1")} icon={Magnet} showImage items={(rankings.topStickinessD1 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
+        <RankingTable title={t("rankings.topStickinessD7")} icon={Magnet} showImage items={(rankings.topStickinessD7 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topStickinessD1_UGC")} icon={Magnet} items={rankings.topStickinessD1_UGC || []} />
-        <RankingTable title={t("rankings.topStickinessD7_UGC")} icon={Magnet} items={rankings.topStickinessD7_UGC || []} />
+        <RankingTable title={t("rankings.topStickinessD1_UGC")} icon={Magnet} showImage items={(rankings.topStickinessD1_UGC || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
+        <RankingTable title={t("rankings.topStickinessD7_UGC")} icon={Magnet} showImage items={(rankings.topStickinessD7_UGC || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} />
       </div>
       <AiNarrative text={getNarrative(13)} />
 
@@ -357,8 +357,8 @@ export default function ReportView() {
       {/* Section 14 (Retention Adj Engagement) */}
       <SectionHeader icon={Target} number={14} title={t("reportSections.s14Title")} description={t("reportSections.s14Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topRetentionAdjD1")} icon={Target} items={rankings.topRetentionAdjD1 || []} valueFormatter={(v) => Number(v).toFixed(1)} />
-        <RankingTable title={t("rankings.topRetentionAdjD7")} icon={Target} items={rankings.topRetentionAdjD7 || []} valueFormatter={(v) => Number(v).toFixed(1)} />
+        <RankingTable title={t("rankings.topRetentionAdjD1")} icon={Target} showImage items={(rankings.topRetentionAdjD1 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(1)} />
+        <RankingTable title={t("rankings.topRetentionAdjD7")} icon={Target} showImage items={(rankings.topRetentionAdjD7 || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} valueFormatter={(v) => Number(v).toFixed(1)} />
       </div>
       <AiNarrative text={getNarrative(14)} />
 
@@ -393,7 +393,7 @@ export default function ReportView() {
       {/* Section 16 (Growth/Breakouts) */}
       <SectionHeader icon={Rocket} number={16} title={t("reportSections.s16Title")} description={t("reportSections.s16Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topWeeklyGrowth")} icon={Rocket} items={rankings.topWeeklyGrowth || []} barColor="bg-success" />
+        <RankingTable title={t("rankings.topWeeklyGrowth")} icon={Rocket} showImage items={(rankings.topWeeklyGrowth || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-success" />
       </div>
       <AiNarrative text={getNarrative(16)} />
 
@@ -402,8 +402,8 @@ export default function ReportView() {
       {/* Section 17 (Risers) */}
       <SectionHeader icon={TrendingUp} number={17} title={t("reportSections.s12Title")} description={t("reportSections.s12Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topRisers")} icon={TrendingUp} items={rankings.topRisers || []} barColor="bg-success" />
-        <RankingTable title={t("rankings.topDecliners")} icon={TrendingDown} items={rankings.topDecliners || []} barColor="bg-destructive" />
+        <RankingTable title={t("rankings.topRisers")} icon={TrendingUp} showImage items={(rankings.topRisers || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-success" />
+        <RankingTable title={t("rankings.topDecliners")} icon={TrendingDown} showImage items={(rankings.topDecliners || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(17)} />
 
@@ -416,8 +416,8 @@ export default function ReportView() {
         <KpiCard icon={Skull} label={t("kpis.dead")} value={fmt(kpis.deadCount)} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.revivedIslands")} icon={HeartPulse} items={rankings.revivedIslands || []} barColor="bg-success" />
-        <RankingTable title={t("rankings.deadIslands")} icon={Skull} items={rankings.deadIslands || []} barColor="bg-destructive" />
+        <RankingTable title={t("rankings.revivedIslands")} icon={HeartPulse} showImage items={(rankings.revivedIslands || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-success" />
+        <RankingTable title={t("rankings.deadIslands")} icon={Skull} showImage items={(rankings.deadIslands || []).map((i: any) => ({ ...i, imageUrl: i.image_url }))} barColor="bg-destructive" />
       </div>
       <AiNarrative text={getNarrative(18)} />
 
@@ -443,12 +443,15 @@ export default function ReportView() {
           <RankingTable
             title={t("rankings.multiPanelPresence")}
             icon={Grid3X3}
+            showImage
+            showBadges
             items={(rankings.multiPanelPresence || []).map((item: any) => ({
               name: item.title || item.link_code,
               code: item.link_code,
               subtitle: `@${item.creator_code || "unknown"} · ${item.panels_distinct} panels`,
               value: item.panels_distinct,
               label: `${item.panels_distinct} panels`,
+              imageUrl: item.image_url,
             }))}
           />
           <AiNarrative text={getNarrative(20)} />
@@ -463,12 +466,15 @@ export default function ReportView() {
           <RankingTable
             title={t("rankings.panelLoyalty")}
             icon={Anchor}
+            showImage
+            showBadges
             items={(rankings.panelLoyalty || []).map((item: any) => ({
               name: item.title || item.link_code,
               code: item.link_code,
               subtitle: `@${item.creator_code || "unknown"} · ${item.panel_name}`,
               value: item.total_minutes_in_panel,
               label: `${fmt(item.total_minutes_in_panel)} min`,
+              imageUrl: item.image_url,
             }))}
           />
           <AiNarrative text={getNarrative(21)} />

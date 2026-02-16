@@ -164,22 +164,10 @@ serve(async (req) => {
 
     // Enrich mostUpdated with version (from RPC) and image_url (from cache)
     const updatedRaw = updatedRes.data || [];
-    const updatedCodes = updatedRaw.map((r: any) => r.island_code).filter(Boolean);
-    let imageMap: Record<string, string> = {};
-    if (updatedCodes.length > 0) {
-      const { data: cacheRows } = await supabase
-        .from("discover_islands_cache")
-        .select("island_code, image_url")
-        .in("island_code", updatedCodes);
-      for (const row of (cacheRows || [])) {
-        if (row.image_url) imageMap[row.island_code] = row.image_url;
-      }
-    }
     const mostUpdatedItems = updatedRaw.map((r: any) => ({
       code: r.island_code, name: r.title || r.island_code, title: r.title,
       creator: r.creator_code, category: r.category || "Fortnite UGC", value: r.week_plays || 0,
       version: r.version || null,
-      image_url: imageMap[r.island_code] || null,
     }));
 
     const computedRankings: any = {
@@ -201,6 +189,56 @@ serve(async (req) => {
       topAvgPeakCCU_UGC: (rankingsRes.data || {} as any).topPeakCCU_UGC || [],
       baselineAvailable: Boolean(prevReportId),
     };
+
+    // ── Bulk-enrich ALL island ranking items with image_url from cache ──
+    const ISLAND_RANKING_KEYS = [
+      "topPeakCCU", "topPeakCCU_UGC", "topUniquePlayers", "topTotalPlays",
+      "topMinutesPlayed", "topAvgMinutesPerPlayer", "topRetentionD1", "topRetentionD7",
+      "topPlaysPerPlayer", "topFavsPer100", "topRecPer100", "topFavsPerPlay", "topRecsPerPlay",
+      "topStickinessD1", "topStickinessD7", "topStickinessD1_UGC", "topStickinessD7_UGC",
+      "topRetentionAdjD1", "topRetentionAdjD7",
+      "failedIslandsList", "revivedIslands", "deadIslands",
+      "topWeeklyGrowth", "topRisers", "topDecliners",
+      "topNewIslandsByPlays", "topNewIslandsByPlaysPublished", "topNewIslandsByCCU",
+      "mostUpdatedIslandsThisWeek",
+    ];
+    const allCodes = new Set<string>();
+    for (const key of ISLAND_RANKING_KEYS) {
+      const arr = computedRankings[key];
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          const c = item.code || item.island_code;
+          if (c) allCodes.add(c);
+        }
+      }
+    }
+    const codesArr = Array.from(allCodes);
+    const imageMap: Record<string, string> = {};
+    if (codesArr.length > 0) {
+      // Fetch in batches of 500
+      for (let i = 0; i < codesArr.length; i += 500) {
+        const batch = codesArr.slice(i, i + 500);
+        const { data: cacheRows } = await supabase
+          .from("discover_islands_cache")
+          .select("island_code, image_url")
+          .in("island_code", batch);
+        for (const row of (cacheRows || [])) {
+          if (row.image_url) imageMap[row.island_code] = row.image_url;
+        }
+      }
+    }
+    // Inject image_url into every ranking item
+    for (const key of ISLAND_RANKING_KEYS) {
+      const arr = computedRankings[key];
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          const c = item.code || item.island_code;
+          if (c && imageMap[c] && !item.image_url) {
+            item.image_url = imageMap[c];
+          }
+        }
+      }
+    }
 
     // ── Save to discover_reports ──
     await supabase.from("discover_reports").update({
