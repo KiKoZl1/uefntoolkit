@@ -28,6 +28,7 @@ export default function AdminReportEditor() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildProgress, setRebuildProgress] = useState(0);
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -87,10 +88,31 @@ export default function AdminReportEditor() {
   const handleRebuild = async () => {
     if (!id) return;
     setRebuilding(true);
+    setRebuildProgress(0);
+
+    // Animate progress through estimated stages
+    const progressInterval = setInterval(() => {
+      setRebuildProgress(prev => {
+        if (prev < 30) return prev + 3;      // Data phase ~10s
+        if (prev < 60) return prev + 2;      // Exposure phase ~15s
+        if (prev < 85) return prev + 1;      // AI phase ~25s
+        if (prev < 95) return prev + 0.3;    // Finishing
+        return prev;
+      });
+    }, 1000);
+
     const { error, data } = await supabase.functions.invoke("discover-report-rebuild", {
       body: { weeklyReportId: id, runAi: true, reinjectExposure: true, refreshMetadata: false },
     });
-    setRebuilding(false);
+
+    clearInterval(progressInterval);
+    setRebuildProgress(100);
+
+    setTimeout(() => {
+      setRebuilding(false);
+      setRebuildProgress(0);
+    }, 1500);
+
     if (error) {
       toast({ title: t("common.error"), description: error.message, variant: "destructive" });
       return;
@@ -156,9 +178,9 @@ export default function AdminReportEditor() {
           <Button variant="outline" onClick={handleSave} disabled={saving}>
             <Save className="h-4 w-4 mr-1" /> {saving ? t("common.saving") : t("common.save")}
           </Button>
-          <Button variant="outline" onClick={handleRebuild} disabled={rebuilding}>
+          <Button variant="outline" onClick={handleRebuild} disabled={rebuilding} className="min-w-[180px]">
             <RefreshCw className={"h-4 w-4 mr-1 " + (rebuilding ? "animate-spin" : "")} />
-            {rebuilding ? t("admin.regenerating") : t("admin.regenerateDb")}
+            {rebuilding ? `${t("admin.regenerating")} ${Math.round(rebuildProgress)}%` : t("admin.regenerateDb")}
           </Button>
           <Button variant={report.status === "published" ? "destructive" : "default"} onClick={togglePublish}>
             {report.status === "published" ? <><EyeOff className="h-4 w-4 mr-1" /> {t("admin.unpublish")}</> : <><Globe className="h-4 w-4 mr-1" /> {t("admin.publish")}</>}

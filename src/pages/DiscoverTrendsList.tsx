@@ -21,7 +21,9 @@ interface DiscoverReport {
   week_number: number;
   year: number;
   status: string;
+  phase: string | null;
   island_count: number | null;
+  reported_count: number | null;
   platform_kpis: any;
   created_at: string;
 }
@@ -535,6 +537,12 @@ export default function DiscoverTrendsList() {
                         </AlertDialog>
                       </div>
                     </div>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      {r.phase && r.phase !== "done" && (
+                        <span className="text-primary/70">{r.phase} · </span>
+                      )}
+                      {formatNumber(r.reported_count)} reported
+                    </p>
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
                       {new Date(r.week_start).toLocaleDateString("pt-BR")} — {new Date(r.week_end).toLocaleDateString("pt-BR")}

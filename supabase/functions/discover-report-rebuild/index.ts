@@ -409,6 +409,12 @@ serve(async (req) => {
       await supabase.functions.invoke("discover-report-ai", { body: { reportId } });
     }
 
+    // Ensure status is set to completed after successful rebuild
+    await supabase
+      .from("discover_reports")
+      .update({ status: "completed", phase: "done", progress_pct: 100 })
+      .eq("id", reportId!);
+
     return json({
       success: true,
       reportId,
