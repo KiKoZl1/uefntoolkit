@@ -1735,6 +1735,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      normalize_island_title_for_dup: {
+        Args: { p_title: string }
+        Returns: string
+      }
       repair_discover_report_state: {
         Args: { p_report_id: string; p_stale_after_seconds?: number }
         Returns: Json
