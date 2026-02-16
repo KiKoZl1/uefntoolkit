@@ -173,9 +173,54 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
       };
       return {
         title: "Exposure Pipeline com Atraso",
-        description: `${stale} target${stale > 1 ? "s" : ""} não coletou dados no tempo esperado (2x o intervalo configurado).`,
-        detail: `Isso pode significar que o cron 'orchestrate-minute' falhou ou que a API da Epic está lenta/fora do ar. Targets em atraso não geram dados de exposição, afetando rankings e intel.`,
-        action: stale > 2 ? "⚠️ Verifique os logs do cron e o status da API da Epic." : "Monitorar — pode se resolver sozinho no próximo tick.",
+        description: `${stale} target${stale > 1 ? "s" : ""} não coletou dados no tempo esperado.`,
+        detail: `O cron 'orchestrate-minute' pode ter falhado ou a API da Epic está lenta. Targets em atraso não geram dados de exposição.`,
+        action: stale > 2 ? "⚠️ Verifique os logs do cron e o status da API da Epic." : "Monitorar.",
+      };
+    }
+    case "exposure_data_flow": {
+      const ticks1h = Number(d.ticks_1h || 0);
+      const lastAge = d.last_tick_age_seconds != null ? Number(d.last_tick_age_seconds) : null;
+      const ageStr = lastAge != null ? (lastAge < 60 ? `${lastAge}s` : lastAge < 3600 ? `${Math.round(lastAge / 60)}min` : `${Math.round(lastAge / 3600)}h`) : "nunca";
+      if (alert.severity === "ok") return {
+        title: "Exposure Data Flow",
+        description: `${ticks1h} ticks OK na última hora. Último: ${ageStr} atrás.`,
+      };
+      return {
+        title: "🚨 Exposure Collector PARADO",
+        description: `${ticks1h} ticks na última hora. Último tick OK: ${ageStr} atrás.`,
+        detail: "O cron 'orchestrate-minute' pode estar falhando com erros de autenticação (401/403) ou a Edge Function não está sendo executada. Isso significa que NENHUM dado de exposição está sendo coletado.",
+        action: "⚠️ Verifique imediatamente os logs da Edge Function 'discover-exposure-collector'.",
+      };
+    }
+    case "metadata_data_flow": {
+      const fetched1h = Number(d.fetched_1h || 0);
+      const lastAge = d.last_fetch_age_seconds != null ? Number(d.last_fetch_age_seconds) : null;
+      const ageStr = lastAge != null ? (lastAge < 60 ? `${lastAge}s` : lastAge < 3600 ? `${Math.round(lastAge / 60)}min` : `${Math.round(lastAge / 3600)}h`) : "nunca";
+      if (alert.severity === "ok") return {
+        title: "Metadata Data Flow",
+        description: `${fetched1h} fetches na última hora. Último: ${ageStr} atrás.`,
+      };
+      return {
+        title: "🚨 Metadata Collector PARADO",
+        description: `${fetched1h} fetches na última hora. Último fetch: ${ageStr} atrás.`,
+        detail: "O cron 'discover-links-metadata-orchestrate-min' pode estar falhando. Nenhum metadado está sendo coletado — títulos, imagens e dados de collections não estão sendo atualizados.",
+        action: "⚠️ Verifique os logs da Edge Function 'discover-links-metadata-collector'.",
+      };
+    }
+    case "collector_pipeline": {
+      const phase = d.phase || "idle";
+      const ageSec = d.age_seconds != null ? Number(d.age_seconds) : null;
+      const ageStr = ageSec != null ? (ageSec < 60 ? `${ageSec}s` : ageSec < 3600 ? `${Math.round(ageSec / 60)}min` : `${Math.round(ageSec / 3600)}h`) : "desconhecido";
+      if (alert.severity === "ok") return {
+        title: "Collector Pipeline",
+        description: phase === "done" ? `Último report concluído (${ageStr} atrás).` : `Pipeline idle.`,
+      };
+      return {
+        title: "🚨 Collector Pipeline TRAVADO",
+        description: `Fase '${phase}' sem progresso há ${ageStr}.`,
+        detail: "O report semanal está travado. O cron 'discover-collector-orchestrate-min' pode estar falhando com erros de autenticação. Verifique os logs da Edge Function.",
+        action: "⚠️ Verifique logs do 'discover-collector'. Considere reiniciar o report.",
       };
     }
     case "metadata_backlog": {
@@ -188,62 +233,27 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
         title: "Backlog de Metadados Crescendo",
         description: `${fmt(due)} itens prontos para coleta aguardando processamento.`,
         detail: due > 50000
-          ? `O volume é muito alto. O collector pode não conseguir processar tudo a tempo. Verifique se o cron 'discover-links-metadata-orchestrate-min' está rodando e se não há muitos erros 429.`
-          : `O collector está processando mas não na velocidade necessária. Isso é esperado após enfileirar um grande volume. O backlog deve reduzir gradualmente.`,
-        action: due > 100000 ? "⚠️ Considere verificar os logs do metadata collector para erros." : undefined,
+          ? `Volume muito alto. Verifique se o cron metadata está rodando e se não há erros 429.`
+          : `Collector processando mas não na velocidade necessária. Backlog deve reduzir gradualmente.`,
+        action: due > 100000 ? "⚠️ Verifique logs do metadata collector." : undefined,
       };
     }
     case "intel_freshness": {
       const ageSec = d.age_seconds != null ? Number(d.age_seconds) : null;
-      const asOf = d.as_of ? new Date(d.as_of) : null;
       const ageStr = ageSec != null
         ? (ageSec < 60 ? `${ageSec}s` : ageSec < 3600 ? `${Math.round(ageSec / 60)} min` : `${Math.floor(ageSec / 3600)}h ${Math.round((ageSec % 3600) / 60)}m`)
         : "desconhecido";
       if (alert.severity === "ok") return {
         title: "Intel Público",
-        description: `Dados atualizados há ${ageStr}. Premium, Emerging e Pollution estão frescos.`,
+        description: `Dados atualizados há ${ageStr}.`,
       };
       return {
         title: "Intel Público Desatualizado",
-        description: `Última atualização há ${ageStr}${asOf ? ` (${asOf.toLocaleTimeString("pt-BR")})` : ""}.`,
+        description: `Última atualização há ${ageStr}.`,
         detail: ageSec != null && ageSec > 1800
-          ? `Os dados públicos (Premium Now, Emerging, Pollution) estão defasados há mais de 30 minutos. O cron 'intel-refresh-5min' pode ter falhado. Páginas públicas mostram dados antigos.`
-          : `Leve atraso na atualização do Intel. Geralmente se resolve no próximo ciclo do cron (a cada 5 min).`,
-        action: ageSec != null && ageSec > 3600 ? "⚠️ Verifique os logs do cron 'intel-refresh-5min'." : undefined,
-      };
-    }
-    case "link_edges_coverage": {
-      const seen = Number(d.collections_seen_24h || 0);
-      const resolved = Number(d.collections_resolved_24h || 0);
-      const pctVal = d.resolution_24h_pct != null ? Number(d.resolution_24h_pct) * 100 : null;
-      if (alert.severity === "ok") return {
-        title: "Rails Resolver Coverage",
-        description: seen === 0
-          ? "Nenhuma collection recente para resolver nas ultimas 24h."
-          : `Cobertura de collections saudavel: ${resolved}/${seen} (${pctVal?.toFixed(1)}%).`,
-      };
-      return {
-        title: "Rails Resolver com Cobertura Baixa",
-        description: `${resolved}/${seen} collections recentes resolvidas (${pctVal?.toFixed(1) || 0}%).`,
-        detail: "As colecoes do Discovery (Homebar/reference/ref_panel) podem aparecer sem expansao completa para ilhas filhas.",
-        action: "Rode backfill_recent_collections e verifique erros do discover-links-metadata-collector.",
-      };
-    }
-    case "link_edges_freshness": {
-      const ageSec = d.edge_age_seconds != null ? Number(d.edge_age_seconds) : null;
-      const stale = Number(d.stale_edges_60d || 0);
-      const ageStr = ageSec == null
-        ? "desconhecida"
-        : ageSec < 60 ? `${ageSec}s` : ageSec < 3600 ? `${Math.round(ageSec / 60)} min` : `${Math.round(ageSec / 3600)}h`;
-      if (alert.severity === "ok") return {
-        title: "Link Graph Freshness",
-        description: `Edges atualizadas (${ageStr}), stale(60d): ${fmt(stale)}.`,
-      };
-      return {
-        title: "Link Graph Desatualizado",
-        description: `Ultima atualizacao de edges: ${ageStr}. stale(60d): ${fmt(stale)}.`,
-        detail: "O grafo parent->child pode estar desatualizado e afetar o render de rails resolvidos no admin/public.",
-        action: "Verifique cron metadata e execute maintenance (cleanup_discover_link_edges).",
+          ? `Dados públicos defasados >30min. O cron 'intel-refresh-5min' pode ter falhado.`
+          : `Leve atraso. Geralmente resolve no próximo ciclo.`,
+        action: ageSec != null && ageSec > 3600 ? "⚠️ Verifique cron 'intel-refresh-5min'." : undefined,
       };
     }
     case "link_edges_coverage": {
@@ -252,13 +262,13 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
       const edges = Number(d.edges_total || 0);
       if (alert.severity === "ok") return {
         title: "Link Edges Coverage",
-        description: `${parents} collections com edges resolvidos de ${collections} total (${edges} edges).`,
+        description: `${parents} collections com edges de ${collections} total (${edges} edges).`,
       };
       return {
         title: "Cobertura de Link Edges Baixa",
         description: `Apenas ${parents} de ${collections} collections têm edges resolvidos.`,
-        detail: `O metadata collector precisa processar collections para resolver seus filhos. Verifique se o cron está rodando e considere executar um backfill_recent_collections.`,
-        action: "⚠️ Execute backfill_recent_collections para aquecer a cobertura.",
+        detail: `Metadata collector precisa processar collections. Execute backfill_recent_collections.`,
+        action: "⚠️ Execute backfill_recent_collections.",
       };
     }
     case "link_edges_freshness": {
@@ -270,9 +280,9 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
       };
       return {
         title: "Link Edges Desatualizados",
-        description: `${fmt(stale)} edges não são atualizados há mais de 60 dias (${total} total).`,
-        detail: `Edges stale podem causar dados obsoletos nos rails resolvidos. O cleanup diário removerá edges com mais de 60 dias.`,
-        action: stale > total * 0.5 ? "⚠️ Verifique se o metadata collector está processando collections." : undefined,
+        description: `${fmt(stale)} edges não atualizados há >60 dias.`,
+        detail: `Cleanup diário removerá edges antigos.`,
+        action: stale > total * 0.5 ? "⚠️ Verifique metadata collector." : undefined,
       };
     }
     default:
@@ -647,6 +657,12 @@ export default function AdminOverview() {
   const alertStatus: HealthStatus =
     alertBad.length === 0 ? "ok" : alertBad.some(a => a.severity === "error") ? "error" : "warn";
 
+  // Monitoring health: check if alerts themselves are stale (>5 min old)
+  const alertsMaxAge = alerts.length > 0
+    ? Math.max(...alerts.map(a => a.updated_at ? (Date.now() - new Date(a.updated_at).getTime()) / 1000 : 999999))
+    : 999999;
+  const monitoringOffline = alerts.length === 0 || alertsMaxAge > 300; // 5 minutes
+
   const phaseLabel: Record<string, string> = {
     idle: "", catalog: "Catalogando", metrics: "Coletando metricas",
     finalize: "Finalizando rankings", ai: "Gerando IA", done: "Concluido",
@@ -679,11 +695,33 @@ export default function AdminOverview() {
             <div className="flex items-center gap-1.5"><HealthDot status={metaHealth} label={`${metaPct.toFixed(1)}% preenchido`} /><span className="text-muted-foreground">Metadata</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={railsHealth} label={`${linkGraph?.collectionsResolved24h || 0}/${linkGraph?.collectionsSeen24h || 0} collections resolvidas (24h)`} /><span className="text-muted-foreground">Rails</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={reportHealth} label={generating ? "Em andamento" : "Idle"} /><span className="text-muted-foreground">Report</span></div>
-            <div className="flex items-center gap-1.5"><HealthDot status={alertStatus} label={`${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
-            <div className="flex items-center gap-1.5"><HealthDot status="ok" label="7/7 ativos" /><span className="text-muted-foreground">Crons</span></div>
+            <div className="flex items-center gap-1.5"><HealthDot status={monitoringOffline ? "error" : alertStatus} label={monitoringOffline ? "Monitoramento offline!" : `${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
+            <div className="flex items-center gap-1.5"><HealthDot status="ok" label="8/8 ativos" /><span className="text-muted-foreground">Crons</span></div>
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Monitoring Offline Banner ──────────────────────── */}
+      {monitoringOffline && (
+        <Card className="border-destructive bg-destructive/10">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="h-5 w-5 text-destructive shrink-0" />
+              <div>
+                <p className="font-semibold text-sm text-destructive">⚠️ MONITORAMENTO OFFLINE</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {alerts.length === 0
+                    ? "Nenhum alerta cadastrado no banco. O cron 'system-alerts-refresh-2min' pode não ter executado ainda."
+                    : `Os alertas não são atualizados há ${Math.round(alertsMaxAge / 60)} minutos. O sistema de monitoramento pode estar falhando — os indicadores acima podem estar DESATUALIZADOS e não refletem o estado real.`}
+                </p>
+                <p className="text-xs text-destructive font-medium mt-1">
+                  Isso significa que erros podem estar ocorrendo sem serem detectados. Verifique os logs das Edge Functions manualmente.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+         </Card>
+      )}
 
       {/* ── Alerts Section (always visible) ──────────────── */}
       <Card className={alertBad.length > 0 ? "border-destructive/30" : "border-green-500/30"}>
