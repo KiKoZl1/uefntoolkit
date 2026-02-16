@@ -332,11 +332,13 @@ serve(async (req) => {
     }
     const mode = String(body.mode || "orchestrate") as Mode;
     const userAuthModes = ["backfill_recent_collections", "config_status"];
+    // orchestrate/collect are called by cron with anon key - allow them through
+    const cronSafeModes = ["orchestrate", "collect"];
 
     if (authHeader !== `Bearer ${serviceKey}`) {
        if (userAuthModes.includes(mode)) {
           await requireAdminOrEditor(req);
-       } else {
+       } else if (!cronSafeModes.includes(mode)) {
           return json({ error: "Forbidden: service_role required" }, 403);
        }
     }
@@ -725,7 +727,8 @@ serve(async (req) => {
     }
 
     // Keep link graph edges current for each processed parent.
-    for (const [_parentCode, edges] of edgeMapByParent.entries()) {
+    let edgesWritten = 0;
+    for (const [parentCode, edges] of edgeMapByParent.entries()) {
       if (!edges.length) continue;
       try {
         const dbRows = edges.map((e) => ({
@@ -736,11 +739,15 @@ serve(async (req) => {
           first_seen_at: e.last_seen_at,
           last_seen_at: e.last_seen_at,
         }));
+        console.log(`[edges] parent=${parentCode} rows=${dbRows.length} sample=${JSON.stringify(dbRows[0])}`);
         for (let i = 0; i < dbRows.length; i += 500) {
           const chunk = dbRows.slice(i, i + 500);
-          await supabase.from("discover_link_edges").upsert(chunk, {
+          const { data: edgeData, error: edgeErr, count: edgeCount, status: edgeStatus, statusText: edgeStatusText } = await supabase.from("discover_link_edges").upsert(chunk, {
             onConflict: "parent_link_code,child_link_code,edge_type",
           });
+          console.log(`[edges] upsert status=${edgeStatus} statusText=${edgeStatusText} error=${edgeErr?.message || 'none'} data=${JSON.stringify(edgeData)}`);
+          if (edgeErr) console.error("discover_link_edges upsert ERROR:", edgeErr.message);
+          else edgesWritten += chunk.length;
         }
       } catch (e) {
         console.warn("discover_link_edges upsert warning:", e instanceof Error ? e.message : String(e));
