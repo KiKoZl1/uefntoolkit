@@ -187,6 +187,7 @@ export default function AdminOverview() {
 
   // Enqueue gap
   const [enqueueLoading, setEnqueueLoading] = useState(false);
+  const [metaFlash, setMetaFlash] = useState(false);
 
   const addLog = useCallback((msg: string) => {
     setLogs(p => [...p.slice(-80), { time: timeNow(), message: msg }]);
@@ -292,13 +293,17 @@ export default function AdminOverview() {
       const updated = typeof enqueued === "object" && enqueued ? Number(enqueued.updated || 0) : 0;
       toast({ title: "Enfileiramento concluído", description: `${inserted} novas enfileiradas (${updated} bump) de ${submitted} submetidas.` });
       addLog(`Enfileirar Top 5K: ${inserted} novas (${updated} bump) de ${submitted}`);
-      await fetchMeta();
+      // Re-fetch both meta and census so GAP updates visually
+      await Promise.all([fetchMeta(), fetchCensus()]);
+      // Flash highlight on metadata section
+      setMetaFlash(true);
+      setTimeout(() => setMetaFlash(false), 2000);
     } catch (e: any) {
       toast({ title: "Erro ao enfileirar", description: e.message, variant: "destructive" });
     } finally {
       setEnqueueLoading(false);
     }
-  }, [toast, addLog, fetchMeta]);
+  }, [toast, addLog, fetchMeta, fetchCensus]);
 
   const fetchExposure = useCallback(async () => {
     const twentyFourAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -543,7 +548,7 @@ export default function AdminOverview() {
         <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
           <Hash className="h-4 w-4" /> Metadata Pipeline
         </h2>
-        <Card>
+        <Card className={`transition-all duration-500 ${metaFlash ? "ring-2 ring-primary/50 bg-primary/5" : ""}`}>
           <CardContent className="pt-4 pb-4 space-y-4">
             {/* Progress bar */}
             <div>
