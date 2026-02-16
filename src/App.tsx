@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AdminRoute } from "@/components/AdminRoute";
-import PublicLayout from "./components/PublicLayout";
+import SmartLayout from "./components/SmartLayout";
 import AppLayout from "./components/AppLayout";
 import AdminLayout from "./components/AdminLayout";
 
@@ -43,13 +43,14 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            {/* Public */}
-            <Route element={<PublicLayout />}>
+            {/* Smart layout: sidebar when logged in, public nav when not */}
+            <Route element={<SmartLayout />}>
               <Route path="/" element={<Home />} />
               <Route path="/discover" element={<DiscoverLive />} />
               <Route path="/reports" element={<ReportsList />} />
               <Route path="/reports/:slug" element={<ReportView />} />
             </Route>
+
             <Route path="/auth" element={<Auth />} />
 
             {/* Client (auth required) */}
