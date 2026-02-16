@@ -570,12 +570,10 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Auth guard: require service_role key, anon key (for cron), or admin/editor
+    // Auth guard: require service_role key OR cron-safe mode (any auth) OR admin/editor user
     const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const anonKey = mustEnv("SUPABASE_ANON_KEY");
     const isServiceRole = authHeader === `Bearer ${serviceKey}`;
-    const isAnonKey = authHeader === `Bearer ${anonKey}`;
 
     const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
 
@@ -588,14 +586,14 @@ serve(async (req) => {
 
     const mode: Mode = (body.mode || "orchestrate") as Mode;
 
-    // Cron-safe modes: allow anon key (cron jobs send anon key)
+    // Cron-safe modes: allow through without specific auth (cron jobs use anon key)
     const cronSafeModes: Mode[] = ["orchestrate", "tick", "maintenance", "intel_refresh", "config_status", "diagnose_rating"];
     // Modes that use user-level auth (requireAdminOrEditor) handle their own auth
     const userAuthModes: Mode[] = ["set_paused", "bootstrap_device_auth"];
 
     if (!isServiceRole) {
-      if (isAnonKey && cronSafeModes.includes(mode)) {
-        // Allow cron jobs through for safe automation modes
+      if (cronSafeModes.includes(mode)) {
+        // Allow cron jobs and internal calls through for safe automation modes
       } else if (userAuthModes.includes(mode)) {
         // These modes handle their own auth via requireAdminOrEditor
       } else {
