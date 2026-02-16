@@ -12,8 +12,11 @@ export function SectionHeader({ icon: Icon, number, title, description }: Sectio
   const { t } = useTranslation();
   return (
     <div className="flex items-start gap-4 mb-6 pt-8 first:pt-0">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
         <Icon className="h-5 w-5 text-primary" />
+        <div className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary/10 flex items-center justify-center">
+          <span className="text-[8px] font-bold text-primary">{number}</span>
+        </div>
       </div>
       <div>
         <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-1">

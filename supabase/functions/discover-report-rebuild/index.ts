@@ -161,9 +161,24 @@ serve(async (req) => {
       creator: r.creator_code, category: r.category || "Fortnite UGC", value: r.week_plays || 0,
     }));
 
-    const mostUpdatedItems = (updatedRes.data || []).map((r: any) => ({
+    // Enrich mostUpdated with version (from RPC) and image_url (from cache)
+    const updatedRaw = updatedRes.data || [];
+    const updatedCodes = updatedRaw.map((r: any) => r.island_code).filter(Boolean);
+    let imageMap: Record<string, string> = {};
+    if (updatedCodes.length > 0) {
+      const { data: cacheRows } = await supabase
+        .from("discover_islands_cache")
+        .select("island_code, image_url")
+        .in("island_code", updatedCodes);
+      for (const row of (cacheRows || [])) {
+        if (row.image_url) imageMap[row.island_code] = row.image_url;
+      }
+    }
+    const mostUpdatedItems = updatedRaw.map((r: any) => ({
       code: r.island_code, name: r.title || r.island_code, title: r.title,
       creator: r.creator_code, category: r.category || "Fortnite UGC", value: r.week_plays || 0,
+      version: r.version || null,
+      image_url: imageMap[r.island_code] || null,
     }));
 
     const computedRankings: any = {

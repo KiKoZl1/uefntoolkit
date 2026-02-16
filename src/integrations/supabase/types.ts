@@ -1861,6 +1861,7 @@ export type Database = {
           island_code: string
           title: string
           updated_at_epic: string
+          version: number
           week_plays: number
           week_unique: number
         }[]

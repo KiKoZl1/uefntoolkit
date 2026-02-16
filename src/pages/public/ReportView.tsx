@@ -42,6 +42,11 @@ const PIE_COLORS = [
   "hsl(340, 75%, 55%)",
 ];
 
+const EPIC_CREATORS = new Set(["epic", "epic labs", "epic games", "fortnite"]);
+function isEpicCreator(creator: string | null | undefined): boolean {
+  return EPIC_CREATORS.has((creator || "").toLowerCase().trim());
+}
+
 function hashHue(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -264,12 +269,16 @@ export default function ReportView() {
       {/* Section 7 (Creator Performance) */}
       <SectionHeader icon={Crown} number={7} title={t("reportSections.s7Title")} description={t("reportSections.s7Desc")} />
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topCreatorsByPlays")} icon={Play} items={rankings.topCreatorsByPlays || []} />
-        <RankingTable title={t("rankings.topCreatorsByMinutes")} icon={Clock} items={rankings.topCreatorsByMinutes || []} />
+        <RankingTable title={t("rankings.topCreatorsByPlays") + " (UGC)"} icon={Play} showBadges
+          items={(rankings.topCreatorsByPlays || []).filter((i: any) => !isEpicCreator(i.name))} />
+        <RankingTable title={t("rankings.topCreatorsByMinutes") + " (UGC)"} icon={Clock} showBadges
+          items={(rankings.topCreatorsByMinutes || []).filter((i: any) => !isEpicCreator(i.name))} />
       </div>
       <div className="grid md:grid-cols-2 gap-4 mb-4">
-        <RankingTable title={t("rankings.topCreatorsByPlayers")} icon={Users} items={rankings.topCreatorsByPlayers || []} />
-        <RankingTable title={t("rankings.topCreatorsByCCU")} icon={BarChart3} items={rankings.topCreatorsByCCU || []} />
+        <RankingTable title={t("rankings.topCreatorsByPlayers") + " (UGC)"} icon={Users} showBadges
+          items={(rankings.topCreatorsByPlayers || []).filter((i: any) => !isEpicCreator(i.name))} />
+        <RankingTable title={t("rankings.topCreatorsByCCU") + " (UGC)"} icon={BarChart3} showBadges
+          items={(rankings.topCreatorsByCCU || []).filter((i: any) => !isEpicCreator(i.name))} />
       </div>
       <AiNarrative text={getNarrative(7)} />
 
@@ -468,30 +477,40 @@ export default function ReportView() {
       )}
 
       {/* Section 22 (Most Updated Islands) */}
-      {(rankings.mostUpdatedIslandsThisWeek?.length > 0 || rankings.versionEnrichment) && (
-        <>
-          <SectionHeader icon={RefreshCw} number={22} title={t("reportSections.s22Title")} description={t("reportSections.s22Desc")} />
-          {rankings.versionEnrichment && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-              <KpiCard icon={RefreshCw} label={t("kpis.avgVersion")} value={String(rankings.versionEnrichment.avgVersion || "—")} />
-              <KpiCard icon={RefreshCw} label={t("kpis.v5PlusIslands")} value={fmt(rankings.versionEnrichment.islandsWithVersion5Plus)} />
-              <KpiCard icon={RefreshCw} label={t("kpis.totalWithVersion")} value={fmt(rankings.versionEnrichment.totalWithVersion)} />
+      {(rankings.mostUpdatedIslandsThisWeek?.length > 0 || rankings.versionEnrichment) && (() => {
+        const allUpdated = (rankings.mostUpdatedIslandsThisWeek || []).map((item: any) => ({
+          name: item.name || item.title || item.code || item.island_code,
+          code: item.code || item.island_code,
+          subtitle: `${item.version ? `v${item.version} · ` : ""}@${item.creator || item.creator_code || "unknown"}`,
+          value: item.value || item.week_plays || 0,
+          imageUrl: item.imageUrl || item.image_url,
+          _creator: item.creator || item.creator_code || "",
+        }));
+        const epicUpdated = allUpdated.filter((i: any) => isEpicCreator(i._creator));
+        const ugcUpdated = allUpdated.filter((i: any) => !isEpicCreator(i._creator));
+        return (
+          <>
+            <SectionHeader icon={RefreshCw} number={22} title={t("reportSections.s22Title")} description={t("reportSections.s22Desc")} />
+            {rankings.versionEnrichment && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+                <KpiCard icon={RefreshCw} label={t("kpis.avgVersion")} value={String(rankings.versionEnrichment.avgVersion || "—")} />
+                <KpiCard icon={RefreshCw} label={t("kpis.v5PlusIslands")} value={fmt(rankings.versionEnrichment.islandsWithVersion5Plus)} />
+                <KpiCard icon={RefreshCw} label={t("kpis.totalWithVersion")} value={fmt(rankings.versionEnrichment.totalWithVersion)} />
+              </div>
+            )}
+            <div className="grid md:grid-cols-2 gap-4 mb-4">
+              {ugcUpdated.length > 0 && (
+                <RankingTable title={t("rankings.mostUpdated") + " (UGC)"} icon={RefreshCw} showBadges showImage items={ugcUpdated.slice(0, 10)} />
+              )}
+              {epicUpdated.length > 0 && (
+                <RankingTable title={t("rankings.mostUpdated") + " (Epic)"} icon={RefreshCw} showImage items={epicUpdated.slice(0, 10)} />
+              )}
             </div>
-          )}
-          <RankingTable
-            title={t("rankings.mostUpdated")}
-            icon={RefreshCw}
-            items={(rankings.mostUpdatedIslandsThisWeek || []).slice(0, 10).map((item: any) => ({
-              name: item.name || item.title || item.code || item.island_code,
-              code: item.code || item.island_code,
-              subtitle: `@${item.creator || item.creator_code || "unknown"}`,
-              value: item.value || item.week_plays || 0,
-            }))}
-          />
-          <AiNarrative text={getNarrative(22)} />
-          <div className="border-t border-border my-8" />
-        </>
-      )}
+            <AiNarrative text={getNarrative(22)} />
+            <div className="border-t border-border my-8" />
+          </>
+        );
+      })()}
 
       {/* Section 23 (Rookie Creators) */}
       {rankings.rookieCreators?.length > 0 && (
