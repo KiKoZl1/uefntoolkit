@@ -16,11 +16,23 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Collect ALL islands from cache ordered by plays (no artificial limit)
+    // Parse optional maxIslands from body (default: 50000 per invocation)
+    let maxIslands = 50_000;
+    try {
+      const body = await req.json();
+      if (body?.maxIslands) maxIslands = Math.max(1000, Number(body.maxIslands));
+    } catch { /* no body is fine */ }
+
+    // Collect islands from cache in pages of 1000 up to maxIslands
     const codes: string[] = [];
     let offset = 0;
     const PAGE = 1000;
-    while (true) {
+    const startMs = Date.now();
+    const BUDGET_MS = 25_000; // leave headroom for RPC calls
+
+    while (codes.length < maxIslands) {
+      if (Date.now() - startMs > BUDGET_MS) break; // time guard
+
       const { data, error } = await supabase
         .from("discover_islands_cache")
         .select("island_code")
@@ -30,22 +42,23 @@ Deno.serve(async (req) => {
       if (error) throw error;
       if (!data?.length) break;
       codes.push(...data.map((d: { island_code: string }) => d.island_code));
-      if (data.length < PAGE) break; // last page
+      if (data.length < PAGE) break;
       offset += PAGE;
     }
 
     if (codes.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, submitted: 0, enqueued: 0 }),
+        JSON.stringify({ success: true, submitted: 0, inserted: 0, updated: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Enqueue via RPC in chunks (RPC accepts arrays but we chunk to avoid payload limits)
+    // Enqueue via RPC in chunks
     let totalInserted = 0;
     let totalUpdated = 0;
     const CHUNK = 5000;
     for (let i = 0; i < codes.length; i += CHUNK) {
+      if (Date.now() - startMs > 50_000) break; // hard time guard
       const chunk = codes.slice(i, i + CHUNK);
       const { data: enq, error: rpcError } = await supabase.rpc(
         "enqueue_discover_link_metadata",
@@ -59,7 +72,13 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, submitted: codes.length, inserted: totalInserted, updated: totalUpdated }),
+      JSON.stringify({
+        success: true,
+        submitted: codes.length,
+        inserted: totalInserted,
+        updated: totalUpdated,
+        elapsed_ms: Date.now() - startMs,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
