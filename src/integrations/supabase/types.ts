@@ -1422,6 +1422,204 @@ export type Database = {
         }
         Relationships: []
       }
+      ralph_actions: {
+        Row: {
+          created_at: string
+          details: Json
+          id: number
+          latency_ms: number
+          phase: string
+          run_id: string
+          status: string
+          step_index: number
+          target: string | null
+          tool_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          id?: number
+          latency_ms?: number
+          phase?: string
+          run_id: string
+          status?: string
+          step_index?: number
+          target?: string | null
+          tool_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          id?: number
+          latency_ms?: number
+          phase?: string
+          run_id?: string
+          status?: string
+          step_index?: number
+          target?: string | null
+          tool_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ralph_actions_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ralph_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ralph_eval_results: {
+        Row: {
+          created_at: string
+          details: Json
+          id: number
+          metric: string
+          pass: boolean
+          run_id: string
+          suite: string
+          threshold: number | null
+          value: number | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          id?: number
+          metric: string
+          pass: boolean
+          run_id: string
+          suite: string
+          threshold?: number | null
+          value?: number | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          id?: number
+          metric?: string
+          pass?: boolean
+          run_id?: string
+          suite?: string
+          threshold?: number | null
+          value?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ralph_eval_results_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ralph_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ralph_incidents: {
+        Row: {
+          created_at: string
+          id: number
+          incident_type: string
+          message: string
+          metadata: Json
+          resolution_note: string | null
+          resolved: boolean
+          resolved_at: string | null
+          run_id: string | null
+          severity: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          incident_type: string
+          message: string
+          metadata?: Json
+          resolution_note?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          run_id?: string | null
+          severity: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          incident_type?: string
+          message?: string
+          metadata?: Json
+          resolution_note?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          run_id?: string | null
+          severity?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ralph_incidents_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ralph_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ralph_runs: {
+        Row: {
+          budget_usd: number
+          created_at: string
+          created_by: string | null
+          ended_at: string | null
+          error_message: string | null
+          id: string
+          max_iterations: number
+          mode: string
+          spent_tokens: number
+          spent_usd: number
+          started_at: string
+          status: string
+          summary: Json
+          target_scope: string[]
+          timeout_minutes: number
+          token_budget: number
+          updated_at: string
+        }
+        Insert: {
+          budget_usd?: number
+          created_at?: string
+          created_by?: string | null
+          ended_at?: string | null
+          error_message?: string | null
+          id?: string
+          max_iterations?: number
+          mode: string
+          spent_tokens?: number
+          spent_usd?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          target_scope?: string[]
+          timeout_minutes?: number
+          token_budget?: number
+          updated_at?: string
+        }
+        Update: {
+          budget_usd?: number
+          created_at?: string
+          created_by?: string | null
+          ended_at?: string | null
+          error_message?: string | null
+          id?: string
+          max_iterations?: number
+          mode?: string
+          spent_tokens?: number
+          spent_usd?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          target_scope?: string[]
+          timeout_minutes?: number
+          token_budget?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reports: {
         Row: {
           ai_summary: string | null
@@ -1803,6 +2001,17 @@ export type Database = {
         Args: { p_due_within_minutes?: number; p_link_codes: string[] }
         Returns: Json
       }
+      finish_ralph_run: {
+        Args: {
+          p_error_message?: string
+          p_run_id: string
+          p_spent_tokens?: number
+          p_spent_usd?: number
+          p_status: string
+          p_summary?: Json
+        }
+        Returns: Json
+      }
       get_census_stats: { Args: never; Returns: Json }
       get_island_card: {
         Args: { p_island_code: string; p_window_hours?: number }
@@ -1820,6 +2029,7 @@ export type Database = {
         Args: { p_panel_name: string }
         Returns: string
       }
+      get_ralph_health: { Args: { p_hours?: number }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1830,6 +2040,41 @@ export type Database = {
       normalize_island_title_for_dup: {
         Args: { p_title: string }
         Returns: string
+      }
+      raise_ralph_incident: {
+        Args: {
+          p_incident_type?: string
+          p_message?: string
+          p_metadata?: Json
+          p_run_id?: string
+          p_severity?: string
+        }
+        Returns: number
+      }
+      record_ralph_action: {
+        Args: {
+          p_details?: Json
+          p_latency_ms?: number
+          p_phase?: string
+          p_run_id: string
+          p_status?: string
+          p_step_index?: number
+          p_target?: string
+          p_tool_name?: string
+        }
+        Returns: number
+      }
+      record_ralph_eval: {
+        Args: {
+          p_details?: Json
+          p_metric: string
+          p_pass: boolean
+          p_run_id: string
+          p_suite: string
+          p_threshold: number
+          p_value: number
+        }
+        Returns: number
       }
       repair_discover_report_state: {
         Args: { p_report_id: string; p_stale_after_seconds?: number }
@@ -1956,6 +2201,23 @@ export type Database = {
           p_stale_after_seconds?: number
         }
         Returns: number
+      }
+      resolve_ralph_incident: {
+        Args: { p_incident_id: number; p_resolution_note?: string }
+        Returns: Json
+      }
+      start_ralph_run: {
+        Args: {
+          p_budget_usd?: number
+          p_created_by?: string
+          p_max_iterations?: number
+          p_mode: string
+          p_summary?: Json
+          p_target_scope?: string[]
+          p_timeout_minutes?: number
+          p_token_budget?: number
+        }
+        Returns: string
       }
     }
     Enums: {
