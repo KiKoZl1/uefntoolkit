@@ -12,7 +12,7 @@ import {
   Loader2, Sparkles, CheckCircle2, RefreshCcw, Gauge, Users, AlertTriangle,
   ShieldAlert, EyeOff, Activity, Database, Eye, FileText, Clock, ChevronDown,
   ChevronRight, Radio, Circle, ArrowRight, Zap, Hash, Layers, AlertCircle,
-  Timer, Lock, CalendarClock, BarChart3, Target
+  Timer, Lock, CalendarClock, BarChart3, Target, Search
 } from "lucide-react";
 
 // ─── Formatters ───────────────────────────────────────────────
@@ -127,6 +127,24 @@ interface LinkGraphData {
   edgeAgeSeconds: number | null;
   staleEdges60d: number;
   collectionsDueNow: number;
+}
+
+interface LookupPipelineData {
+  calls24h: number;
+  ok24h: number;
+  fail24h: number;
+  calls1h: number;
+  ok1h: number;
+  fail1h: number;
+  p95ms24h: number | null;
+  avgMs24h: number | null;
+  lastOkAt: string | null;
+  lastErrorAt: string | null;
+  failRate24hPct: number;
+  coverageInternalCardPct: number;
+  coverageDiscoverySignalsPct: number;
+  coverageWeeklyPerfPct: number;
+  errorBreakdown: Array<{ error_type: string; count: number }>;
 }
 
 interface CronJob {
@@ -311,6 +329,7 @@ export default function AdminOverview() {
 
   // Rails / Link graph
   const [linkGraph, setLinkGraph] = useState<LinkGraphData | null>(null);
+  const [lookup, setLookup] = useState<LookupPipelineData | null>(null);
 
   // Crons
   const [crons, setCrons] = useState<CronJob[]>([]);
@@ -332,6 +351,7 @@ export default function AdminOverview() {
   // History tracking for sparklines
   const censusHistory = useRef<Record<string, number[]>>({});
   const metaHistory = useRef<Record<string, number[]>>({});
+  const lookupHistory = useRef<Record<string, number[]>>({});
 
   // Enqueue gap
   const [enqueueLoading, setEnqueueLoading] = useState(false);
@@ -475,6 +495,43 @@ export default function AdminOverview() {
     });
   }, []);
 
+  const fetchLookup = useCallback(async () => {
+    const [statsRes, errorsRes] = await Promise.all([
+      (supabase as any).rpc("get_lookup_pipeline_stats"),
+      (supabase as any).rpc("get_lookup_pipeline_error_breakdown", { p_hours: 24, p_limit: 8 }),
+    ]);
+    const s = statsRes?.data as any;
+    if (!s) return;
+
+    const errors = Array.isArray(errorsRes?.data) ? (errorsRes.data as any[]) : [];
+    setLookup({
+      calls24h: Number(s.calls_24h || 0),
+      ok24h: Number(s.ok_24h || 0),
+      fail24h: Number(s.fail_24h || 0),
+      calls1h: Number(s.calls_1h || 0),
+      ok1h: Number(s.ok_1h || 0),
+      fail1h: Number(s.fail_1h || 0),
+      p95ms24h: s.p95_ms_24h != null ? Number(s.p95_ms_24h) : null,
+      avgMs24h: s.avg_ms_24h != null ? Number(s.avg_ms_24h) : null,
+      lastOkAt: s.last_ok_at || null,
+      lastErrorAt: s.last_error_at || null,
+      failRate24hPct: Number(s.fail_rate_24h_pct || 0),
+      coverageInternalCardPct: Number(s.coverage_internal_card_pct || 0),
+      coverageDiscoverySignalsPct: Number(s.coverage_discovery_signals_pct || 0),
+      coverageWeeklyPerfPct: Number(s.coverage_weekly_perf_pct || 0),
+      errorBreakdown: errors.map((e: any) => ({
+        error_type: String(e.error_type || "unknown"),
+        count: Number(e.count || 0),
+      })),
+    });
+
+    const lh = lookupHistory.current;
+    const pushLH = (key: string, val: number) => { lh[key] = [...(lh[key] || []).slice(-30), val]; };
+    pushLH("calls24h", Number(s.calls_24h || 0));
+    pushLH("p95", Number(s.p95_ms_24h || 0));
+    pushLH("failRate", Number(s.fail_rate_24h_pct || 0));
+  }, []);
+
   const handleBackfillCollections = useCallback(async () => {
     setBackfillLoading(true);
     try {
@@ -536,14 +593,14 @@ export default function AdminOverview() {
       setLastRefresh(timeNow());
     };
     const tickSlow = async () => {
-      await Promise.all([fetchCensus(), fetchExposure(), fetchLinkGraph(), fetchCrons(), fetchReports(), fetchAlerts()]);
+      await Promise.all([fetchCensus(), fetchExposure(), fetchLinkGraph(), fetchLookup(), fetchCrons(), fetchReports(), fetchAlerts()]);
     };
     tickFast();
     tickSlow();
     const fastId = setInterval(tickFast, 5_000);
     const slowId = setInterval(tickSlow, 30_000);
     return () => { clearInterval(fastId); clearInterval(slowId); };
-  }, [fetchCensus, fetchMeta, fetchExposure, fetchLinkGraph, fetchCrons, fetchReports, fetchAlerts]);
+  }, [fetchCensus, fetchMeta, fetchExposure, fetchLinkGraph, fetchLookup, fetchCrons, fetchReports, fetchAlerts]);
 
   // ─── Weekly pipeline (preserved logic) ────────────────────
 
@@ -646,6 +703,15 @@ export default function AdminOverview() {
         : (linkGraph.resolution24hPct || 0) >= 0.5
           ? "warn"
           : "error";
+  const lookupHealth: HealthStatus = !lookup
+    ? "idle"
+    : lookup.calls1h === 0
+      ? "warn"
+      : lookup.failRate24hPct >= 10 || (lookup.p95ms24h ?? 0) > 3000
+        ? "error"
+        : lookup.failRate24hPct >= 3 || (lookup.p95ms24h ?? 0) > 1800
+          ? "warn"
+          : "ok";
   const reportHealth: HealthStatus = generating ? "ok" : genState.phase === "done" ? "ok" : "idle";
 
   const metaPct = meta && meta.total > 0 ? (meta.withTitle / meta.total) * 100 : 0;
@@ -694,6 +760,7 @@ export default function AdminOverview() {
             <div className="flex items-center gap-1.5"><HealthDot status={exposureHealth} label={`${exposure?.ticksFailed || 0} falhas 24h`} /><span className="text-muted-foreground">Exposure</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={metaHealth} label={`${metaPct.toFixed(1)}% preenchido`} /><span className="text-muted-foreground">Metadata</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={railsHealth} label={`${linkGraph?.collectionsResolved24h || 0}/${linkGraph?.collectionsSeen24h || 0} collections resolvidas (24h)`} /><span className="text-muted-foreground">Rails</span></div>
+            <div className="flex items-center gap-1.5"><HealthDot status={lookupHealth} label={`${lookup?.ok1h || 0}/${lookup?.calls1h || 0} lookup ok (1h)`} /><span className="text-muted-foreground">Lookup</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={reportHealth} label={generating ? "Em andamento" : "Idle"} /><span className="text-muted-foreground">Report</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={monitoringOffline ? "error" : alertStatus} label={monitoringOffline ? "Monitoramento offline!" : `${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status="ok" label="8/8 ativos" /><span className="text-muted-foreground">Crons</span></div>
@@ -933,6 +1000,66 @@ export default function AdminOverview() {
                   {backfillLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Zap className="h-3 w-3 mr-1" />}
                   Backfill Collections (72h)
                 </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
+          <Search className="h-4 w-4" /> Lookup Pipeline
+        </h2>
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              <StatCard icon={Activity} label="Calls 24h" value={fmt(lookup?.calls24h)} sparkData={lookupHistory.current.calls24h} />
+              <StatCard icon={CheckCircle2} label="OK 24h" value={fmt(lookup?.ok24h)} color="success" />
+              <StatCard icon={AlertTriangle} label="Fail 24h" value={fmt(lookup?.fail24h)} color={(lookup?.fail24h || 0) > 0 ? "destructive" : "default"} />
+              <StatCard icon={Gauge} label="p95 (ms)" value={lookup?.p95ms24h != null ? fmt(lookup.p95ms24h) : "-"} sparkData={lookupHistory.current.p95} />
+              <StatCard icon={Clock} label="Avg (ms)" value={lookup?.avgMs24h != null ? fmt(lookup.avgMs24h) : "-"} />
+              <StatCard icon={ShieldAlert} label="Fail rate" value={lookup ? `${lookup.failRate24hPct.toFixed(2)}%` : "-"} color={(lookup?.failRate24hPct || 0) >= 3 ? "warning" : "default"} sparkData={lookupHistory.current.failRate} />
+              <StatCard icon={Layers} label="Coverage card" value={lookup ? `${lookup.coverageInternalCardPct.toFixed(1)}%` : "-"} />
+              <StatCard icon={BarChart3} label="Coverage discover" value={lookup ? `${lookup.coverageDiscoverySignalsPct.toFixed(1)}%` : "-"} />
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-xs">
+              <p className="font-semibold text-sm">Notify / Acoes Recomendadas</p>
+              {!lookup ? (
+                <p className="text-muted-foreground">Aguardando dados do lookup pipeline.</p>
+              ) : (
+                <>
+                  {lookup.calls1h === 0 ? (
+                    <p className="text-destructive">Nenhuma chamada no lookup na ultima hora. Verifique uso da ferramenta e logs da edge function.</p>
+                  ) : lookup.failRate24hPct >= 10 ? (
+                    <p className="text-destructive">Fail rate alto ({lookup.failRate24hPct.toFixed(2)}%). Prioridade alta: revisar erros por tipo.</p>
+                  ) : lookup.failRate24hPct >= 3 ? (
+                    <p className="text-yellow-600">Fail rate em atencao ({lookup.failRate24hPct.toFixed(2)}%). Monitorar.</p>
+                  ) : (
+                    <p className="text-muted-foreground">Lookup pipeline dentro do esperado.</p>
+                  )}
+                  {(lookup.p95ms24h ?? 0) > 3000 && (
+                    <p className="text-destructive">Latencia p95 acima de 3s ({lookup.p95ms24h}ms). Verificar enrichment e IO externo.</p>
+                  )}
+                  {(lookup.coverageInternalCardPct ?? 0) < 70 && (
+                    <p className="text-yellow-600">Coverage de internalCard baixa ({lookup.coverageInternalCardPct.toFixed(1)}%).</p>
+                  )}
+                </>
+              )}
+
+              <div className="pt-1 border-t">
+                <p className="text-muted-foreground text-[11px] mb-1">Top erros (24h):</p>
+                {lookup?.errorBreakdown?.length ? (
+                  <div className="grid sm:grid-cols-2 gap-1">
+                    {lookup.errorBreakdown.map((e) => (
+                      <p key={e.error_type} className="text-[11px]">
+                        <span className="font-mono">{e.error_type}</span>: {fmt(e.count)}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">Sem erros no periodo.</p>
+                )}
               </div>
             </div>
           </CardContent>

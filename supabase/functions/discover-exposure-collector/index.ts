@@ -668,6 +668,7 @@ serve(async (req) => {
       // V1 cleanup piggyback: link metadata events retention (best-effort)
       let linkMetaCleanup: any = null;
       let linkEdgesCleanup: any = null;
+      let lookupCleanup: any = null;
       try {
         const { data: cData, error: cErr } = await supabase.rpc("cleanup_discover_link_metadata_events", {
           p_days: 90,
@@ -689,7 +690,18 @@ serve(async (req) => {
         // ignore
       }
 
-      return json({ success: true, maintenance: data, linkMetaCleanup, linkEdgesCleanup });
+      // Lookup telemetry retention (best-effort)
+      try {
+        const { data: lData, error: lErr } = await supabase.rpc("cleanup_discover_lookup_pipeline_runs", {
+          p_days: 30,
+          p_delete_batch: deleteBatch != null && isFinite(deleteBatch) ? deleteBatch : undefined,
+        });
+        if (!lErr) lookupCleanup = lData;
+      } catch (_e) {
+        // ignore
+      }
+
+      return json({ success: true, maintenance: data, linkMetaCleanup, linkEdgesCleanup, lookupCleanup });
     }
 
     if (mode === "intel_refresh") {

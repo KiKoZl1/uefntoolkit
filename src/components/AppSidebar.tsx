@@ -1,4 +1,4 @@
-import { Radar, Search, FolderOpen, LogOut, Shield } from "lucide-react";
+import { Radar, Search, FolderOpen, LogOut, Shield, Sparkles } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
@@ -14,8 +14,9 @@ export function AppSidebar() {
   const { t } = useTranslation();
 
   const tools = [
-    { title: t("app.csvAnalytics"), url: "/app", icon: FolderOpen, end: true },
-    { title: "Island Lookup", url: "/app/island-lookup", icon: Search },
+    { title: "Workspace", url: "/app", icon: FolderOpen, end: true },
+    { title: "Island Lookup Pro", url: "/app/island-lookup", icon: Search },
+    { title: "Discover Live", url: "/discover", icon: Sparkles },
   ];
 
   return (
