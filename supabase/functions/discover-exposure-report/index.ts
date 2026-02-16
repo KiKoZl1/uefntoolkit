@@ -55,7 +55,14 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const supabase = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_SERVICE_ROLE_KEY"));
+    // Auth guard: require service_role key
+    const authHeader = req.headers.get("Authorization") || "";
+    const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+    if (authHeader !== `Bearer ${serviceKey}`) {
+      return json({ error: "Forbidden: service_role required" }, 403);
+    }
+
+    const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
 
     let body: any = {};
     try {
