@@ -473,9 +473,11 @@ export default function AdminOverview() {
       });
       if (res.error) throw new Error(res.error.message);
       const d = res.data || {};
+      const eq = d.enqueued || {};
+      const total = (typeof eq === "number") ? eq : ((eq.inserted || 0) + (eq.updated || 0));
       toast({
         title: "Backfill disparado",
-        description: `${fmt(d.enqueued || d.inserted || 0)} collections enfileiradas. ${d.message || ""}`,
+        description: `${fmt(total)} collections enfileiradas (${eq.inserted || 0} novas, ${eq.updated || 0} atualizadas).`,
       });
       addLog(`Backfill collections: ${JSON.stringify(d)}`);
       await fetchLinkGraph();
