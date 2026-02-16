@@ -1762,6 +1762,10 @@ export type Database = {
       get_link_card: { Args: { p_link_code: string }; Returns: Json }
       get_link_graph_stats: { Args: never; Returns: Json }
       get_metadata_pipeline_stats: { Args: never; Returns: Json }
+      get_panel_display_name: {
+        Args: { p_panel_name: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1808,14 +1812,12 @@ export type Database = {
         Args: { p_report_id: string }
         Returns: Json
       }
-      report_finalize_exposure_analysis: {
-        Args: { p_days?: number; p_report_id: string }
-        Returns: Json
-      }
-      report_finalize_exposure_efficiency: {
-        Args: { p_limit?: number; p_report_id: string }
-        Returns: Json
-      }
+      report_finalize_exposure_analysis:
+        | { Args: { p_days?: number; p_report_id: string }; Returns: Json }
+        | { Args: { p_days?: number; p_report_id: string }; Returns: Json }
+      report_finalize_exposure_efficiency:
+        | { Args: { p_limit?: number; p_report_id: string }; Returns: Json }
+        | { Args: { p_limit?: number; p_report_id: string }; Returns: Json }
       report_finalize_kpis: {
         Args: { p_prev_report_id?: string; p_report_id: string }
         Returns: Json

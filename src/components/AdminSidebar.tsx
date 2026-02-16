@@ -1,4 +1,4 @@
-import { Radar, Activity, FileText, LogOut, ArrowLeft, Eye, Brain } from "lucide-react";
+import { Radar, Activity, FileText, LogOut, ArrowLeft, Eye, Brain, Layers } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,7 @@ export function AdminSidebar() {
     { title: t("nav.reports"), url: "/admin/reports", icon: FileText },
     { title: t("admin.exposure"), url: "/admin/exposure", icon: Eye },
     { title: t("admin.intel"), url: "/admin/intel", icon: Brain },
+    { title: "Panels", url: "/admin/panels", icon: Layers },
   ];
 
   return (

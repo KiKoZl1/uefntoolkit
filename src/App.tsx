@@ -29,6 +29,7 @@ import AdminReportsList from "./pages/admin/AdminReportsList";
 import AdminReportEditor from "./pages/admin/AdminReportEditor";
 import AdminExposureHealth from "./pages/admin/AdminExposureHealth";
 import AdminIntel from "./pages/admin/AdminIntel";
+import AdminPanelManager from "./pages/admin/AdminPanelManager";
 
 import NotFound from "./pages/NotFound";
 
@@ -66,6 +67,7 @@ const App = () => (
               <Route path="reports/:id/edit" element={<AdminReportEditor />} />
               <Route path="exposure" element={<AdminExposureHealth />} />
               <Route path="intel" element={<AdminIntel />} />
+              <Route path="panels" element={<AdminPanelManager />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

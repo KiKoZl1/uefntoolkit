@@ -504,7 +504,7 @@ export default function ReportView() {
                           <span className="w-4 text-center text-muted-foreground font-mono">{pi + 1}</span>
                           <span className="flex-1 truncate font-medium">{p.panel}</span>
                           <span className="text-muted-foreground">{fmt(p.minutes)} min</span>
-                          <span className="text-muted-foreground">{p.appearances} app</span>
+                          <span className="text-muted-foreground">{p.appearances} appearances</span>
                           {p.best_rank && <span className="text-primary text-[10px]">#{p.best_rank}</span>}
                         </div>
                       ))}
@@ -532,7 +532,7 @@ export default function ReportView() {
             items={(rankings.panelLoyalty || []).map((item: any) => ({
               name: item.title || item.link_code,
               code: item.link_code,
-              subtitle: `@${item.creator_code || "unknown"} · ${item.panel_name}`,
+              subtitle: `@${item.creator_code || "unknown"} · ${item.panel_display || item.panel_name}`,
               value: item.total_minutes_in_panel,
               label: `${fmt(item.total_minutes_in_panel)} min`,
               imageUrl: item.image_url,
@@ -715,7 +715,7 @@ export default function ReportView() {
                                 <span className="w-4 text-center text-muted-foreground font-mono">{pi + 1}</span>
                                 <span className="flex-1 truncate font-medium">{p.panel}</span>
                                 <span className="text-muted-foreground">{fmt(p.minutes)} min</span>
-                                <span className="text-muted-foreground">{p.appearances} app</span>
+                                <span className="text-muted-foreground">{p.appearances} appearances</span>
                                 {p.best_rank && <span className="text-primary text-[10px]">#{p.best_rank}</span>}
                               </div>
                             ))}
