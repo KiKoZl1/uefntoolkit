@@ -165,9 +165,10 @@ Write insightful narratives for each of the 19 sections below. Each narrative MU
 - Actionable insights for creators (e.g., "Creators should consider X genre given Y trend")
 - Notable standouts or anomalies worth highlighting
 - When WoW data is available, mention trends and changes vs last week
-- If baseline is not available (Baseline available = no), explicitly state that WoW/lifecycle movers are N/A and avoid inferring "stability" from missing data.
+- If baseline is not available (Baseline available = no), for sections that depend on WoW data (sections 16, 17, 18), write about what WILL be tracked once baseline exists. Discuss what the current snapshot reveals about the ecosystem's starting point. DO NOT write "none" or say there's no data — instead analyze the current week's absolute performance as the foundation for future comparisons.
 - Always explain what values mean (e.g., "5.37 plays per unique player", "71.26 favorites per 100 players")
 - For stickiness scores, explain the formula: plays × avgMinutes × retention
+- For Efficiency & Conversion (section 12), ALWAYS use the topFavsPerPlay, topRecsPerPlay, topPlaysPerPlayer data — these are available even without baseline.
 
 Write in English. Be analytical, not generic. Reference specific island names, creators, and categories from the rankings.
 
@@ -189,13 +190,13 @@ Sections:
 9. Low Performance Analysis - count of low-perf islands, histogram (<50, <100, <500 players), top 10 worst with their tags/categories, common failure patterns
 10. Plays per Player (Replay Frequency) - top 10 replay frequency (≥1000 plays filter). What design patterns drive replays
 11. Advocacy Metrics - favorites per 100 players, recommendations per 100 players (with quality filters). What makes players advocate for a map
-12. Efficiency & Conversion - favorites/play ratio, recommendations/play ratio, minutes per favorite. Conversion quality analysis
+12. Efficiency & Conversion - favorites/play ratio (topFavsPerPlay), recommendations/play ratio (topRecsPerPlay), plays per player (topPlaysPerPlayer). These metrics are ALWAYS available. Analyze conversion quality.
 13. Stickiness (D1 & D7) - top 10 stickiness scores (plays × avgMinutes × retention) for global and UGC. Explain what stickiness means and why it matters
 14. Retention-Adjusted Engagement - top 10 by avgMinutes × retention (D1 and D7, ≥1000 plays & ≥500 uniques filter). Deep engagement quality
 15. Category & Tags - genre distribution, top tags by island count, top categories by plays. Market composition analysis
-16. Weekly Growth / Breakouts - biggest risers by play delta, multi-metric breakout detection. What triggered viral moments
-17. Risers & Decliners - specific WoW movers, what's growing and what's fading, pattern analysis
-18. Island Lifecycle - revived islands, dead islands, breakout stories. Ecosystem churn analysis
+16. Weekly Growth / Breakouts - If baseline available: biggest risers by play delta, breakout detection. If NO baseline: analyze the current week's top performers as the "starting lineup", discuss which islands show signs of breakout potential based on their absolute metrics (high plays + high retention = likely breakout candidate)
+17. Risers & Decliners - If baseline available: specific WoW movers. If NO baseline: identify potential risers/decliners by analyzing metric imbalances (e.g., high plays but low retention = at risk of declining; low plays but high retention = poised to rise with more visibility)
+18. Island Lifecycle - revived islands, dead islands, breakout stories. If NO baseline: describe the ecosystem's current composition as the lifecycle starting point
 19. Discovery Exposure - which panels drove exposure, time-in-panel patterns, churn/stability, and actionable positioning insights (based on panel/rank timeline)`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
