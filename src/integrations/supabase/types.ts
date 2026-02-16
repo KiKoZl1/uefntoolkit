@@ -91,7 +91,9 @@ export type Database = {
           created_in: string | null
           creator_code: string | null
           first_seen_at: string | null
+          image_url: string | null
           island_code: string
+          last_metadata_fetch_at: string | null
           last_probe_plays: number | null
           last_probe_unique: number | null
           last_report_id: string | null
@@ -108,18 +110,26 @@ export type Database = {
           last_week_plays: number | null
           last_week_recommends: number | null
           last_week_unique: number | null
+          link_state: string | null
+          max_players: number | null
+          min_players: number | null
+          moderation_status: string | null
+          published_at_epic: string | null
           reported_streak: number | null
           suppressed_streak: number | null
           tags: Json | null
           title: string | null
           updated_at: string | null
+          updated_at_epic: string | null
         }
         Insert: {
           category?: string | null
           created_in?: string | null
           creator_code?: string | null
           first_seen_at?: string | null
+          image_url?: string | null
           island_code: string
+          last_metadata_fetch_at?: string | null
           last_probe_plays?: number | null
           last_probe_unique?: number | null
           last_report_id?: string | null
@@ -136,18 +146,26 @@ export type Database = {
           last_week_plays?: number | null
           last_week_recommends?: number | null
           last_week_unique?: number | null
+          link_state?: string | null
+          max_players?: number | null
+          min_players?: number | null
+          moderation_status?: string | null
+          published_at_epic?: string | null
           reported_streak?: number | null
           suppressed_streak?: number | null
           tags?: Json | null
           title?: string | null
           updated_at?: string | null
+          updated_at_epic?: string | null
         }
         Update: {
           category?: string | null
           created_in?: string | null
           creator_code?: string | null
           first_seen_at?: string | null
+          image_url?: string | null
           island_code?: string
+          last_metadata_fetch_at?: string | null
           last_probe_plays?: number | null
           last_probe_unique?: number | null
           last_report_id?: string | null
@@ -164,11 +182,17 @@ export type Database = {
           last_week_plays?: number | null
           last_week_recommends?: number | null
           last_week_unique?: number | null
+          link_state?: string | null
+          max_players?: number | null
+          min_players?: number | null
+          moderation_status?: string | null
+          published_at_epic?: string | null
           reported_streak?: number | null
           suppressed_streak?: number | null
           tags?: Json | null
           title?: string | null
           updated_at?: string | null
+          updated_at_epic?: string | null
         }
         Relationships: []
       }
@@ -448,6 +472,54 @@ export type Database = {
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "discover_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      discover_report_rebuild_runs: {
+        Row: {
+          id: number
+          ok: boolean
+          report_id: string | null
+          summary_json: Json
+          ts_end: string | null
+          ts_start: string
+          user_id: string | null
+          weekly_report_id: string
+        }
+        Insert: {
+          id?: number
+          ok?: boolean
+          report_id?: string | null
+          summary_json?: Json
+          ts_end?: string | null
+          ts_start?: string
+          user_id?: string | null
+          weekly_report_id: string
+        }
+        Update: {
+          id?: number
+          ok?: boolean
+          report_id?: string | null
+          summary_json?: Json
+          ts_end?: string | null
+          ts_start?: string
+          user_id?: string | null
+          weekly_report_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discover_report_rebuild_runs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "discover_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discover_report_rebuild_runs_weekly_report_id_fkey"
+            columns: ["weekly_report_id"]
+            isOneToOne: false
+            referencedRelation: "weekly_reports"
             referencedColumns: ["id"]
           },
         ]
@@ -1092,6 +1164,7 @@ export type Database = {
           best_rank_24h: number | null
           creator_code: string | null
           first_seen_at: string
+          image_url: string | null
           link_code: string
           link_code_type: string
           minutes_24h: number
@@ -1109,6 +1182,7 @@ export type Database = {
           best_rank_24h?: number | null
           creator_code?: string | null
           first_seen_at: string
+          image_url?: string | null
           link_code: string
           link_code_type: string
           minutes_24h: number
@@ -1126,6 +1200,7 @@ export type Database = {
           best_rank_24h?: number | null
           creator_code?: string | null
           first_seen_at?: string
+          image_url?: string | null
           link_code?: string
           link_code_type?: string
           minutes_24h?: number
@@ -1175,6 +1250,7 @@ export type Database = {
           as_of: string
           ccu: number | null
           creator_code: string | null
+          image_url: string | null
           link_code: string
           link_code_type: string
           panel_display_name: string | null
@@ -1189,6 +1265,7 @@ export type Database = {
           as_of: string
           ccu?: number | null
           creator_code?: string | null
+          image_url?: string | null
           link_code: string
           link_code_type: string
           panel_display_name?: string | null
@@ -1203,6 +1280,7 @@ export type Database = {
           as_of?: string
           ccu?: number | null
           creator_code?: string | null
+          image_url?: string | null
           link_code?: string
           link_code_type?: string
           panel_display_name?: string | null
@@ -1329,6 +1407,30 @@ export type Database = {
           },
         ]
       }
+      system_alerts_current: {
+        Row: {
+          alert_key: string
+          details: Json
+          message: string
+          severity: string
+          updated_at: string
+        }
+        Insert: {
+          alert_key: string
+          details?: Json
+          message: string
+          severity: string
+          updated_at?: string
+        }
+        Update: {
+          alert_key?: string
+          details?: Json
+          message?: string
+          severity?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       uploads: {
         Row: {
           created_at: string
@@ -1403,9 +1505,11 @@ export type Database = {
           editor_sections_json: Json | null
           id: string
           kpis_json: Json | null
+          last_rebuilt_at: string | null
           public_slug: string | null
           published_at: string | null
           rankings_json: Json | null
+          rebuild_count: number
           sections_json: Json | null
           status: string
           subtitle_public: string | null
@@ -1424,9 +1528,11 @@ export type Database = {
           editor_sections_json?: Json | null
           id?: string
           kpis_json?: Json | null
+          last_rebuilt_at?: string | null
           public_slug?: string | null
           published_at?: string | null
           rankings_json?: Json | null
+          rebuild_count?: number
           sections_json?: Json | null
           status?: string
           subtitle_public?: string | null
@@ -1445,9 +1551,11 @@ export type Database = {
           editor_sections_json?: Json | null
           id?: string
           kpis_json?: Json | null
+          last_rebuilt_at?: string | null
           public_slug?: string | null
           published_at?: string | null
           rankings_json?: Json | null
+          rebuild_count?: number
           sections_json?: Json | null
           status?: string
           subtitle_public?: string | null
@@ -1533,6 +1641,10 @@ export type Database = {
               surface_name: string
             }[]
           }
+      cleanup_discover_link_metadata_events: {
+        Args: { p_days?: number; p_delete_batch?: number }
+        Returns: Json
+      }
       compute_discovery_exposure_rollup_daily: {
         Args: { p_date: string }
         Returns: number
@@ -1540,6 +1652,15 @@ export type Database = {
       compute_discovery_public_intel: {
         Args: { p_as_of?: string }
         Returns: Json
+      }
+      compute_system_alerts: { Args: never; Returns: Json }
+      discovery_exposure_breadth_top: {
+        Args: { p_date_from: string; p_date_to: string; p_limit?: number }
+        Returns: {
+          link_code: string
+          link_code_type: string
+          panels_distinct: number
+        }[]
       }
       discovery_exposure_panel_daily_summaries: {
         Args: { p_date_from: string; p_date_to: string }
@@ -1589,10 +1710,24 @@ export type Database = {
           target_id: string
         }[]
       }
-      enqueue_discover_link_metadata: {
-        Args: { p_link_codes: string[] }
-        Returns: number
+      discovery_exposure_top_panels: {
+        Args: { p_date_from: string; p_date_to: string; p_limit?: number }
+        Returns: {
+          minutes_exposed: number
+          panel_name: string
+          surface_name: string
+          target_id: string
+        }[]
       }
+      enqueue_discover_link_metadata: {
+        Args: { p_due_within_minutes?: number; p_link_codes: string[] }
+        Returns: Json
+      }
+      get_island_card: {
+        Args: { p_island_code: string; p_window_hours?: number }
+        Returns: Json
+      }
+      get_link_card: { Args: { p_link_code: string }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1619,7 +1754,15 @@ export type Database = {
           title: string
         }[]
       }
+      report_exposure_coverage: {
+        Args: { p_weekly_report_id: string }
+        Returns: Json
+      }
       report_link_metadata_coverage: {
+        Args: { p_report_id: string }
+        Returns: Json
+      }
+      report_low_perf_histogram: {
         Args: { p_report_id: string }
         Returns: Json
       }
