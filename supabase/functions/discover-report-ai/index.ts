@@ -116,6 +116,12 @@ serve(async (req) => {
       panelLoyalty: r.panelLoyalty?.slice?.(0, 10) || [],
       versionEnrichment: r.versionEnrichment || null,
       sacCoverage: r.sacCoverage || null,
+      // WoW comparative data
+      categoryRisers: r.categoryRisers?.slice?.(0, 10) || [],
+      categoryDecliners: r.categoryDecliners?.slice?.(0, 10) || [],
+      creatorRisers: r.creatorRisers?.slice?.(0, 10) || [],
+      creatorDecliners: r.creatorDecliners?.slice?.(0, 10) || [],
+      creatorRankClimbers: r.creatorRankClimbers?.slice?.(0, 10) || [],
     }, null, 0);
     const baselineAvailable = Boolean((kpis as any)?.baselineAvailable) || kpis.wowTotalPlays != null;
 
@@ -125,8 +131,29 @@ serve(async (req) => {
 - Total Players: ${kpis.wowTotalPlayers?.toFixed(1)}% WoW
 - Total Minutes: ${kpis.wowTotalMinutes?.toFixed(1)}% WoW
 - Active Islands: ${kpis.wowActiveIslands?.toFixed(1)}% WoW
+- Avg Retention D1: ${kpis.wowAvgRetentionD1?.toFixed(1) ?? 'N/A'}% WoW
+- Avg Retention D7: ${kpis.wowAvgRetentionD7?.toFixed(1) ?? 'N/A'}% WoW
+- Avg Play Duration: ${kpis.wowAvgPlayDuration?.toFixed(1) ?? 'N/A'}% WoW
+- Avg CCU/Map: ${kpis.wowAvgCCUPerMap?.toFixed(1) ?? 'N/A'}% WoW
+- Total Favorites: ${kpis.wowTotalFavorites?.toFixed(1) ?? 'N/A'}% WoW
+- Total Recommendations: ${kpis.wowTotalRecommendations?.toFixed(1) ?? 'N/A'}% WoW
+- Total Creators: ${kpis.wowTotalCreators?.toFixed(1) ?? 'N/A'}% WoW
 - New Maps delta: ${kpis.wowNewMaps > 0 ? '+' : ''}${kpis.wowNewMaps}
-- New Creators delta: ${kpis.wowNewCreators > 0 ? '+' : ''}${kpis.wowNewCreators}`
+- New Creators delta: ${kpis.wowNewCreators > 0 ? '+' : ''}${kpis.wowNewCreators}
+- Revived delta: ${kpis.wowRevivedCount > 0 ? '+' : ''}${kpis.wowRevivedCount ?? 'N/A'}
+- Dead delta: ${kpis.wowDeadCount > 0 ? '+' : ''}${kpis.wowDeadCount ?? 'N/A'}
+- Failed Islands delta: ${kpis.wowFailedIslands > 0 ? '+' : ''}${kpis.wowFailedIslands ?? 'N/A'}
+
+## Previous Week Absolute Values (for side-by-side comparison)
+- Prev Total Plays: ${kpis.prevTotalPlays ?? 'N/A'}
+- Prev Total Players: ${kpis.prevTotalPlayers ?? 'N/A'}
+- Prev Active Islands: ${kpis.prevActiveIslands ?? 'N/A'}
+- Prev Total Creators: ${kpis.prevTotalCreators ?? 'N/A'}
+- Prev Avg Retention D1: ${kpis.prevAvgRetentionD1 ?? 'N/A'}
+- Prev Avg Retention D7: ${kpis.prevAvgRetentionD7 ?? 'N/A'}
+- Prev Avg Play Duration: ${kpis.prevAvgPlayDuration ?? 'N/A'}
+- Prev New Maps: ${kpis.prevNewMapsThisWeek ?? 'N/A'}
+- Prev New Creators: ${kpis.prevNewCreatorsThisWeek ?? 'N/A'}`
       : '';
 
     const lifecycleBlock = baselineAvailable
@@ -169,13 +196,13 @@ ${evidenceSummary || "Not available yet."}
 ${exposureSummary ? JSON.stringify(exposureSummary, null, 0) : "Not available for this week (collector not running or insufficient data yet)."}
 
 ## Instructions
-Write insightful narratives for each of the 25 sections below. Each narrative MUST be 4-6 sentences long, data-driven, and include:
+Write insightful narratives for each of the 27 sections below. Each narrative MUST be 4-6 sentences long, data-driven, and include:
 - Specific numbers and percentages from the data
 - Comparisons and patterns (e.g., "The top 3 islands account for X% of total plays")
 - Actionable insights for creators (e.g., "Creators should consider X genre given Y trend")
 - Notable standouts or anomalies worth highlighting
-- When WoW data is available, mention trends and changes vs last week
-- If baseline is not available (Baseline available = no), for sections that depend on WoW data (sections 16, 17, 18), write about what WILL be tracked once baseline exists. Discuss what the current snapshot reveals about the ecosystem's starting point. DO NOT write "none" or say there's no data — instead analyze the current week's absolute performance as the foundation for future comparisons.
+- When WoW data is available, mention trends and changes vs last week with specific % deltas and absolute previous values
+- If baseline is not available (Baseline available = no), for sections that depend on WoW data (sections 16, 17, 18, 26, 27), write about what WILL be tracked once baseline exists. Discuss what the current snapshot reveals about the ecosystem's starting point. DO NOT write "none" or say there's no data — instead analyze the current week's absolute performance as the foundation for future comparisons.
 - Always explain what values mean (e.g., "5.37 plays per unique player", "71.26 favorites per 100 players")
 - For stickiness scores, explain the formula: plays × avgMinutes × retention
 - For Efficiency & Conversion (section 12), ALWAYS use the topFavsPerPlay, topRecsPerPlay, topPlaysPerPlayer data — these are available even without baseline.
@@ -213,14 +240,16 @@ Sections:
 22. Most Updated Islands - islands with the highest version numbers (most iterations by creators). Reference mostUpdatedIslandsThisWeek and versionEnrichment data. Analyze the correlation between update frequency and performance. Include version distribution stats.
 23. Rookie Creators - new creators (first_seen this week) with standout performance. Reference rookieCreators data. Analyze how rookies compare to established creators. Highlight total new creators and their best islands.
 24. Player Capacity Analysis - performance breakdown by max_players tiers (Solo, Duo, Squad, Party, Large, Massive). Reference capacityAnalysis data. Which player count drives the best retention/engagement? Actionable insights for creators choosing party sizes.
-25. UEFN vs Fortnite Creative - tool split comparison. Reference toolSplit data. Compare avg plays, retention, CCU, minutes between UEFN and FNC islands. Which tool produces better-performing islands? What does this mean for creators choosing their development tool?`;
+25. UEFN vs Fortnite Creative - tool split comparison. Reference toolSplit data. Compare avg plays, retention, CCU, minutes between UEFN and FNC islands. Which tool produces better-performing islands? What does this mean for creators choosing their development tool?
+26. Category & Genre Movement - WoW category comparison. Reference categoryRisers and categoryDecliners data. Which categories/genres are growing or shrinking? Include plays delta, % change, island count changes. Identify emerging genres and declining ones. What does this mean for creators choosing what to build?
+27. Creator Movement & Ranking Changes - WoW creator comparison. Reference creatorRisers, creatorDecliners, and creatorRankClimbers data. Which creators gained/lost the most plays? Who climbed the most ranking positions? Include rank changes, play deltas, and % changes. Identify breakout creators and consistent performers.`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     // ── Step 1: Generate English narratives ──
     const sectionProps: Record<string, any> = {};
-    for (let i = 1; i <= 25; i++) {
+    for (let i = 1; i <= 27; i++) {
       sectionProps[`section${i}`] = {
         type: "object",
         properties: {

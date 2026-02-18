@@ -3,10 +3,13 @@ import { KpiCard } from "@/components/discover/KpiCard";
 import { RankingTable } from "@/components/discover/RankingTable";
 import { SectionHeader } from "@/components/discover/SectionHeader";
 import { AiNarrative } from "@/components/discover/AiNarrative";
+import { EvolutionDashboard } from "@/components/discover/EvolutionDashboard";
+import { MoversTable } from "@/components/discover/MoversTable";
 import {
   Activity, Users, Play, Clock, TrendingUp, TrendingDown, Star, ThumbsUp,
   BarChart3, Crown, Map as MapIcon, Layers, Zap, Target, Tags, Sparkles,
-  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket,
+  AlertTriangle, Flame, UserPlus, HeartPulse, Skull, Rocket, GitCompareArrows,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   PieChart as RPieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
@@ -286,6 +289,41 @@ export function ReportPreview({
           <div className="border-t border-border my-8" />
           <SectionHeader icon={Target} number={14} title="Discovery Exposure" description="Timeline por panel" />
           <AiNarrative text={getNarrative(14)} />
+        </>
+      )}
+
+      {/* Evolution Dashboard - WoW Comparison */}
+      {kpis.baselineAvailable && (
+        <>
+          <div className="border-t border-border my-8" />
+          <SectionHeader icon={GitCompareArrows} number={15} title="Weekly Evolution Dashboard" description="Comparativo lado a lado com a semana anterior" />
+          <EvolutionDashboard kpis={kpis} prevWeekLabel="Semana Anterior" currWeekLabel="Esta Semana" />
+        </>
+      )}
+
+      {/* Section 26 - Category Movement */}
+      {(rankings.categoryRisers?.length > 0 || rankings.categoryDecliners?.length > 0) && (
+        <>
+          <div className="border-t border-border my-8" />
+          <SectionHeader icon={Tags} number={26} title="Category & Genre Movement" description="Categorias que cresceram ou encolheram WoW" />
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            <MoversTable title="📈 Categories Rising" icon={TrendingUp} items={(rankings.categoryRisers || []).map((c: any) => ({ name: c.name, plays: c.plays, prevPlays: c.prevPlays, deltaPlays: c.deltaPlays, pctChange: c.pctChange, islandCount: c.islandCount }))} type="riser" />
+            <MoversTable title="📉 Categories Declining" icon={TrendingDown} items={(rankings.categoryDecliners || []).map((c: any) => ({ name: c.name, plays: c.plays, prevPlays: c.prevPlays, deltaPlays: c.deltaPlays, pctChange: c.pctChange, islandCount: c.islandCount }))} type="decliner" />
+          </div>
+          <AiNarrative text={getNarrative(26)} />
+        </>
+      )}
+
+      {/* Section 27 - Creator Movement */}
+      {(rankings.creatorRisers?.length > 0 || rankings.creatorDecliners?.length > 0) && (
+        <>
+          <div className="border-t border-border my-8" />
+          <SectionHeader icon={ArrowUpDown} number={27} title="Creator Movement & Rankings" description="Criadores que mais ganharam/perderam posições" />
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            <MoversTable title="🚀 Creator Risers" icon={TrendingUp} items={(rankings.creatorRisers || []).map((c: any) => ({ name: c.creator, plays: c.plays, prevPlays: c.prevPlays, deltaPlays: c.deltaPlays, pctChange: c.pctChange, rankCurr: c.rankCurr, rankPrev: c.rankPrev, rankChange: c.rankChange }))} type="riser" showRank />
+            <MoversTable title="📉 Creator Decliners" icon={TrendingDown} items={(rankings.creatorDecliners || []).map((c: any) => ({ name: c.creator, plays: c.plays, prevPlays: c.prevPlays, deltaPlays: c.deltaPlays, pctChange: c.pctChange, rankCurr: c.rankCurr, rankPrev: c.rankPrev, rankChange: c.rankChange }))} type="decliner" showRank />
+          </div>
+          <AiNarrative text={getNarrative(27)} />
         </>
       )}
     </div>

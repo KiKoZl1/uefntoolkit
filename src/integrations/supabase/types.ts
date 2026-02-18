@@ -2103,6 +2103,22 @@ export type Database = {
         Args: { p_limit?: number; p_report_id: string }
         Returns: Json
       }
+      report_finalize_category_movers: {
+        Args: {
+          p_limit?: number
+          p_prev_report_id: string
+          p_report_id: string
+        }
+        Returns: Json
+      }
+      report_finalize_creator_movers: {
+        Args: {
+          p_limit?: number
+          p_prev_report_id: string
+          p_report_id: string
+        }
+        Returns: Json
+      }
       report_finalize_creators: {
         Args: { p_limit?: number; p_report_id: string }
         Returns: Json

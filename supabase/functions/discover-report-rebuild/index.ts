@@ -120,6 +120,7 @@ serve(async (req) => {
       distributionsRes, trendingRes, moversRes,
       newIslandsRes, updatedRes, newCountRes,
       toolSplitRes, rookiesRes, exposureAnalysisRes, exposureEfficiencyRes,
+      categoryMoversRes, creatorMoversRes,
     ] = await Promise.all([
       supabase.rpc("report_finalize_kpis", { p_report_id: reportId, p_prev_report_id: prevReportId }),
       supabase.rpc("report_finalize_rankings", { p_report_id: reportId, p_limit: 10 }),
@@ -137,6 +138,12 @@ serve(async (req) => {
       supabase.rpc("report_finalize_rookies", { p_report_id: reportId, p_limit: 10 }),
       supabase.rpc("report_finalize_exposure_analysis", { p_report_id: reportId!, p_days: 7 }),
       supabase.rpc("report_finalize_exposure_efficiency", { p_report_id: reportId!, p_limit: 15 }),
+      prevReportId
+        ? supabase.rpc("report_finalize_category_movers", { p_report_id: reportId, p_prev_report_id: prevReportId, p_limit: 10 })
+        : Promise.resolve({ data: { categoryRisers: [], categoryDecliners: [] }, error: null }),
+      prevReportId
+        ? supabase.rpc("report_finalize_creator_movers", { p_report_id: reportId, p_prev_report_id: prevReportId, p_limit: 10 })
+        : Promise.resolve({ data: { creatorRisers: [], creatorDecliners: [], creatorRankClimbers: [] }, error: null }),
     ]);
 
     // Log RPC errors
@@ -145,6 +152,7 @@ serve(async (req) => {
       ["categories", categoriesRes], ["distributions", distributionsRes],
       ["trending", trendingRes], ["movers", moversRes],
       ["toolSplit", toolSplitRes], ["rookies", rookiesRes], ["exposureAnalysis", exposureAnalysisRes], ["exposureEfficiency", exposureEfficiencyRes],
+      ["categoryMovers", categoryMoversRes], ["creatorMovers", creatorMoversRes],
     ] as const) {
       if ((res as any).error) console.error(`[rebuild] RPC ${name} error:`, (res as any).error.message);
     }
@@ -181,6 +189,8 @@ serve(async (req) => {
       ...(rookiesRes.data || {}),
       ...(exposureAnalysisRes.data || {}),
       ...(exposureEfficiencyRes.data || {}),
+      ...(categoryMoversRes.data || {}),
+      ...(creatorMoversRes.data || {}),
       topNewIslandsByPlays: topNewItems,
       topNewIslandsByPlaysPublished: topNewItems,
       topNewIslandsByCCU: [...topNewItems].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 10),
