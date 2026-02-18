@@ -107,6 +107,14 @@ select * from public.ralph_eval_results order by created_at desc limit 20;
 select public.get_ralph_health(24);
 ```
 
+Memory context checks:
+
+```sql
+select * from public.ralph_memory_snapshots order by created_at desc limit 10;
+select * from public.ralph_memory_items order by importance desc, last_seen_at desc limit 20;
+select public.get_ralph_context_pack(array['csv','lookup'], 72, 20);
+```
+
 ## 7) Recommended first validation
 
 1. Run dry mode with 3 iterations.

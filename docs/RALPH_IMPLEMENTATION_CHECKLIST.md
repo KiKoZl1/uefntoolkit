@@ -5,6 +5,7 @@ This checklist is the implementation baseline to enable Ralph operations safely.
 
 ## Database
 - [ ] Apply migration: `supabase/migrations/20260216123000_ralph_ops_foundation.sql`
+- [ ] Apply migration: `supabase/migrations/20260218154000_ralph_memory_context.sql`
 - [ ] Confirm tables exist:
   - [ ] `public.ralph_runs`
   - [ ] `public.ralph_actions`

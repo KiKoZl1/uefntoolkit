@@ -155,13 +155,37 @@ function normalizePath(p) {
   return String(p || "").replace(/\\/g, "/").replace(/^\.?\//, "");
 }
 
-function buildPlanPrompt(args, iteration) {
+function summarizeContextPack(contextPack) {
+  if (!contextPack || typeof contextPack !== "object") return "No context pack available.";
+  const latest = contextPack.latest_snapshot || {};
+  const metrics = latest.metrics || {};
+  const items = Array.isArray(contextPack.memory_items) ? contextPack.memory_items : [];
+  const alerts = Array.isArray(contextPack.open_alerts) ? contextPack.open_alerts : [];
+  const topItems = items.slice(0, 5).map((x) => `- [${x.category}] ${x.summary}`).join("\n");
+
+  return [
+    `Context generated_at: ${contextPack.generated_at || "n/a"}`,
+    `Snapshot source: ${latest.source || "n/a"} at ${latest.created_at || "n/a"}`,
+    `Exposure stale targets: ${metrics.exposure_targets_stale ?? "n/a"}`,
+    `Metadata due now: ${metrics.metadata_due_now ?? "n/a"}`,
+    `Metadata title coverage %: ${metrics.metadata_coverage_title_pct ?? "n/a"}`,
+    `Metadata image coverage %: ${metrics.metadata_coverage_image_pct ?? "n/a"}`,
+    `Collections edge coverage %: ${metrics.collections_edges_coverage_pct ?? "n/a"}`,
+    `Open alerts: ${alerts.length}`,
+    `Top memory items:\n${topItems || "- none"}`,
+  ].join("\n");
+}
+
+function buildPlanPrompt(args, iteration, contextSummary) {
   return [
     "You are Ralph runner in Epic Insight Engine.",
     `Mode: ${args.mode}`,
     `Iteration: ${iteration}/${args.maxIterations}`,
     `Scope: ${args.scope.join(", ")}`,
     `Goal: ${args.prompt}`,
+    "",
+    "Operational context pack:",
+    contextSummary || "No context pack available.",
     "Return concise JSON with keys: plan, risks, next_action.",
   ].join("\n");
 }
@@ -210,12 +234,15 @@ function readCandidateContext(paths, maxCharsPerFile = 5000) {
   return blocks.join("\n\n");
 }
 
-function buildOpsPrompt(args, iteration, planText, candidateFiles, candidateContext) {
+function buildOpsPrompt(args, iteration, planText, candidateFiles, candidateContext, contextSummary) {
   return [
     "You are generating SAFE code edit operations for a React + TypeScript repository.",
     `Iteration ${iteration}/${args.maxIterations}`,
     `Goal: ${args.prompt}`,
     `Plan summary: ${planText || "n/a"}`,
+    "",
+    "Operational context pack:",
+    contextSummary || "No context pack available.",
     `Allowed paths prefixes: ${args.editAllowlist.join(", ")}`,
     `Max files this iteration: ${args.editMaxFiles}`,
     "You must return STRICT JSON only (no markdown):",
@@ -469,6 +496,55 @@ async function main() {
   const repoContext = collectRepoContext();
   const candidateFiles = getCandidateFiles(args.scope).filter((p) => pathAllowed(p, args.editAllowlist));
   const candidateContext = readCandidateContext(candidateFiles);
+  let contextPack = null;
+  let contextSummary = "No context pack available.";
+
+  try {
+    contextPack = await rpc(supabase, "get_ralph_context_pack", {
+      p_scope: args.scope,
+      p_hours: 72,
+      p_limit_items: 20,
+    });
+    contextSummary = summarizeContextPack(contextPack);
+    localLog.context_pack = contextPack;
+    await recordAction(supabase, runId, {
+      stepIndex: 0,
+      phase: "context",
+      toolName: "rpc:get_ralph_context_pack",
+      target: args.scope.join(","),
+      status: "ok",
+      latencyMs: 20,
+      details: { has_context_pack: true, memory_items: Array.isArray(contextPack?.memory_items) ? contextPack.memory_items.length : 0 },
+    });
+    await recordEval(supabase, runId, {
+      suite: "context",
+      metric: "context_pack_available",
+      value: 1,
+      threshold: 1,
+      pass: true,
+      details: { scope: args.scope },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    localLog.context_pack_error = msg;
+    await recordAction(supabase, runId, {
+      stepIndex: 0,
+      phase: "context",
+      toolName: "rpc:get_ralph_context_pack",
+      target: args.scope.join(","),
+      status: "warn",
+      latencyMs: 20,
+      details: { has_context_pack: false, error: msg },
+    });
+    await recordEval(supabase, runId, {
+      suite: "context",
+      metric: "context_pack_available",
+      value: 0,
+      threshold: 1,
+      pass: false,
+      details: { error: msg },
+    });
+  }
 
   try {
     for (let i = 1; i <= args.maxIterations; i++) {
@@ -476,7 +552,7 @@ async function main() {
         throw new Error(`Run timeout exceeded (${args.timeoutMinutes} min).`);
       }
 
-      const planPrompt = buildPlanPrompt(args, i);
+      const planPrompt = buildPlanPrompt(args, i, contextSummary);
       const llmPlan = args.dryRun
         ? { provider: "none", model: "dry-run", text: '{"plan":"dry","risks":[],"next_action":"noop"}', raw: { dry_run: true, iteration: i } }
         : await callLlm(args.llmProvider, args.llmModel, planPrompt);
@@ -521,7 +597,14 @@ async function main() {
       }
 
       if (!args.dryRun && args.editMode !== "off") {
-        const opsPrompt = buildOpsPrompt(args, i, llmPlan.text.slice(0, 1200), candidateFiles, candidateContext || repoContext);
+        const opsPrompt = buildOpsPrompt(
+          args,
+          i,
+          llmPlan.text.slice(0, 1200),
+          candidateFiles,
+          candidateContext || repoContext,
+          contextSummary
+        );
         const llmOps = await callLlm(args.llmProvider, args.llmModel, opsPrompt);
         const ops = parseEditOps(llmOps.text);
         const opsFile = path.join(patchDir, `iter_${String(i).padStart(2, "0")}_ops.json`);
@@ -758,6 +841,25 @@ async function main() {
   }
 
   const finalStatus = failed ? "failed" : !args.dryRun && args.editMode === "apply" ? "promotable" : "completed";
+
+  try {
+    await rpc(supabase, "compute_ralph_memory_snapshot", {
+      p_source: "ralph_local_runner",
+      p_scope: args.scope,
+      p_notes: {
+        run_id: runId,
+        mode: args.mode,
+        dry_run: args.dryRun,
+        final_status: finalStatus,
+        applied_patches: appliedPatches,
+      },
+      p_min_interval_minutes: 1,
+      p_force: true,
+    });
+  } catch (_e) {
+    // best-effort
+  }
+
   const finishData = await rpc(supabase, "finish_ralph_run", {
     p_run_id: runId,
     p_status: finalStatus,

@@ -957,6 +957,19 @@ serve(async (req) => {
       // ignore
     }
 
+    // Piggyback: persist Ralph memory snapshot on a bounded cadence (best-effort).
+    try {
+      await supabase.rpc("compute_ralph_memory_snapshot", {
+        p_source: "discover_exposure_orchestrate",
+        p_scope: ["exposure", "metadata", "alerts", "reports"],
+        p_notes: { mode, targets_count: results.length },
+        p_min_interval_minutes: 10,
+        p_force: false,
+      });
+    } catch (_e) {
+      // ignore
+    }
+
     return json({
       success: true,
       mode,
