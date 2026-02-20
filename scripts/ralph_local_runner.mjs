@@ -64,8 +64,11 @@ function parseArgs(argv) {
     semanticMatchCount: 8,
     semanticMinImportance: 40,
     semanticUseEmbeddings: true,
+    semanticEmbeddingProvider: "auto",
     semanticEmbeddingModel: "text-embedding-3-small",
     maxCandidateFiles: 80,
+    applyMinFindChars: 120,
+    buildFailureGuardThreshold: 2,
   };
 
   for (const raw of argv) {
@@ -95,8 +98,11 @@ function parseArgs(argv) {
     else if (raw.startsWith("--semantic-match-count=")) args.semanticMatchCount = Number(raw.slice("--semantic-match-count=".length));
     else if (raw.startsWith("--semantic-min-importance=")) args.semanticMinImportance = Number(raw.slice("--semantic-min-importance=".length));
     else if (raw.startsWith("--semantic-use-embeddings=")) args.semanticUseEmbeddings = asBool(raw.slice("--semantic-use-embeddings=".length), true);
+    else if (raw.startsWith("--semantic-embedding-provider=")) args.semanticEmbeddingProvider = raw.slice("--semantic-embedding-provider=".length);
     else if (raw.startsWith("--semantic-embedding-model=")) args.semanticEmbeddingModel = raw.slice("--semantic-embedding-model=".length);
     else if (raw.startsWith("--max-candidate-files=")) args.maxCandidateFiles = Number(raw.slice("--max-candidate-files=".length));
+    else if (raw.startsWith("--apply-min-find-chars=")) args.applyMinFindChars = Number(raw.slice("--apply-min-find-chars=".length));
+    else if (raw.startsWith("--build-failure-guard-threshold=")) args.buildFailureGuardThreshold = Number(raw.slice("--build-failure-guard-threshold=".length));
   }
 
   if (!VALID_MODES.has(args.mode)) args.mode = "custom";
@@ -108,7 +114,11 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.editMaxFiles) || args.editMaxFiles < 1) args.editMaxFiles = 2;
   if (!Number.isFinite(args.semanticMatchCount) || args.semanticMatchCount < 1) args.semanticMatchCount = 8;
   if (!Number.isFinite(args.semanticMinImportance) || args.semanticMinImportance < 0) args.semanticMinImportance = 40;
+  args.semanticEmbeddingProvider = String(args.semanticEmbeddingProvider || "auto").trim().toLowerCase();
+  if (!["auto", "openai", "nvidia", "none"].includes(args.semanticEmbeddingProvider)) args.semanticEmbeddingProvider = "auto";
   if (!Number.isFinite(args.maxCandidateFiles) || args.maxCandidateFiles < 10) args.maxCandidateFiles = 80;
+  if (!Number.isFinite(args.applyMinFindChars) || args.applyMinFindChars < 40) args.applyMinFindChars = 120;
+  if (!Number.isFinite(args.buildFailureGuardThreshold) || args.buildFailureGuardThreshold < 2) args.buildFailureGuardThreshold = 2;
 
   return args;
 }
@@ -216,6 +226,86 @@ function readJsonSafe(filePath, fallback = null) {
   }
 }
 
+function parseJsonlSafe(filePath) {
+  const abs = path.resolve(filePath);
+  if (!fs.existsSync(abs)) return [];
+  try {
+    return fs
+      .readFileSync(abs, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function extractBuildFailureSignature(stderrText) {
+  const stderr = String(stderrText || "");
+  if (!stderr) return null;
+  const lines = stderr.split(/\r?\n/);
+  const fileLine =
+    lines.find((l) => /src\/.+\.(tsx?|jsx?):\d+:\d+/.test(l)) ||
+    lines.find((l) => /file:\s+.+\.(tsx?|jsx?):\d+:\d+/.test(l)) ||
+    "";
+  const messageLine =
+    lines.find((l) => /ERROR:\s+/.test(l)) ||
+    lines.find((l) => /Transform failed/.test(l)) ||
+    "";
+  const normalizedFile = fileLine.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  const normalizedMessage = messageLine.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  if (!normalizedFile && !normalizedMessage) return null;
+  const signature = [normalizedFile, normalizedMessage].filter(Boolean).join(" | ");
+  return {
+    file: normalizedFile || null,
+    message: normalizedMessage || null,
+    signature,
+  };
+}
+
+function evaluateBuildFailureGuard(progressFile, requestedEditMode, threshold = 2) {
+  if (requestedEditMode !== "apply") {
+    return { forcePropose: false, reason: "not_apply_mode", repeated_count: 0 };
+  }
+  const rows = parseJsonlSafe(progressFile);
+  if (!rows.length) {
+    return { forcePropose: false, reason: "no_history", repeated_count: 0 };
+  }
+  const recent = rows.slice(-20).reverse();
+  let repeated = 0;
+  let anchor = null;
+  for (const row of recent) {
+    if (String(row?.status || "") !== "failed") break;
+    const sig = String(row?.build_failure_signature || "").trim();
+    if (!sig) break;
+    if (!anchor) anchor = sig;
+    if (sig !== anchor) break;
+    repeated += 1;
+  }
+  if (repeated >= threshold) {
+    return {
+      forcePropose: true,
+      reason: "repeated_build_failure_signature",
+      repeated_count: repeated,
+      signature: anchor,
+    };
+  }
+  return {
+    forcePropose: false,
+    reason: "below_threshold",
+    repeated_count: repeated,
+    signature: anchor,
+  };
+}
+
 function pickActiveFeature(featureDoc) {
   if (!featureDoc) return null;
   const features = Array.isArray(featureDoc)
@@ -243,11 +333,11 @@ function gateStatusMap(gateResults) {
   return out;
 }
 
-function shouldMarkFeaturePass(args, activeFeature, finalStatus, failed, appliedPatches, gateResults) {
+function shouldMarkFeaturePass(args, runEditMode, activeFeature, finalStatus, failed, appliedPatches, gateResults) {
   if (!args.autoMarkFeaturePass) return { ok: false, reason: "auto_mark_disabled" };
   if (!activeFeature?.id) return { ok: false, reason: "no_active_feature" };
   if (failed || finalStatus === "failed") return { ok: false, reason: "run_failed" };
-  if (args.editMode !== "apply") return { ok: false, reason: "not_apply_mode" };
+  if (runEditMode !== "apply") return { ok: false, reason: "not_apply_mode" };
   if (appliedPatches <= 0) return { ok: false, reason: "no_applied_patches" };
   if (!args.gateBuild || !args.gateTest) return { ok: false, reason: "required_gates_not_enabled" };
 
@@ -482,7 +572,8 @@ function extractJsonObject(text) {
 async function callOpenAIEmbedding(input, model) {
   const apiKey = mustEnv("OPENAI_API_KEY");
   const m = model || "text-embedding-3-small";
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
+  const endpoint = getEnv("OPENAI_EMBEDDINGS_URL", "https://api.openai.com/v1/embeddings");
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -499,6 +590,64 @@ async function callOpenAIEmbedding(input, model) {
   const emb = json?.data?.[0]?.embedding;
   if (!Array.isArray(emb) || emb.length === 0) throw new Error("Invalid embedding response");
   return emb;
+}
+
+async function callNvidiaEmbedding(input, model) {
+  const apiKey = mustEnv("NVIDIA_API_KEY");
+  const m = model || "baai/bge-m3";
+  const endpoint = getEnv("NVIDIA_EMBEDDINGS_URL", "https://integrate.api.nvidia.com/v1/embeddings");
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      model: m,
+      input,
+      encoding_format: "float",
+    }),
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`NVIDIA embeddings error ${res.status}: ${raw.slice(0, 500)}`);
+  const json = JSON.parse(raw);
+  const emb = json?.data?.[0]?.embedding;
+  if (!Array.isArray(emb) || emb.length === 0) throw new Error("Invalid NVIDIA embedding response");
+  return emb;
+}
+
+function resolveEmbeddingProvider(args) {
+  const requested = String(args.semanticEmbeddingProvider || "auto").toLowerCase();
+  if (requested === "none") return "none";
+  if (requested === "openai") return process.env.OPENAI_API_KEY ? "openai" : "none";
+  if (requested === "nvidia") return process.env.NVIDIA_API_KEY ? "nvidia" : "none";
+  if (process.env.NVIDIA_API_KEY) return "nvidia";
+  if (process.env.OPENAI_API_KEY) return "openai";
+  return "none";
+}
+
+function resolveEmbeddingModel(provider, configuredModel) {
+  const configured = String(configuredModel || "").trim();
+  if (!configured) {
+    return provider === "nvidia" ? "baai/bge-m3" : "text-embedding-3-small";
+  }
+  if (provider === "nvidia" && configured === "text-embedding-3-small") {
+    return "nvidia/nv-embedqa-e5-v5";
+  }
+  return configured;
+}
+
+async function callSemanticEmbedding(args, input) {
+  const provider = resolveEmbeddingProvider(args);
+  if (provider === "none") return { provider: "none", model: null, embedding: null };
+  const model = resolveEmbeddingModel(provider, args.semanticEmbeddingModel);
+  if (provider === "nvidia") {
+    const embedding = await callNvidiaEmbedding(input, model);
+    return { provider, model, embedding };
+  }
+  const embedding = await callOpenAIEmbedding(input, model);
+  return { provider, model, embedding };
 }
 
 function parseEditOps(rawText) {
@@ -613,10 +762,59 @@ async function callAnthropic(prompt, model) {
   return { provider: "anthropic", model: m, text: text.trim(), raw: json };
 }
 
+function normalizeNvidiaContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item?.text === "string") return item.text;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+async function callNvidia(prompt, model) {
+  const apiKey = mustEnv("NVIDIA_API_KEY");
+  const m = model || "moonshotai/kimi-k2.5";
+  const endpoint = getEnv("NVIDIA_CHAT_COMPLETIONS_URL", "https://integrate.api.nvidia.com/v1/chat/completions");
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      model: m,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 4096,
+      temperature: 0.2,
+      top_p: 1,
+      stream: false,
+      chat_template_kwargs: { thinking: true },
+    }),
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`NVIDIA error ${res.status}: ${raw.slice(0, 500)}`);
+  const json = JSON.parse(raw);
+  const text = Array.isArray(json?.choices)
+    ? json.choices
+        .map((choice) => normalizeNvidiaContent(choice?.message?.content))
+        .filter(Boolean)
+        .join("\n")
+    : "";
+  return { provider: "nvidia", model: m, text: text.trim(), raw: json };
+}
+
 async function callLlm(provider, model, prompt) {
   const p = String(provider || "none").toLowerCase();
   if (p === "openai") return callOpenAI(prompt, model);
   if (p === "anthropic") return callAnthropic(prompt, model);
+  if (p === "nvidia") return callNvidia(prompt, model);
   return { provider: "none", model: "dry-run", text: "Dry run response.", raw: { dry_run: true } };
 }
 
@@ -665,6 +863,13 @@ async function main() {
   loadDotEnvIfPresent();
   const args = parseArgs(process.argv.slice(2));
   args.prompt = resolvePrompt(args);
+  const requestedEditMode = args.editMode;
+  const guardDecision = evaluateBuildFailureGuard(
+    args.progressFile,
+    requestedEditMode,
+    args.buildFailureGuardThreshold
+  );
+  const effectiveEditMode = guardDecision.forcePropose ? "propose" : requestedEditMode;
   const supabaseUrl = mustEnv("SUPABASE_URL", getEnv("VITE_SUPABASE_URL", ""));
   const serviceRole = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
   const supabase = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -675,7 +880,7 @@ async function main() {
   ensureDir(patchDir);
 
   const branch = gitCurrentBranch();
-  if (args.editMode === "apply" && args.requireNonMainBranch && ["main", "master"].includes(branch)) {
+  if (effectiveEditMode === "apply" && args.requireNonMainBranch && ["main", "master"].includes(branch)) {
     throw new Error("Refusing edit-mode=apply on main/master. Switch to a feature branch or set --require-non-main-branch=false.");
   }
 
@@ -690,6 +895,9 @@ async function main() {
     llm_outputs: [],
     patches: [],
     gate_results: [],
+    guard_decision: guardDecision,
+    requested_edit_mode: requestedEditMode,
+    effective_edit_mode: effectiveEditMode,
   };
 
   const runId = await rpc(supabase, "start_ralph_run", {
@@ -705,7 +913,11 @@ async function main() {
       dry_run: args.dryRun,
       llm_provider: args.llmProvider,
       llm_model: args.llmModel || null,
-      edit_mode: args.editMode,
+      semantic_embedding_provider: args.semanticEmbeddingProvider,
+      semantic_embedding_model: args.semanticEmbeddingModel || null,
+      edit_mode_requested: requestedEditMode,
+      edit_mode_effective: effectiveEditMode,
+      guard_decision: guardDecision,
       branch,
     },
   });
@@ -726,6 +938,37 @@ async function main() {
   let semanticSummary = "No semantic memory matches.";
   localLog.feature_file = path.resolve(args.featureFile);
   localLog.active_feature = activeFeature;
+
+  if (guardDecision.forcePropose) {
+    await recordAction(supabase, runId, {
+      stepIndex: 0,
+      phase: "guard",
+      toolName: "build_failure_guard",
+      target: "edit_mode",
+      status: "warn",
+      latencyMs: 1,
+      details: {
+        requested_edit_mode: requestedEditMode,
+        effective_edit_mode: effectiveEditMode,
+        reason: guardDecision.reason,
+        repeated_count: guardDecision.repeated_count,
+        signature: guardDecision.signature || null,
+      },
+    });
+    await raiseIncident(
+      supabase,
+      runId,
+      "warn",
+      "build_failure_guard_activated",
+      "Apply mode downgraded to propose due to repeated build failure signature",
+      {
+        requested_edit_mode: requestedEditMode,
+        effective_edit_mode: effectiveEditMode,
+        repeated_count: guardDecision.repeated_count,
+        signature: guardDecision.signature || null,
+      }
+    );
+  }
 
   try {
     contextPack = await rpc(supabase, "get_ralph_context_pack", {
@@ -783,9 +1026,13 @@ async function main() {
     ].join("\n");
 
     let embeddingText = null;
-    if (!args.dryRun && args.semanticUseEmbeddings && process.env.OPENAI_API_KEY) {
-      const emb = await callOpenAIEmbedding(semanticQuery, args.semanticEmbeddingModel);
-      embeddingText = JSON.stringify(emb);
+    let embeddingInfo = { provider: "none", model: null };
+    if (!args.dryRun && args.semanticUseEmbeddings) {
+      const embRes = await callSemanticEmbedding(args, semanticQuery);
+      if (Array.isArray(embRes.embedding) && embRes.embedding.length > 0) {
+        embeddingText = JSON.stringify(embRes.embedding);
+      }
+      embeddingInfo = { provider: embRes.provider, model: embRes.model };
     }
 
     semanticRows = await rpc(supabase, "search_ralph_memory_documents", {
@@ -798,7 +1045,12 @@ async function main() {
 
     if (!Array.isArray(semanticRows)) semanticRows = [];
     semanticSummary = summarizeSemanticRows(semanticRows);
-    localLog.semantic_context = { rows: semanticRows };
+    localLog.semantic_context = {
+      rows: semanticRows,
+      embedding_provider: embeddingInfo.provider,
+      embedding_model: embeddingInfo.model,
+      used_vector_search: Boolean(embeddingText),
+    };
 
     await recordAction(supabase, runId, {
       stepIndex: 0,
@@ -807,7 +1059,12 @@ async function main() {
       target: args.scope.join(","),
       status: "ok",
       latencyMs: 20,
-      details: { matches: semanticRows.length },
+      details: {
+        matches: semanticRows.length,
+        embedding_provider: embeddingInfo.provider,
+        embedding_model: embeddingInfo.model,
+        used_vector_search: Boolean(embeddingText),
+      },
     });
     await recordEval(supabase, runId, {
       suite: "context",
@@ -885,7 +1142,7 @@ async function main() {
         break;
       }
 
-      if (!args.dryRun && args.editMode !== "off") {
+      if (!args.dryRun && effectiveEditMode !== "off") {
         const opsPrompt = buildOpsPrompt(
           args,
           i,
@@ -977,7 +1234,7 @@ async function main() {
           continue;
         }
 
-        if (args.editMode === "apply") {
+        if (effectiveEditMode === "apply") {
           let appliedThisIter = 0;
           const applyErrors = [];
           for (const op of ops.slice(0, args.editMaxFiles)) {
@@ -991,13 +1248,41 @@ async function main() {
               applyErrors.push({ path: opPath, reason: "file_not_found" });
               continue;
             }
-            const before = fs.readFileSync(abs, "utf8");
-            const idx = before.indexOf(op.find);
-            if (idx < 0) {
-              applyErrors.push({ path: opPath, reason: "find_not_found", find_preview: op.find.slice(0, 120) });
+            const findText = String(op.find || "");
+            if (findText.length < args.applyMinFindChars) {
+              applyErrors.push({
+                path: opPath,
+                reason: "find_too_short",
+                find_len: findText.length,
+                min_required: args.applyMinFindChars,
+              });
               continue;
             }
-            const after = `${before.slice(0, idx)}${op.replace}${before.slice(idx + op.find.length)}`;
+            const before = fs.readFileSync(abs, "utf8");
+            const idx = before.indexOf(findText);
+            if (idx < 0) {
+              applyErrors.push({ path: opPath, reason: "find_not_found", find_preview: findText.slice(0, 120) });
+              continue;
+            }
+            const occurrences = before.split(findText).length - 1;
+            if (occurrences !== 1) {
+              applyErrors.push({ path: opPath, reason: "find_ambiguous", occurrences, find_preview: findText.slice(0, 120) });
+              continue;
+            }
+            const endIdx = idx + findText.length;
+            const startsOnBoundary = idx === 0 || before[idx - 1] === "\n";
+            const endsOnBoundary = endIdx === before.length || before[endIdx] === "\n";
+            if (!startsOnBoundary || !endsOnBoundary) {
+              applyErrors.push({
+                path: opPath,
+                reason: "find_not_line_bounded",
+                starts_on_boundary: startsOnBoundary,
+                ends_on_boundary: endsOnBoundary,
+                find_preview: findText.slice(0, 120),
+              });
+              continue;
+            }
+            const after = `${before.slice(0, idx)}${op.replace}${before.slice(endIdx)}`;
             if (after === before) {
               applyErrors.push({ path: opPath, reason: "no_effect" });
               continue;
@@ -1067,6 +1352,8 @@ async function main() {
     if (!failed && args.gateBuild) {
       const buildRes = runShell("npm run build");
       localLog.gate_results.push({ gate: "build", ...buildRes });
+      const buildFailure = buildRes.code !== 0 ? extractBuildFailureSignature(buildRes.stderr) : null;
+      localLog.build_failure = buildFailure;
       await recordAction(supabase, runId, {
         stepIndex: args.maxIterations + 2,
         phase: "gate",
@@ -1074,7 +1361,12 @@ async function main() {
         target: "build",
         status: buildRes.code === 0 ? "ok" : "error",
         latencyMs: buildRes.latencyMs,
-        details: { stdout: buildRes.stdout, stderr: buildRes.stderr },
+        details: {
+          stdout: buildRes.stdout,
+          stderr: buildRes.stderr,
+          failure_signature: buildFailure?.signature || null,
+          failure_file: buildFailure?.file || null,
+        },
       });
       await recordEval(supabase, runId, {
         suite: "gates",
@@ -1087,6 +1379,17 @@ async function main() {
       if (buildRes.code !== 0) {
         failed = true;
         errorMessage = "Build gate failed";
+        await raiseIncident(
+          supabase,
+          runId,
+          "error",
+          "build_gate_failed",
+          "Build gate failed during Ralph run",
+          {
+            failure_signature: buildFailure?.signature || null,
+            failure_file: buildFailure?.file || null,
+          }
+        );
       }
     }
 
@@ -1122,16 +1425,16 @@ async function main() {
     await raiseIncident(supabase, runId, "critical", "runner_exception", errorMessage, {});
   }
 
-  if (!failed && !args.dryRun && args.editMode === "apply" && appliedPatches === 0) {
+  if (!failed && !args.dryRun && effectiveEditMode === "apply" && appliedPatches === 0) {
     failed = true;
     errorMessage = "No edit operations were applied (0 changes).";
     await raiseIncident(supabase, runId, "error", "no_changes_applied", errorMessage, {
-      edit_mode: args.editMode,
+      edit_mode: effectiveEditMode,
       max_iterations: args.maxIterations,
     });
   }
 
-  const finalStatus = failed ? "failed" : !args.dryRun && args.editMode === "apply" ? "promotable" : "completed";
+  const finalStatus = failed ? "failed" : !args.dryRun && effectiveEditMode === "apply" ? "promotable" : "completed";
 
   try {
     await rpc(supabase, "compute_ralph_memory_snapshot", {
@@ -1159,7 +1462,10 @@ async function main() {
       dry_run: args.dryRun,
       llm_provider: args.llmProvider,
       scope: args.scope,
-      edit_mode: args.editMode,
+      edit_mode: effectiveEditMode,
+      edit_mode_requested: requestedEditMode,
+      edit_mode_effective: effectiveEditMode,
+      guard_decision: guardDecision,
       applied_patches: appliedPatches,
       gates: {
         lint: args.gateLint,
@@ -1188,6 +1494,7 @@ async function main() {
 
   const passCheck = shouldMarkFeaturePass(
     args,
+    effectiveEditMode,
     activeFeature,
     finalStatus,
     failed,
@@ -1220,8 +1527,11 @@ async function main() {
       mode: args.mode,
       status: finalStatus,
       dry_run: args.dryRun,
-      edit_mode: args.editMode,
+      edit_mode: effectiveEditMode,
+      requested_edit_mode: requestedEditMode,
+      effective_edit_mode: effectiveEditMode,
       scope: args.scope,
+      guard_decision: guardDecision,
       active_feature: activeFeature
         ? {
             id: activeFeature.id || null,
@@ -1231,6 +1541,8 @@ async function main() {
         : null,
       feature_pass_check: localLog.feature_pass_check || null,
       feature_pass_update: localLog.feature_pass_update || null,
+      build_failure_signature: localLog.build_failure?.signature || null,
+      build_failure_file: localLog.build_failure?.file || null,
       applied_patches: appliedPatches,
       changed_files_after_run: localLog.changed_files_after_run,
       summary_path: outPath,
@@ -1244,7 +1556,11 @@ async function main() {
   console.log(`- status: ${finalStatus}`);
   console.log(`- dry_run: ${args.dryRun}`);
   console.log(`- mode: ${args.mode}`);
-  console.log(`- edit_mode: ${args.editMode}`);
+  console.log(`- edit_mode_requested: ${requestedEditMode}`);
+  console.log(`- edit_mode_effective: ${effectiveEditMode}`);
+  if (guardDecision.forcePropose) {
+    console.log(`- guard: activated (${guardDecision.reason}, repeated=${guardDecision.repeated_count})`);
+  }
   console.log(`- applied_patches: ${appliedPatches}`);
   console.log(`- gates: lint=${args.gateLint} build=${args.gateBuild} test=${args.gateTest}`);
   console.log(`- summary: ${outPath}`);

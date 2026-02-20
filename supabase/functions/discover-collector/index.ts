@@ -185,16 +185,113 @@ function extractTrendingNgrams(
 }
 
 const METRICS_V2_DEFAULTS = {
-  workers: 4,
-  claimSizePerWorker: 500,
-  workerInitialConcurrency: 3,
+  // Faster default profile (still protected by adaptive backoff on 429).
+  workers: 6,
+  claimSizePerWorker: 700,
+  workerInitialConcurrency: 5,
   workerMinConcurrency: 1,
-  workerMaxConcurrency: 8,
-  staleAfterSeconds: 900,
-  workerBudgetMs: 55000,
+  workerMaxConcurrency: 12,
+  staleAfterSeconds: 600,
+  workerBudgetMs: 58000,
   chunkSize: 500,
-  globalDelayBetweenBatchesMs: 300,
+  globalDelayBetweenBatchesMs: 120,
 };
+
+function toInt(val: unknown, fallback: number): number {
+  const n = Number(val);
+  return Number.isFinite(n) ? Math.floor(n) : fallback;
+}
+
+function clampInt(val: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, val));
+}
+
+function envInt(name: string, fallback: number): number {
+  const raw = Deno.env.get(name);
+  if (raw == null || raw === "") return fallback;
+  return toInt(raw, fallback);
+}
+
+function getMetricsV2Profile(body: any) {
+  const raw = body?.metricsProfile || body?.profile || {};
+  const profile = {
+    workers: clampInt(toInt(raw.workers ?? envInt("DISCOVER_METRICS_V2_WORKERS", METRICS_V2_DEFAULTS.workers), METRICS_V2_DEFAULTS.workers), 1, 20),
+    claimSizePerWorker: clampInt(
+      toInt(
+        raw.claimSizePerWorker ?? envInt("DISCOVER_METRICS_V2_CLAIM_SIZE_PER_WORKER", METRICS_V2_DEFAULTS.claimSizePerWorker),
+        METRICS_V2_DEFAULTS.claimSizePerWorker
+      ),
+      50,
+      3000,
+    ),
+    workerInitialConcurrency: clampInt(
+      toInt(
+        raw.workerInitialConcurrency ?? envInt("DISCOVER_METRICS_V2_WORKER_INITIAL_CONCURRENCY", METRICS_V2_DEFAULTS.workerInitialConcurrency),
+        METRICS_V2_DEFAULTS.workerInitialConcurrency
+      ),
+      1,
+      40,
+    ),
+    workerMinConcurrency: clampInt(
+      toInt(
+        raw.workerMinConcurrency ?? envInt("DISCOVER_METRICS_V2_WORKER_MIN_CONCURRENCY", METRICS_V2_DEFAULTS.workerMinConcurrency),
+        METRICS_V2_DEFAULTS.workerMinConcurrency
+      ),
+      1,
+      20,
+    ),
+    workerMaxConcurrency: clampInt(
+      toInt(
+        raw.workerMaxConcurrency ?? envInt("DISCOVER_METRICS_V2_WORKER_MAX_CONCURRENCY", METRICS_V2_DEFAULTS.workerMaxConcurrency),
+        METRICS_V2_DEFAULTS.workerMaxConcurrency
+      ),
+      1,
+      80,
+    ),
+    staleAfterSeconds: clampInt(
+      toInt(
+        raw.staleAfterSeconds ?? envInt("DISCOVER_METRICS_V2_STALE_AFTER_SECONDS", METRICS_V2_DEFAULTS.staleAfterSeconds),
+        METRICS_V2_DEFAULTS.staleAfterSeconds
+      ),
+      30,
+      3600,
+    ),
+    workerBudgetMs: clampInt(
+      toInt(
+        raw.workerBudgetMs ?? envInt("DISCOVER_METRICS_V2_WORKER_BUDGET_MS", METRICS_V2_DEFAULTS.workerBudgetMs),
+        METRICS_V2_DEFAULTS.workerBudgetMs
+      ),
+      10000,
+      59000,
+    ),
+    chunkSize: clampInt(
+      toInt(
+        raw.chunkSize ?? envInt("DISCOVER_METRICS_V2_CHUNK_SIZE", METRICS_V2_DEFAULTS.chunkSize),
+        METRICS_V2_DEFAULTS.chunkSize
+      ),
+      50,
+      2000,
+    ),
+    globalDelayBetweenBatchesMs: clampInt(
+      toInt(
+        raw.globalDelayBetweenBatchesMs ?? envInt("DISCOVER_METRICS_V2_GLOBAL_DELAY_MS", METRICS_V2_DEFAULTS.globalDelayBetweenBatchesMs),
+        METRICS_V2_DEFAULTS.globalDelayBetweenBatchesMs
+      ),
+      0,
+      3000,
+    ),
+  };
+
+  // Keep invariants valid even if env/body provided conflicting values.
+  if (profile.workerInitialConcurrency > profile.workerMaxConcurrency) {
+    profile.workerInitialConcurrency = profile.workerMaxConcurrency;
+  }
+  if (profile.workerMinConcurrency > profile.workerInitialConcurrency) {
+    profile.workerMinConcurrency = profile.workerInitialConcurrency;
+  }
+
+  return profile;
+}
 
 function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
   const out: T[][] = [];
@@ -296,12 +393,33 @@ async function flushQueueStatusUpdatesV2(supabase: any, reportId: string, update
   if (!updates.length) return 0;
   let total = 0;
   for (const chunk of chunkArray(updates, 500)) {
-    const { data, error } = await supabase.rpc("apply_discover_queue_results", {
-      p_report_id: reportId,
-      p_results: chunk,
-    });
-    if (error) throw new Error(`apply_discover_queue_results failed: ${error.message}`);
-    total += Number(data || 0);
+    let applied = false;
+    let lastErr: any = null;
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { data, error } = await supabase.rpc("apply_discover_queue_results", {
+        p_report_id: reportId,
+        p_results: chunk,
+      });
+      if (!error) {
+        total += Number(data || 0);
+        applied = true;
+        break;
+      }
+
+      lastErr = error;
+      const msg = String(error.message || "").toLowerCase();
+      const retryable =
+        msg.includes("deadlock detected") ||
+        msg.includes("could not serialize access") ||
+        msg.includes("serialization failure") ||
+        msg.includes("lock timeout");
+      if (!retryable || attempt === maxAttempts) break;
+      const backoffMs = 120 * attempt + Math.floor(Math.random() * 120);
+      await delay(backoffMs);
+    }
+
+    if (!applied) throw new Error(`apply_discover_queue_results failed: ${lastErr?.message || "unknown"}`);
   }
   return total;
 }
@@ -341,11 +459,17 @@ async function processMetricsWorkerV2(
   const claimedMap = new Map<string, { id: string; island_code: string; priority: number | null }>();
   for (const row of claimed) claimedMap.set(row.id, row);
 
-  const { data: cacheRows, error: cacheErr } = await supabase
-    .from("discover_islands_cache")
-    .select("island_code, last_status, suppressed_streak, last_reported_at, reported_streak")
-    .in("island_code", claimed.map((r) => r.island_code));
-  if (cacheErr) throw new Error(`Cache preload failed: ${cacheErr.message}`);
+  const claimedCodes = claimed.map((r) => r.island_code);
+  const cacheRows: any[] = [];
+  const preloadChunkSize = 250;
+  for (const codeChunk of chunkArray(claimedCodes, preloadChunkSize)) {
+    const { data: chunkRows, error: chunkErr } = await supabase
+      .from("discover_islands_cache")
+      .select("island_code, last_status, suppressed_streak, last_reported_at, reported_streak")
+      .in("island_code", codeChunk);
+    if (chunkErr) throw new Error(`Cache preload failed: ${chunkErr.message}`);
+    if (chunkRows?.length) cacheRows.push(...chunkRows);
+  }
 
   const cacheMap = new Map<string, any>();
   for (const c of cacheRows || []) cacheMap.set(c.island_code, c);
@@ -954,10 +1078,11 @@ serve(async (req) => {
 
       const metricsEngine = (Deno.env.get("METRICS_ENGINE") || "v2").toLowerCase();
       if (metricsEngine === "v2") {
+        const profile = getMetricsV2Profile(body);
         const tickStart = Date.now();
         const requeueRes = await supabase.rpc("requeue_stale_discover_queue", {
           p_report_id: reportId,
-          p_stale_after_seconds: METRICS_V2_DEFAULTS.staleAfterSeconds,
+          p_stale_after_seconds: profile.staleAfterSeconds,
           p_max_rows: 5000,
         });
         if (requeueRes.error) throw new Error(`requeue_stale_discover_queue failed: ${requeueRes.error.message}`);
@@ -975,14 +1100,14 @@ serve(async (req) => {
         const yesterdayStr = yesterday.toISOString().split("T")[0];
 
         const workerRuns = await Promise.all(
-          Array.from({ length: METRICS_V2_DEFAULTS.workers }).map(() =>
+          Array.from({ length: profile.workers }).map(() =>
             processMetricsWorkerV2(
               supabase,
               reportId,
               weekFrom,
               weekTo,
               yesterdayStr,
-              METRICS_V2_DEFAULTS
+              profile
             )
           )
         );
@@ -1086,12 +1211,13 @@ serve(async (req) => {
         if (reportUpdateErr) throw new Error(`Failed to update report counters: ${reportUpdateErr.message}`);
 
         console.log(
-          `[metrics:v2] workers=${workersActive}/${METRICS_V2_DEFAULTS.workers} claimed=${totals.claimed} processed=${totals.processed} reported=${totals.reported} suppressed=${totals.suppressed} errors=${totals.errors} rateLimited=${totals.rateLimited} pending=${queueCounts.pending} processing=${queueCounts.processing} done=${queueCounts.done} throughput_per_min=${throughputPerMin}`
+          `[metrics:v2] workers=${workersActive}/${profile.workers} claimed=${totals.claimed} processed=${totals.processed} reported=${totals.reported} suppressed=${totals.suppressed} errors=${totals.errors} rateLimited=${totals.rateLimited} pending=${queueCounts.pending} processing=${queueCounts.processing} done=${queueCounts.done} throughput_per_min=${throughputPerMin} profile=${JSON.stringify(profile)}`
         );
 
         return new Response(JSON.stringify({
           success: true,
           engine: "v2",
+          profile,
           phase: isDone ? "finalize" : "metrics",
           metrics_done_count: metricsDone,
           queue_total: queueTotal,

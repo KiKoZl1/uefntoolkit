@@ -9,6 +9,12 @@ This document provides operational runbooks for common Ralph incidents.
 4. Raise incident type `build_failure_loop`.
 5. Stop automation and request human intervention.
 
+### Guard policy (mandatory)
+1. If the same build failure signature repeats for 2 consecutive runs, disable `apply` and force `propose`.
+2. Restrict next run to diagnosis and minimal compile-fix only.
+3. Do not continue feature implementation while build remains red.
+4. Resume `apply` only after one full green gate pass (build + test when enabled).
+
 ## Incident: tests fail without progress
 1. Compare failing tests to touched files.
 2. Attempt one targeted fix cycle.
@@ -40,6 +46,7 @@ Rollback immediately if:
 - critical incident is raised
 - mandatory gate fails after retry limit
 - migration side effects are unknown/unbounded
+- repeated line-breaking patch behavior is detected (`find_not_line_bounded`, `find_ambiguous`, or parse-corrupting replacements)
 
 Rollback process:
 1. Revert run changes in branch

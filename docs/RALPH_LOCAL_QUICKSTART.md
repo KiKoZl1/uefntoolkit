@@ -25,6 +25,8 @@ Optional for LLM mode:
 $env:OPENAI_API_KEY="<openai-key>"
 # or
 $env:ANTHROPIC_API_KEY="<anthropic-key>"
+# or
+$env:NVIDIA_API_KEY="<nvidia-key>"
 ```
 
 ## 2) Ensure DB foundation exists
@@ -61,6 +63,12 @@ Anthropic:
 scripts\run-ralph-local-runner.bat --mode=qa --dry-run=false --llm-provider=anthropic --llm-model=claude-3-5-sonnet-latest --scope=csv,lookup --max-iterations=3
 ```
 
+NVIDIA (Kimi):
+
+```powershell
+scripts\run-ralph-local-runner.bat --mode=qa --dry-run=false --llm-provider=nvidia --llm-model=moonshotai/kimi-k2.5 --scope=csv,lookup --max-iterations=3
+```
+
 ## 4.1) Enable site/platform edits (safe modes)
 
 Propose edit operations only (no code changes applied):
@@ -86,6 +94,15 @@ Notes:
 - `--edit-mode=apply` is blocked on `main/master` unless `--require-non-main-branch=false`.
 - Proposed operations are saved under `scripts/_out/ralph_local_runner/run_*/patches/*_ops.json`.
 - Scope control is enforced by allowlist and max touched files.
+- Apply guard is enabled: repeated build failure signature (2x) auto-downgrades `apply` to `propose` in subsequent runs.
+- Safer patch rules are enforced in apply mode:
+  - `--apply-min-find-chars` (default `120`)
+  - find text must be unique and line-bounded (prevents mid-token corruption).
+- Semantic embeddings provider can be controlled with:
+  - `--semantic-embedding-provider=auto|nvidia|openai|none`
+  - `--semantic-embedding-model=<model-id>`
+- In `auto`, runner prefers NVIDIA embeddings when `NVIDIA_API_KEY` exists, then OpenAI, then text-only fallback.
+- Current NVIDIA-safe default model: `baai/bge-m3`.
 - In `--edit-mode=apply`, if zero operations are applied, run status is `failed`.
 - Runner reads `--feature-file` and logs each session to `--progress-file`.
 - Feature auto-pass update is enabled by default (`--auto-mark-feature-pass=true`) and only occurs when:

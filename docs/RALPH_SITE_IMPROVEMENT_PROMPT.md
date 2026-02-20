@@ -15,6 +15,9 @@ Constraints:
 - Touch at most 2 files per iteration.
 - Keep build/test compatibility.
 - No changes to migrations, lock files, env/secrets, or deployment configs.
+- If build fails 2 consecutive runs with the same failure signature, stop applying edits and switch to diagnose/propose mode.
+- Do not use partial/truncated find/replace snippets; only use line-bounded replacements for full code blocks.
+- If a file is already in broken state, prioritize restoring compilable state before any new feature work.
 
 Improvement patterns:
 - Better empty/loading/error states.
@@ -27,3 +30,4 @@ Output style for runner:
 - Return STRICT valid JSON only (no markdown/prose).
 - Provide exact find/replace operations verifiable against current file text.
 - If no safe improvement is possible, return `{ "edits": [] }`.
+- If build is red, output diagnosis-first operations; do not expand scope to unrelated features.
