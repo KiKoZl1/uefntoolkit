@@ -596,22 +596,44 @@ async function callNvidiaEmbedding(input, model) {
   const apiKey = mustEnv("NVIDIA_API_KEY");
   const m = model || "baai/bge-m3";
   const endpoint = getEnv("NVIDIA_EMBEDDINGS_URL", "https://integrate.api.nvidia.com/v1/embeddings");
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
+  const configuredInputType = getEnv("NVIDIA_EMBEDDING_INPUT_TYPE", "").trim();
+
+  async function doRequest(inputType) {
+    const body = {
       model: m,
       input,
       encoding_format: "float",
-    }),
-  });
-  const raw = await res.text();
-  if (!res.ok) throw new Error(`NVIDIA embeddings error ${res.status}: ${raw.slice(0, 500)}`);
-  const json = JSON.parse(raw);
+    };
+    if (inputType) body.input_type = inputType;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    return { res, raw };
+  }
+
+  let attempt = await doRequest(configuredInputType || null);
+  if (!attempt.res.ok) {
+    const low = String(attempt.raw || "").toLowerCase();
+    const needsInputType = low.includes("input_type") && low.includes("required");
+    // For asymmetric models, NVIDIA requires input_type=query/passage.
+    if (needsInputType && !configuredInputType) {
+      attempt = await doRequest("query");
+    }
+  }
+
+  if (!attempt.res.ok) {
+    throw new Error(`NVIDIA embeddings error ${attempt.res.status}: ${String(attempt.raw || "").slice(0, 500)}`);
+  }
+
+  const json = JSON.parse(attempt.raw);
   const emb = json?.data?.[0]?.embedding;
   if (!Array.isArray(emb) || emb.length === 0) throw new Error("Invalid NVIDIA embedding response");
   return emb;
@@ -1035,13 +1057,33 @@ async function main() {
       embeddingInfo = { provider: embRes.provider, model: embRes.model };
     }
 
-    semanticRows = await rpc(supabase, "search_ralph_memory_documents", {
-      p_query_text: semanticQuery,
-      p_query_embedding_text: embeddingText,
-      p_scope: args.scope,
-      p_match_count: args.semanticMatchCount,
-      p_min_importance: args.semanticMinImportance,
-    });
+    let embeddingFallbackToText = false;
+    try {
+      semanticRows = await rpc(supabase, "search_ralph_memory_documents", {
+        p_query_text: semanticQuery,
+        p_query_embedding_text: embeddingText,
+        p_scope: args.scope,
+        p_match_count: args.semanticMatchCount,
+        p_min_importance: args.semanticMinImportance,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const isVectorDimMismatch =
+        msg.toLowerCase().includes("expected") &&
+        msg.toLowerCase().includes("dimensions");
+      if (embeddingText && isVectorDimMismatch) {
+        embeddingFallbackToText = true;
+        semanticRows = await rpc(supabase, "search_ralph_memory_documents", {
+          p_query_text: semanticQuery,
+          p_query_embedding_text: null,
+          p_scope: args.scope,
+          p_match_count: args.semanticMatchCount,
+          p_min_importance: args.semanticMinImportance,
+        });
+      } else {
+        throw e;
+      }
+    }
 
     if (!Array.isArray(semanticRows)) semanticRows = [];
     semanticSummary = summarizeSemanticRows(semanticRows);
@@ -1050,6 +1092,7 @@ async function main() {
       embedding_provider: embeddingInfo.provider,
       embedding_model: embeddingInfo.model,
       used_vector_search: Boolean(embeddingText),
+      fallback_to_text_search: embeddingFallbackToText,
     };
 
     await recordAction(supabase, runId, {
@@ -1064,6 +1107,7 @@ async function main() {
         embedding_provider: embeddingInfo.provider,
         embedding_model: embeddingInfo.model,
         used_vector_search: Boolean(embeddingText),
+        fallback_to_text_search: embeddingFallbackToText,
       },
     });
     await recordEval(supabase, runId, {
