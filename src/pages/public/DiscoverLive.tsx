@@ -147,9 +147,9 @@ type PanelIntel = {
   typical_exit_minutes: number | null;
   keep_alive_targets: { ccu_min: number | null; minutes_min: number | null };
   transitions_out_total: number;
-  top_next_panels: Array<{ panel_name: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
+  top_next_panels: Array<{ panel_name: string; panel_display_name?: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
   transitions_in_total: number;
-  top_prev_panels: Array<{ panel_name: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
+  top_prev_panels: Array<{ panel_name: string; panel_display_name?: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
   entry_prev_ccu_p50: number | null;
   entry_prev_ccu_p80: number | null;
   entry_prev_gap_minutes_p50: number | null;
@@ -165,6 +165,7 @@ type PanelIntel = {
 
 type PanelTimelinePayload = {
   panelName: string;
+  panelDisplayName?: string;
   from: string;
   to: string;
   series: TimelineSeriesPoint[];
@@ -518,6 +519,7 @@ export default function DiscoverLive() {
 
       const payload = data as {
         panelName?: string;
+        panelDisplayName?: string;
         from?: string;
         to?: string;
         series?: TimelineSeriesPoint[];
@@ -526,7 +528,8 @@ export default function DiscoverLive() {
       };
 
       setTimelineData({
-        panelName: String(payload?.panelName || rail.panelDisplayName || rail.panelName),
+        panelName: String(payload?.panelDisplayName || rail.panelDisplayName || payload?.panelName || rail.panelName),
+        panelDisplayName: String(payload?.panelDisplayName || rail.panelDisplayName || payload?.panelName || rail.panelName),
         from: String(payload?.from || ""),
         to: String(payload?.to || ""),
         series: Array.isArray(payload?.series) ? payload.series : [],
@@ -1099,7 +1102,7 @@ export default function DiscoverLive() {
                         {timelineData.panel_intel.top_next_panels?.length ? (
                           timelineData.panel_intel.top_next_panels.map((row, idx) => (
                             <div key={`next-${row.panel_name}-${idx}`} className="rounded-md border px-3 py-2 text-xs grid grid-cols-12 gap-2 items-center">
-                              <p className="col-span-5 font-medium truncate">{row.panel_name}</p>
+                              <p className="col-span-5 font-medium truncate">{row.panel_display_name || row.panel_name}</p>
                               <p className="col-span-2 text-right">{fmtNum(row.count)}</p>
                               <p className="col-span-2 text-right">{fmtPct(row.share_pct)}</p>
                               <p className="col-span-3 text-right">{fmtMinutes(row.median_gap_minutes)}</p>
@@ -1119,7 +1122,7 @@ export default function DiscoverLive() {
                         {timelineData.panel_intel.top_prev_panels?.length ? (
                           timelineData.panel_intel.top_prev_panels.map((row, idx) => (
                             <div key={`prev-${row.panel_name}-${idx}`} className="rounded-md border px-3 py-2 text-xs grid grid-cols-12 gap-2 items-center">
-                              <p className="col-span-5 font-medium truncate">{row.panel_name}</p>
+                              <p className="col-span-5 font-medium truncate">{row.panel_display_name || row.panel_name}</p>
                               <p className="col-span-2 text-right">{fmtNum(row.count)}</p>
                               <p className="col-span-2 text-right">{fmtPct(row.share_pct)}</p>
                               <p className="col-span-3 text-right">{fmtMinutes(row.median_gap_minutes)}</p>

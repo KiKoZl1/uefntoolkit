@@ -60,6 +60,79 @@ function maybeNum(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function titleizeWords(input: string): string {
+  return String(input || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function normalizePanelDisplayName(panelName: string): string {
+  const raw = String(panelName || "").trim();
+  if (!raw) return raw;
+
+  if (/^ForYou[_A-Z]/.test(raw)) return "For You";
+
+  if (/^Experiences[_A-Z]/.test(raw)) {
+    const rest = raw
+      .replace(/^Experiences_?/, "")
+      .replace(/_Flat$/i, "")
+      .replace(/_Rows?$/i, "");
+    return titleizeWords(rest.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2"));
+  }
+
+  if (/^Nested[_A-Z]/.test(raw)) {
+    const rest = raw.replace(/^Nested_?/, "");
+    return titleizeWords(rest.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2"));
+  }
+
+  if (/^Browse[_A-Z]/.test(raw)) {
+    const rest = raw.replace(/^Browse_?/, "");
+    return titleizeWords(rest.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2"));
+  }
+
+  if (/^GameCollections[_A-Z]/.test(raw)) {
+    const rest = raw.replace(/^GameCollections_?/, "");
+    const label = titleizeWords(
+      rest
+        .replace(/_Group\d+$/i, "")
+        .replace(/^Split_?/i, "")
+        .replace(/_/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2"),
+    );
+    return `Game Collections ${label}`.trim();
+  }
+
+  return titleizeWords(raw.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\bDefault\b/gi, "").trim());
+}
+
+function cleanPanelLabel(labelValue: string, panelName: string): string {
+  const rawLabel = String(labelValue || "").trim();
+  if (!rawLabel) return normalizePanelDisplayName(panelName);
+
+  const looksTechnical =
+    /^Nested[_A-Z]/.test(rawLabel) ||
+    /^Browse[_A-Z]/.test(rawLabel) ||
+    /^Experiences[_A-Z]/.test(rawLabel) ||
+    /^ForYou[_A-Z]/.test(rawLabel) ||
+    /^GameCollections[_A-Z]/.test(rawLabel);
+
+  if (looksTechnical) {
+    return normalizePanelDisplayName(rawLabel);
+  }
+
+  const spaced = rawLabel
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return spaced || normalizePanelDisplayName(panelName);
+}
+
 function parsePanelRows(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -70,6 +143,7 @@ function parsePanelRows(value: unknown) {
       if (!panelName) return null;
       return {
         panel_name: panelName,
+        panel_display_name: String(r.panel_display_name || "").trim() || null,
         count: asNum(r.count),
         share_pct: maybeNum(r.share_pct),
         median_gap_minutes: maybeNum(r.median_gap_minutes),
@@ -149,6 +223,45 @@ function buildPanelIntel(snapshot: any, fallbackWindowDays: number) {
     attempts_before_abandon_avg: maybeNum(payload.attempts_before_abandon_avg),
     attempts_before_abandon_p50: maybeNum(payload.attempts_before_abandon_p50),
   };
+}
+
+async function resolvePanelDisplayNames(
+  supabase: ReturnType<typeof createClient>,
+  panelNames: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = Array.from(new Set(panelNames.map((n) => String(n || "").trim()).filter(Boolean)));
+  if (!unique.length) return map;
+
+  const { data: tierRows, error: tierErr } = await supabase
+    .from("discovery_panel_tiers")
+    .select("panel_name,label")
+    .in("panel_name", unique);
+
+  if (!tierErr) {
+    for (const row of tierRows || []) {
+      const key = String((row as any).panel_name || "").trim();
+      const label = String((row as any).label || "").trim();
+      if (key && label) map.set(key, cleanPanelLabel(label, key));
+    }
+  }
+
+  for (const panelName of unique) {
+    if (map.has(panelName)) continue;
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("get_panel_display_name", {
+      p_panel_name: panelName,
+    });
+    if (!rpcErr) {
+      const label = String(rpcData || "").trim();
+      if (label) {
+        map.set(panelName, cleanPanelLabel(label, panelName));
+        continue;
+      }
+    }
+    map.set(panelName, cleanPanelLabel("", panelName));
+  }
+
+  return map;
 }
 
 serve(async (req) => {
@@ -329,12 +442,30 @@ serve(async (req) => {
     }
 
     const panelIntel = buildPanelIntel(snapshot, windowDays);
+    const namesToResolve: string[] = [panelName];
+    if (panelIntel) {
+      namesToResolve.push(...(panelIntel.top_next_panels || []).map((r: any) => String(r.panel_name || "")));
+      namesToResolve.push(...(panelIntel.top_prev_panels || []).map((r: any) => String(r.panel_name || "")));
+    }
+    const panelDisplayNames = await resolvePanelDisplayNames(supabase, namesToResolve);
+
+    if (panelIntel) {
+      panelIntel.top_next_panels = (panelIntel.top_next_panels || []).map((row: any) => ({
+        ...row,
+        panel_display_name: panelDisplayNames.get(String(row.panel_name || "")) || String(row.panel_name || ""),
+      }));
+      panelIntel.top_prev_panels = (panelIntel.top_prev_panels || []).map((row: any) => ({
+        ...row,
+        panel_display_name: panelDisplayNames.get(String(row.panel_name || "")) || String(row.panel_name || ""),
+      }));
+    }
 
     return json({
       success: true,
       region,
       surfaceName,
       panelName,
+      panelDisplayName: panelDisplayNames.get(panelName) || panelName,
       targetId,
       from: from.toISOString(),
       to: to.toISOString(),
