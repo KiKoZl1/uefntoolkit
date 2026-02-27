@@ -92,8 +92,11 @@ OPENAI_MODEL=gpt-4.1-mini
 ```
 
 For full migration off Lovable-controlled backend, use:
-- `docs/MIGRATION_OFF_LOVABLE_RUNBOOK.md`
+- `docs/archive/MIGRATION_OFF_LOVABLE_RUNBOOK.md`
 - `migration_artifacts/sql/*`
+
+Documentation index:
+- `DOCS.md`
 
 ### Running the Development Server
 

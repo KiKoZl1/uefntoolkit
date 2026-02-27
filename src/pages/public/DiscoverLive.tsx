@@ -147,9 +147,29 @@ type PanelIntel = {
   typical_exit_minutes: number | null;
   keep_alive_targets: { ccu_min: number | null; minutes_min: number | null };
   transitions_out_total: number;
+  transitions_out_total_6h: number;
+  transitions_out_total_24h: number;
   top_next_panels: Array<{ panel_name: string; panel_display_name?: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
   transitions_in_total: number;
+  transitions_in_total_6h: number;
+  transitions_in_total_24h: number;
   top_prev_panels: Array<{ panel_name: string; panel_display_name?: string; count: number; share_pct: number | null; median_gap_minutes: number | null }>;
+  neighbor_net_flow_top: Array<{
+    panel_name: string;
+    panel_display_name?: string;
+    count_out: number;
+    count_in: number;
+    net_flow: number;
+    out_share_pct: number | null;
+    in_share_pct: number | null;
+    median_gap_minutes_out: number | null;
+    median_gap_minutes_in: number | null;
+  }>;
+  directionality_totals: {
+    out_24h: number;
+    in_24h: number;
+    net_24h: number;
+  };
   entry_prev_ccu_p50: number | null;
   entry_prev_ccu_p80: number | null;
   entry_prev_gap_minutes_p50: number | null;
@@ -1072,27 +1092,6 @@ export default function DiscoverLive() {
                     </CardContent>
                   </Card>
 
-                  <div className="grid lg:grid-cols-3 gap-3">
-                    <Card>
-                      <CardContent className="pt-4">
-                        <p className="text-[11px] text-muted-foreground">{t("discover.transitionsOutTotal")}</p>
-                        <p className="text-lg font-semibold">{fmtNum(timelineData.panel_intel.transitions_out_total)}</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-4">
-                        <p className="text-[11px] text-muted-foreground">{t("discover.transitionsInTotal")}</p>
-                        <p className="text-lg font-semibold">{fmtNum(timelineData.panel_intel.transitions_in_total)}</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-4">
-                        <p className="text-[11px] text-muted-foreground">{t("discover.entryPrevGapP50")}</p>
-                        <p className="text-lg font-semibold">{fmtMinutes(timelineData.panel_intel.entry_prev_gap_minutes_p50)}</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
                   <div className="grid lg:grid-cols-2 gap-3">
                     <Card>
                       <CardHeader className="pb-2">
@@ -1134,6 +1133,33 @@ export default function DiscoverLive() {
                       </CardContent>
                     </Card>
                   </div>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">{t("discover.neighborNetFlow")}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {timelineData.panel_intel.neighbor_net_flow_top?.length ? (
+                        timelineData.panel_intel.neighbor_net_flow_top.map((row, idx) => (
+                          <div key={`flow-${row.panel_name}-${idx}`} className="rounded-md border px-3 py-2 text-xs grid grid-cols-12 gap-2 items-center">
+                            <p className="col-span-4 font-medium truncate">{row.panel_display_name || row.panel_name}</p>
+                            <p className="col-span-2 text-right">
+                              {t("discover.flowOutShort")}: {fmtNum(row.count_out)}
+                            </p>
+                            <p className="col-span-2 text-right">
+                              {t("discover.flowInShort")}: {fmtNum(row.count_in)}
+                            </p>
+                            <p className="col-span-2 text-right">{t("discover.flowNetShort")}: {fmtNum(row.net_flow)}</p>
+                            <p className="col-span-2 text-right">
+                              {fmtPct(row.out_share_pct)} / {fmtPct(row.in_share_pct)}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{t("discover.noDataFilter")}</p>
+                      )}
+                    </CardContent>
+                  </Card>
 
                   <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <Card>

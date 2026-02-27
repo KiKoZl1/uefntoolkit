@@ -153,6 +153,30 @@ function parsePanelRows(value: unknown) {
     .slice(0, 5);
 }
 
+function parseNeighborFlowRows(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => {
+      if (!row || typeof row !== "object") return null;
+      const r = row as Record<string, unknown>;
+      const panelName = String(r.panel_name || "").trim();
+      if (!panelName) return null;
+      return {
+        panel_name: panelName,
+        panel_display_name: String(r.panel_display_name || "").trim() || null,
+        count_out: asNum(r.count_out),
+        count_in: asNum(r.count_in),
+        net_flow: asNum(r.net_flow),
+        out_share_pct: maybeNum(r.out_share_pct),
+        in_share_pct: maybeNum(r.in_share_pct),
+        median_gap_minutes_out: maybeNum(r.median_gap_minutes_out),
+        median_gap_minutes_in: maybeNum(r.median_gap_minutes_in),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function isSnapshotStale(updatedAt: string | null | undefined): boolean {
   const ts = updatedAt ? Date.parse(updatedAt) : NaN;
   if (!Number.isFinite(ts)) return true;
@@ -167,6 +191,10 @@ function snapshotNeedsUpgrade(snapshot: any): boolean {
   return (
     p.transitions_out_total === undefined ||
     p.transitions_in_total === undefined ||
+    p.transitions_out_total_24h === undefined ||
+    p.transitions_in_total_24h === undefined ||
+    p.neighbor_net_flow_top === undefined ||
+    p.directionality_totals === undefined ||
     p.attempts_avg_per_island === undefined ||
     p.reentry_48h_pct === undefined
   );
@@ -208,9 +236,19 @@ function buildPanelIntel(snapshot: any, fallbackWindowDays: number) {
       minutes_min: maybeNum(payload?.keep_alive_targets?.minutes_min),
     },
     transitions_out_total: asNum(payload.transitions_out_total),
+    transitions_out_total_6h: asNum(payload.transitions_out_total_6h),
+    transitions_out_total_24h: asNum(payload.transitions_out_total_24h),
     top_next_panels: parsePanelRows(payload.top_next_panels),
     transitions_in_total: asNum(payload.transitions_in_total),
+    transitions_in_total_6h: asNum(payload.transitions_in_total_6h),
+    transitions_in_total_24h: asNum(payload.transitions_in_total_24h),
     top_prev_panels: parsePanelRows(payload.top_prev_panels),
+    neighbor_net_flow_top: parseNeighborFlowRows(payload.neighbor_net_flow_top),
+    directionality_totals: {
+      out_24h: asNum(payload?.directionality_totals?.out_24h),
+      in_24h: asNum(payload?.directionality_totals?.in_24h),
+      net_24h: asNum(payload?.directionality_totals?.net_24h),
+    },
     entry_prev_ccu_p50: maybeNum(payload.entry_prev_ccu_p50),
     entry_prev_ccu_p80: maybeNum(payload.entry_prev_ccu_p80),
     entry_prev_gap_minutes_p50: maybeNum(payload.entry_prev_gap_minutes_p50),
@@ -446,6 +484,7 @@ serve(async (req) => {
     if (panelIntel) {
       namesToResolve.push(...(panelIntel.top_next_panels || []).map((r: any) => String(r.panel_name || "")));
       namesToResolve.push(...(panelIntel.top_prev_panels || []).map((r: any) => String(r.panel_name || "")));
+      namesToResolve.push(...(panelIntel.neighbor_net_flow_top || []).map((r: any) => String(r.panel_name || "")));
     }
     const panelDisplayNames = await resolvePanelDisplayNames(supabase, namesToResolve);
 
@@ -455,6 +494,10 @@ serve(async (req) => {
         panel_display_name: panelDisplayNames.get(String(row.panel_name || "")) || String(row.panel_name || ""),
       }));
       panelIntel.top_prev_panels = (panelIntel.top_prev_panels || []).map((row: any) => ({
+        ...row,
+        panel_display_name: panelDisplayNames.get(String(row.panel_name || "")) || String(row.panel_name || ""),
+      }));
+      panelIntel.neighbor_net_flow_top = (panelIntel.neighbor_net_flow_top || []).map((row: any) => ({
         ...row,
         panel_display_name: panelDisplayNames.get(String(row.panel_name || "")) || String(row.panel_name || ""),
       }));
