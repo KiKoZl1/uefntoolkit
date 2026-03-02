@@ -206,6 +206,7 @@ async function normalizeOutput1920x1080(
   original_width: number | null;
   original_height: number | null;
   storage_path?: string;
+  normalization_error?: string | null;
 }> {
   const originalDims = await fetchImageDimensions(imageUrl);
   if (originalDims && originalDims[0] === 1920 && originalDims[1] === 1080) {
@@ -216,49 +217,65 @@ async function normalizeOutput1920x1080(
       transformed: false,
       original_width: 1920,
       original_height: 1080,
+      normalization_error: null,
     };
   }
 
-  const r = await fetch(imageUrl);
-  if (!r.ok) {
-    throw new Error(`fallback_fetch_failed_${r.status}`);
+  try {
+    const r = await fetch(imageUrl);
+    if (!r.ok) {
+      throw new Error(`fallback_fetch_failed_${r.status}`);
+    }
+    const contentType = (r.headers.get("content-type") || "image/png").toLowerCase();
+    const buf = new Uint8Array(await r.arrayBuffer());
+
+    await ensureGeneratedBucket(service);
+    const ext = contentType.includes("jpeg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
+    const objectPath = `normalized/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}_${variantIndex + 1}.${ext}`;
+
+    const { error: uploadErr } = await service.storage
+      .from("tgis-generated")
+      .upload(objectPath, buf, { contentType, upsert: false });
+    if (uploadErr) {
+      throw new Error(`fallback_upload_failed:${uploadErr.message}`);
+    }
+
+    const { data: transformed } = service.storage
+      .from("tgis-generated")
+      .getPublicUrl(objectPath, { transform: { width: 1920, height: 1080, resize: "cover" } });
+    const transformedUrl = String(transformed?.publicUrl || "");
+    if (!transformedUrl) {
+      throw new Error("fallback_public_url_failed");
+    }
+
+    const finalDims = await fetchImageDimensions(transformedUrl);
+    if (!finalDims || finalDims[0] !== 1920 || finalDims[1] !== 1080) {
+      throw new Error(`fallback_unexpected_output_dimensions:${finalDims ? `${finalDims[0]}x${finalDims[1]}` : "unknown"}`);
+    }
+
+    return {
+      url: transformedUrl,
+      width: finalDims[0],
+      height: finalDims[1],
+      transformed: true,
+      original_width: originalDims ? originalDims[0] : null,
+      original_height: originalDims ? originalDims[1] : null,
+      storage_path: objectPath,
+      normalization_error: null,
+    };
+  } catch (e) {
+    // Do not fail generation on normalization; return provider output.
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      url: imageUrl,
+      width: originalDims ? originalDims[0] : 1920,
+      height: originalDims ? originalDims[1] : 1080,
+      transformed: false,
+      original_width: originalDims ? originalDims[0] : null,
+      original_height: originalDims ? originalDims[1] : null,
+      normalization_error: msg,
+    };
   }
-  const contentType = (r.headers.get("content-type") || "image/png").toLowerCase();
-  const buf = new Uint8Array(await r.arrayBuffer());
-
-  await ensureGeneratedBucket(service);
-  const ext = contentType.includes("jpeg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
-  const objectPath = `normalized/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}_${variantIndex + 1}.${ext}`;
-
-  const { error: uploadErr } = await service.storage
-    .from("tgis-generated")
-    .upload(objectPath, buf, { contentType, upsert: false });
-  if (uploadErr) {
-    throw new Error(`fallback_upload_failed:${uploadErr.message}`);
-  }
-
-  const { data: transformed } = service.storage
-    .from("tgis-generated")
-    .getPublicUrl(objectPath, { transform: { width: 1920, height: 1080, resize: "cover" } });
-  const transformedUrl = String(transformed?.publicUrl || "");
-  if (!transformedUrl) {
-    throw new Error("fallback_public_url_failed");
-  }
-
-  const finalDims = await fetchImageDimensions(transformedUrl);
-  if (!finalDims || finalDims[0] !== 1920 || finalDims[1] !== 1080) {
-    throw new Error(`fallback_unexpected_output_dimensions:${finalDims ? `${finalDims[0]}x${finalDims[1]}` : "unknown"}`);
-  }
-
-  return {
-    url: transformedUrl,
-    width: finalDims[0],
-    height: finalDims[1],
-    transformed: true,
-    original_width: originalDims ? originalDims[0] : null,
-    original_height: originalDims ? originalDims[1] : null,
-    storage_path: objectPath,
-  };
 }
 
 async function resolveUser(req: Request, service: ReturnType<typeof createClient>) {
@@ -710,6 +727,7 @@ serve(async (req) => {
       transformed: r.transformed,
       original_width: r.original_width,
       original_height: r.original_height,
+      normalization_error: r.normalization_error || null,
     }));
     const costUsd = Number((cfg.default_generation_cost_usd * (requestedVariants / cfg.max_variants_per_generation)).toFixed(6));
 
@@ -736,6 +754,7 @@ serve(async (req) => {
             enforced_output_width: 1920,
             enforced_output_height: 1080,
             transformed_variants: results.filter((r) => r.transformed).length,
+            normalization_errors: results.filter((r) => r.normalization_error).map((r) => r.normalization_error),
             tag_hint: tagHint || null,
           },
         })
