@@ -1,0 +1,13 @@
+[Unit]
+Description=TGIS worker tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/epic-insight-engine
+EnvironmentFile=%h/epic-insight-engine/ml/tgis/deploy/worker.env
+ExecStart=%h/.venv_tgis/bin/python -m ml.tgis.runtime.worker_tick --config %h/epic-insight-engine/ml/tgis/configs/base.yaml
+
+[Install]
+WantedBy=multi-user.target

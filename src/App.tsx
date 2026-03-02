@@ -23,6 +23,7 @@ import AppDashboard from "./pages/AppDashboard";
 import ProjectDetail from "./pages/ProjectDetail";
 import ReportDashboard from "./pages/ReportDashboard";
 import IslandLookup from "./pages/IslandLookup";
+import ThumbGenerator from "./pages/ThumbGenerator";
 
 // Admin pages
 import AdminOverview from "./pages/admin/AdminOverview";
@@ -31,6 +32,22 @@ import AdminReportEditor from "./pages/admin/AdminReportEditor";
 import AdminExposureHealth from "./pages/admin/AdminExposureHealth";
 import AdminIntel from "./pages/admin/AdminIntel";
 import AdminPanelManager from "./pages/admin/AdminPanelManager";
+import AdminDppiOverview from "./pages/admin/dppi/AdminDppiOverview";
+import AdminDppiModels from "./pages/admin/dppi/AdminDppiModels";
+import AdminDppiTraining from "./pages/admin/dppi/AdminDppiTraining";
+import AdminDppiInference from "./pages/admin/dppi/AdminDppiInference";
+import AdminDppiDrift from "./pages/admin/dppi/AdminDppiDrift";
+import AdminDppiCalibration from "./pages/admin/dppi/AdminDppiCalibration";
+import AdminDppiReleases from "./pages/admin/dppi/AdminDppiReleases";
+import AdminDppiFeedback from "./pages/admin/dppi/AdminDppiFeedback";
+import AdminTgisOverview from "./pages/admin/tgis/AdminTgisOverview";
+import AdminTgisClusters from "./pages/admin/tgis/AdminTgisClusters";
+import AdminTgisDataset from "./pages/admin/tgis/AdminTgisDataset";
+import AdminTgisTraining from "./pages/admin/tgis/AdminTgisTraining";
+import AdminTgisModels from "./pages/admin/tgis/AdminTgisModels";
+import AdminTgisInference from "./pages/admin/tgis/AdminTgisInference";
+import AdminTgisCosts from "./pages/admin/tgis/AdminTgisCosts";
+import AdminTgisSafety from "./pages/admin/tgis/AdminTgisSafety";
 
 import NotFound from "./pages/NotFound";
 
@@ -61,6 +78,7 @@ const App = () => (
               <Route path="projects/:id" element={<ProjectDetail />} />
               <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
               <Route path="island-lookup" element={<IslandLookup />} />
+              <Route path="thumb-generator" element={<ThumbGenerator />} />
             </Route>
 
             {/* Admin (admin/editor role required) */}
@@ -71,6 +89,22 @@ const App = () => (
               <Route path="exposure" element={<AdminExposureHealth />} />
               <Route path="intel" element={<AdminIntel />} />
               <Route path="panels" element={<AdminPanelManager />} />
+              <Route path="dppi" element={<AdminDppiOverview />} />
+              <Route path="dppi/models" element={<AdminDppiModels />} />
+              <Route path="dppi/training" element={<AdminDppiTraining />} />
+              <Route path="dppi/inference" element={<AdminDppiInference />} />
+              <Route path="dppi/drift" element={<AdminDppiDrift />} />
+              <Route path="dppi/calibration" element={<AdminDppiCalibration />} />
+              <Route path="dppi/releases" element={<AdminDppiReleases />} />
+              <Route path="dppi/feedback" element={<AdminDppiFeedback />} />
+              <Route path="tgis" element={<AdminTgisOverview />} />
+              <Route path="tgis/clusters" element={<AdminTgisClusters />} />
+              <Route path="tgis/dataset" element={<AdminTgisDataset />} />
+              <Route path="tgis/training" element={<AdminTgisTraining />} />
+              <Route path="tgis/models" element={<AdminTgisModels />} />
+              <Route path="tgis/inference" element={<AdminTgisInference />} />
+              <Route path="tgis/costs" element={<AdminTgisCosts />} />
+              <Route path="tgis/safety" element={<AdminTgisSafety />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

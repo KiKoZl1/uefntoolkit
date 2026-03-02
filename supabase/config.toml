@@ -39,3 +39,45 @@ verify_jwt = false
 [functions.discover-panel-timeline]
 verify_jwt = false
 
+[functions.discover-dppi-panel]
+verify_jwt = false
+
+[functions.discover-dppi-island]
+verify_jwt = false
+
+[functions.dppi-refresh-batch]
+verify_jwt = false
+
+[functions.dppi-train-dispatch]
+verify_jwt = false
+
+[functions.dppi-health]
+verify_jwt = false
+
+[functions.dppi-release-set]
+verify_jwt = false
+
+[functions.dppi-worker-heartbeat]
+verify_jwt = false
+
+[functions.tgis-generate]
+verify_jwt = false
+
+[functions.tgis-health]
+verify_jwt = false
+
+[functions.tgis-admin-refresh-dataset]
+verify_jwt = false
+
+[functions.tgis-admin-start-training]
+verify_jwt = false
+
+[functions.tgis-admin-promote-model]
+verify_jwt = false
+
+[functions.tgis-admin-rollback-model]
+verify_jwt = false
+
+[functions.tgis-admin-sync-manifest]
+verify_jwt = false
+

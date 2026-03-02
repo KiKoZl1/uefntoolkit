@@ -191,6 +191,26 @@ type PanelTimelinePayload = {
   series: TimelineSeriesPoint[];
   sample_top_items: TimelineTopItem[];
   panel_intel: PanelIntel | null;
+  dppi?: {
+    model_version_used: string | null;
+    model_name_used: string | null;
+    prediction_generated_at: string | null;
+    panel_opening_signal: {
+      score_avg: number;
+      slots_likely_opening: number;
+      pressure_distribution: { low: number; medium: number; high: number };
+    };
+    panel_pressure_forecast: "low" | "medium" | "high";
+    panel_opportunities: Array<{
+      island_code: string;
+      rank: number;
+      score: { h2: number; h5: number; h12: number };
+      opening_signal: number;
+      pressure_forecast: string;
+      confidence_bucket: string;
+      evidence: Record<string, unknown>;
+    }>;
+  } | null;
 };
 
 const DISCOVERY_SURFACE = "CreativeDiscoverySurface_Frontend";
@@ -545,6 +565,7 @@ export default function DiscoverLive() {
         series?: TimelineSeriesPoint[];
         sample_top_items?: TimelineTopItem[];
         panel_intel?: PanelIntel | null;
+        dppi?: PanelTimelinePayload["dppi"];
       };
 
       setTimelineData({
@@ -555,6 +576,7 @@ export default function DiscoverLive() {
         series: Array.isArray(payload?.series) ? payload.series : [],
         sample_top_items: Array.isArray(payload?.sample_top_items) ? payload.sample_top_items : [],
         panel_intel: (payload?.panel_intel && typeof payload.panel_intel === "object") ? payload.panel_intel : null,
+        dppi: (payload?.dppi && typeof payload.dppi === "object") ? payload.dppi : null,
       });
       setTimelineLoading(false);
     },
@@ -1195,6 +1217,53 @@ export default function DiscoverLive() {
                   </CardContent>
                 </Card>
               )}
+
+              {timelineData.dppi ? (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" /> {t("discover.dppiTitle")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="rounded-md border p-3">
+                        <p className="text-[11px] text-muted-foreground">{t("discover.dppiOpeningScore")}</p>
+                        <p className="text-lg font-semibold">{fmtPct(timelineData.dppi.panel_opening_signal?.score_avg != null ? timelineData.dppi.panel_opening_signal.score_avg * 100 : null)}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="text-[11px] text-muted-foreground">{t("discover.dppiSlotsLikely")}</p>
+                        <p className="text-lg font-semibold">{fmtNum(timelineData.dppi.panel_opening_signal?.slots_likely_opening)}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="text-[11px] text-muted-foreground">{t("discover.dppiPressureForecast")}</p>
+                        <p className="text-lg font-semibold capitalize">{timelineData.dppi.panel_pressure_forecast || "-"}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="text-[11px] text-muted-foreground">{t("discover.dppiModelVersion")}</p>
+                        <p className="text-sm font-semibold truncate">{timelineData.dppi.model_version_used || "-"}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">{t("discover.dppiTopOpps")}</p>
+                      {timelineData.dppi.panel_opportunities?.length ? (
+                        timelineData.dppi.panel_opportunities.slice(0, 5).map((row, idx) => (
+                          <div key={`${row.island_code}:${idx}`} className="rounded-md border px-3 py-2 text-xs grid grid-cols-12 gap-2 items-center">
+                            <p className="col-span-4 font-medium truncate">{row.island_code}</p>
+                            <p className="col-span-2 text-right">2h {fmtPct(row.score.h2 * 100)}</p>
+                            <p className="col-span-2 text-right">5h {fmtPct(row.score.h5 * 100)}</p>
+                            <p className="col-span-2 text-right">{t("common.status")} {row.confidence_bucket}</p>
+                            <p className="col-span-2 text-right">#{fmtNum(row.rank)}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{t("discover.noDataFilter")}</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
 
               <div className="grid lg:grid-cols-2 gap-4">
                 <Card>

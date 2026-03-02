@@ -1,0 +1,78 @@
+database:
+  url: ""
+
+supabase:
+  url: ""
+  service_role_key: ""
+
+paths:
+  artifacts: "ml/tgis/artifacts"
+  dataset_csv: "ml/tgis/artifacts/dataset_candidates.csv"
+  dataset_visual_csv: "ml/tgis/artifacts/dataset_visual_pool_ab.csv"
+  clusters_csv: "ml/tgis/artifacts/clusters.csv"
+  training_metadata_csv: "ml/tgis/artifacts/training_metadata.csv"
+  training_metadata_report: "ml/tgis/artifacts/training_metadata_report.json"
+  captions_jsonl: "ml/tgis/artifacts/captions.jsonl"
+  training_dataset_dir: "ml/tgis/artifacts/train_datasets"
+  cluster_manifest: "ml/tgis/artifacts/cluster_manifest.json"
+  train_configs_dir: "ml/tgis/artifacts/train_configs"
+
+scoring:
+  min_score: 0.25
+  window_days: 14
+
+visual_pool:
+  min_unique_players: 50
+  window_days: 14
+
+clustering:
+  mode: "taxonomy"
+  k: 10
+  min_cluster_size: 1
+  merge_strategy: "nearest_centroid"
+
+captioning:
+  provider: "openrouter"
+  model: "openai/gpt-4o-mini"
+  use_vision: false
+  max_images: 5000
+
+train:
+  model_base: "/workspace/models/Z-Image-De-Turbo-Complete"
+  model_arch: "zimage"
+  adapter: ""
+  quality_gate: "strict"
+  # 24GB-safe LoRA rank profile validated on RunPod smoke.
+  network_linear: 8
+  network_linear_alpha: 8
+  save_every: 500
+  max_step_saves_to_keep: 4
+  # Training bucket target (single value) to avoid duplicate latent-cache passes.
+  # 1024 proved stable for cluster_01 without repeated OOM aborts.
+  train_resolution: 1024
+  # Product output policy remains 1920x1080 for final generated thumbnails.
+  output_width: 1920
+  output_height: 1080
+  batch_size: 1
+  steps: 2000
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: true
+  train_dtype: "bf16"
+  learning_rate: 0.0001
+  optimizer: "adamw8bit"
+  lr_scheduler: "cosine"
+  lr_warmup_steps: 100
+  max_grad_norm: 1.0
+  noise_scheduler: "flowmatch"
+  quantize: false
+  quantize_te: false
+  qtype: "qfloat8"
+  qtype_te: "qfloat8"
+  low_vram: true
+  layer_offloading: false
+  is_flux: false
+  include_misc: false
+
+runtime:
+  heartbeat_interval_sec: 60
+  mode: "collect_only"

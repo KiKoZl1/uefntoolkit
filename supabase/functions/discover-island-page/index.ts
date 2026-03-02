@@ -96,6 +96,37 @@ type CachePayload = {
     technicalFilteredCount: number;
     lastMeaningfulUpdateAt: string | null;
   };
+  dppi_radar?: {
+    model_version_used: string | null;
+    prediction_generated_at: string | null;
+    headline: {
+      panel_name: string;
+      score_h2: number;
+      opening_signal: number;
+      pressure_forecast: string;
+      confidence_bucket: string;
+    } | null;
+    top_panel_opportunities: Array<{
+      panel_name: string;
+      score: { h2: number; h5: number; h12: number };
+      opening_signal: number;
+      pressure_forecast: string;
+      confidence_bucket: string;
+      evidence: Record<string, unknown>;
+    }>;
+    survival_signals: Array<{
+      panel_name: string;
+      horizon: string;
+      score: number;
+      confidence_bucket: string;
+      generated_at: string | null;
+    }>;
+    attempts: {
+      total_14d: number;
+      entries_48h: number;
+      exits_48h: number;
+    };
+  } | null;
   asOf: string;
 };
 
@@ -879,6 +910,80 @@ async function buildFreshPayload(
   }
   meaningful.sort((a, b) => b.ts.localeCompare(a.ts));
 
+  let dppiRadar: CachePayload["dppi_radar"] = null;
+  if (targetId) {
+    const [oppRes, survRes, attemptRes] = await Promise.all([
+      supabase
+        .from("dppi_opportunities")
+        .select("generated_at,panel_name,enter_score_2h,enter_score_5h,enter_score_12h,opening_signal,pressure_forecast,confidence_bucket,model_version,evidence_json")
+        .eq("target_id", targetId)
+        .eq("island_code", islandCode)
+        .order("enter_score_2h", { ascending: false })
+        .limit(8),
+      supabase
+        .from("dppi_survival_predictions")
+        .select("generated_at,panel_name,prediction_horizon,score,confidence_bucket")
+        .eq("target_id", targetId)
+        .eq("island_code", islandCode)
+        .order("generated_at", { ascending: false })
+        .limit(24),
+      supabase
+        .from("discovery_exposure_presence_events")
+        .select("event_type,ts")
+        .eq("target_id", targetId)
+        .eq("link_code", islandCode)
+        .eq("link_code_type", "island")
+        .gte("ts", new Date(nowMs - 14 * 24 * 60 * 60 * 1000).toISOString())
+        .order("ts", { ascending: false })
+        .limit(400),
+    ]);
+
+    if (!oppRes.error && !survRes.error && !attemptRes.error) {
+      const opportunities = (oppRes.data || []) as any[];
+      const survivalRows = (survRes.data || []) as any[];
+      const attemptEvents = (attemptRes.data || []) as any[];
+      const headline = opportunities[0] || null;
+      const generatedAt = opportunities[0]?.generated_at || survivalRows[0]?.generated_at || null;
+      dppiRadar = {
+        model_version_used: opportunities[0]?.model_version || null,
+        prediction_generated_at: generatedAt,
+        headline: headline
+          ? {
+              panel_name: String(headline.panel_name || ""),
+              score_h2: asNum(headline.enter_score_2h),
+              opening_signal: asNum(headline.opening_signal),
+              pressure_forecast: String(headline.pressure_forecast || "medium"),
+              confidence_bucket: String(headline.confidence_bucket || "low"),
+            }
+          : null,
+        top_panel_opportunities: opportunities.map((row) => ({
+          panel_name: String(row.panel_name || ""),
+          score: {
+            h2: asNum(row.enter_score_2h),
+            h5: asNum(row.enter_score_5h),
+            h12: asNum(row.enter_score_12h),
+          },
+          opening_signal: asNum(row.opening_signal),
+          pressure_forecast: String(row.pressure_forecast || "medium"),
+          confidence_bucket: String(row.confidence_bucket || "low"),
+          evidence: (row.evidence_json && typeof row.evidence_json === "object") ? row.evidence_json as Record<string, unknown> : {},
+        })),
+        survival_signals: survivalRows.map((row) => ({
+          panel_name: String(row.panel_name || ""),
+          horizon: String(row.prediction_horizon || ""),
+          score: asNum(row.score),
+          confidence_bucket: String(row.confidence_bucket || "low"),
+          generated_at: row.generated_at || null,
+        })),
+        attempts: {
+          total_14d: attemptEvents.length,
+          entries_48h: attemptEvents.filter((e) => e.event_type === "enter" && (toEpoch(e.ts) || 0) >= nowMs - (48 * 60 * 60 * 1000)).length,
+          exits_48h: attemptEvents.filter((e) => e.event_type === "exit" && (toEpoch(e.ts) || 0) >= nowMs - (48 * 60 * 60 * 1000)).length,
+        },
+      };
+    }
+  }
+
   const metaTitle = String(
     epicMeta?.title ||
       metadataRes?.data?.title ||
@@ -936,6 +1041,7 @@ async function buildFreshPayload(
       technicalFilteredCount: Math.max(0, rawEvents.length - meaningful.length),
       lastMeaningfulUpdateAt: meaningful[0]?.ts || null,
     },
+    dppi_radar: dppiRadar,
     asOf: nowIso,
   };
 }
@@ -1051,6 +1157,7 @@ serve(async (req) => {
       series: seriesByRange[requestedRange] || seriesByRange["1D"],
       panelTimeline24h: payload.panelTimeline24h,
       updates: payload.updates,
+      dppi_radar: payload.dppi_radar ?? null,
       asOf: payload.asOf,
       range: requestedRange,
       cache: { hit: cacheHit, stale, asOf: payload.asOf },

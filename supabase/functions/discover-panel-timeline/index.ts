@@ -503,6 +503,59 @@ serve(async (req) => {
       }));
     }
 
+    const { data: dppiRows, error: dppiErr } = await supabase
+      .from("dppi_opportunities")
+      .select("generated_at,island_code,enter_score_2h,enter_score_5h,enter_score_12h,opening_signal,pressure_forecast,confidence_bucket,opportunity_rank,model_name,model_version,evidence_json")
+      .eq("target_id", targetId)
+      .eq("panel_name", panelName)
+      .order("opportunity_rank", { ascending: true })
+      .limit(10);
+
+    let dppi: any = null;
+    if (!dppiErr) {
+      const rows = (dppiRows || []) as any[];
+      const openingAvg = rows.length
+        ? rows.reduce((sum, r) => sum + asNum(r.opening_signal), 0) / rows.length
+        : 0;
+      const pressureCounts = rows.reduce(
+        (acc, r) => {
+          const key = String(r.pressure_forecast || "medium").toLowerCase();
+          if (key === "low" || key === "medium" || key === "high") acc[key] += 1;
+          return acc;
+        },
+        { low: 0, medium: 0, high: 0 },
+      );
+
+      dppi = {
+        model_version_used: rows[0]?.model_version || null,
+        model_name_used: rows[0]?.model_name || null,
+        prediction_generated_at: rows[0]?.generated_at || null,
+        panel_opening_signal: {
+          score_avg: Number(openingAvg.toFixed(4)),
+          slots_likely_opening: rows.filter((r) => asNum(r.opening_signal) >= 0.6).length,
+          pressure_distribution: pressureCounts,
+        },
+        panel_pressure_forecast: pressureCounts.high > pressureCounts.medium && pressureCounts.high > pressureCounts.low
+          ? "high"
+          : pressureCounts.low > pressureCounts.medium
+            ? "low"
+            : "medium",
+        panel_opportunities: rows.map((r) => ({
+          island_code: String(r.island_code || ""),
+          rank: asNum(r.opportunity_rank),
+          score: {
+            h2: asNum(r.enter_score_2h),
+            h5: asNum(r.enter_score_5h),
+            h12: asNum(r.enter_score_12h),
+          },
+          opening_signal: asNum(r.opening_signal),
+          pressure_forecast: String(r.pressure_forecast || "medium"),
+          confidence_bucket: String(r.confidence_bucket || "low"),
+          evidence: r.evidence_json || {},
+        })),
+      };
+    }
+
     return json({
       success: true,
       region,
@@ -516,6 +569,7 @@ serve(async (req) => {
       series,
       sample_top_items: sampleTopItems,
       panel_intel: panelIntel,
+      dppi,
     });
   } catch (e) {
     return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);

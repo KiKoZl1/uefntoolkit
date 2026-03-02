@@ -1,0 +1,39 @@
+project: dppi
+region: NAE
+surface_name: CreativeDiscoverySurface_Frontend
+artifacts_dir: ml/dppi/artifacts
+
+split:
+  min_days: 60
+  validation_days: 14
+  test_days: 14
+
+models:
+  entry:
+    algorithm: catboost
+    horizons: [2h, 5h, 12h]
+  survival:
+    algorithm: catboost
+    horizons: [30m, 60m, replace_lt_30m]
+
+training:
+  random_seed: 42
+  optimize_for: brier
+  catboost_params:
+    iterations: 700
+    depth: 6
+    learning_rate: 0.05
+    loss_function: Logloss
+    eval_metric: AUC
+    auto_class_weights: Balanced
+    verbose: false
+
+inference:
+  channel: production
+
+gates:
+  pr_auc_drop_max_pct: 5
+  precision_at_20_drop_max_pct: 10
+  brier_worse_max_pct: 15
+  ece_max: 0.15
+  psi_max: 0.25

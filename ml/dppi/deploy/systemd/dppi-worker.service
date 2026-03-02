@@ -1,0 +1,20 @@
+[Unit]
+Description=DPPI Worker Tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dppi
+Group=dppi
+WorkingDirectory=/opt/epic-insight-engine
+EnvironmentFile=/etc/dppi/worker.env
+ExecStart=/usr/bin/bash -lc 'source .venv/bin/activate && python ml/dppi/pipelines/worker_tick.py --config ml/dppi/configs/base.yaml --channel production'
+StandardOutput=append:/var/log/dppi/worker.log
+StandardError=append:/var/log/dppi/worker.err.log
+TimeoutStartSec=20min
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+

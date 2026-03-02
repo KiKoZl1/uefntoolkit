@@ -16,6 +16,7 @@ supabase/.temp/
 scripts/_out/
 migration_artifacts/exports/
 migration_artifacts/logs/
+.playwright-cli/
 
 # Logs
 logs/
@@ -36,3 +37,14 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Python caches
+__pycache__/
+*.pyc
+ml/dppi/artifacts/
+ml/tgis/artifacts/
+ml/tgis/deploy/worker.env
+%TEMP%/
+.tmp/
+/tgis-sync.tgz
+/tgis-cloud-job.tgz

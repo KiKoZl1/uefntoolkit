@@ -32,6 +32,13 @@ The files below are kept only as pointers for old links:
 - `docs/ralph/feature_backlog.json`
 
 ## Specialized
+- `docs/DPPI_PRD_FINAL_v2.md`
+- `docs/DPPI_HETZNER_CX22_RUNBOOK.md`
+- `docs/TGIS_PRD_FINAL_v1.md`
+- `docs/TGIS_CAPTION_PLAN.md`
+- `docs/TGIS_RUNBOOK.md`
+- `docs/TGIS_FIRST_TRAINING_GUIDE.md`
+- `docs/TGIS_ZIMAGE_DETURBO_MIGRATION.md`
 - `docs/discover-panel-intelligence-algorithms.md`
 - `docs/WEEKLY_PIPELINE_TUNING.md`
 - `docs/LINKS_SERVICE_MNEMONIC_INFO.md`

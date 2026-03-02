@@ -85,6 +85,37 @@ export type IslandPageResponse = {
     technicalFilteredCount?: number;
     lastMeaningfulUpdateAt: string | null;
   };
+  dppi_radar?: {
+    model_version_used: string | null;
+    prediction_generated_at: string | null;
+    headline: {
+      panel_name: string;
+      score_h2: number;
+      opening_signal: number;
+      pressure_forecast: string;
+      confidence_bucket: string;
+    } | null;
+    top_panel_opportunities: Array<{
+      panel_name: string;
+      score: { h2: number; h5: number; h12: number };
+      opening_signal: number;
+      pressure_forecast: string;
+      confidence_bucket: string;
+      evidence: Record<string, unknown>;
+    }>;
+    survival_signals: Array<{
+      panel_name: string;
+      horizon: string;
+      score: number;
+      confidence_bucket: string;
+      generated_at: string | null;
+    }>;
+    attempts: {
+      total_14d: number;
+      entries_48h: number;
+      exits_48h: number;
+    };
+  } | null;
   asOf: string;
   range?: IslandRangeKey;
   cache?: {

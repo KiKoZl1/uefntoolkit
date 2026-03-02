@@ -1,0 +1,12 @@
+[Unit]
+Description=DPPI Worker Tick (every 10 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=dppi-worker.service
+
+[Install]
+WantedBy=timers.target
+

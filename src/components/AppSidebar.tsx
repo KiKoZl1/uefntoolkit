@@ -1,4 +1,4 @@
-import { Radar, Search, FolderOpen, LogOut, Shield, Sparkles, TrendingUp, FileText, Home } from "lucide-react";
+import { Radar, Search, FolderOpen, LogOut, Shield, Sparkles, FileText, Home, ImagePlus } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
@@ -16,6 +16,7 @@ export function AppSidebar() {
   const tools = [
     { title: "Workspace", url: "/app", icon: FolderOpen, end: true },
     { title: "Island Lookup", url: "/app/island-lookup", icon: Search },
+    { title: "Thumb Generator", url: "/app/thumb-generator", icon: ImagePlus },
   ];
 
   const platform = [

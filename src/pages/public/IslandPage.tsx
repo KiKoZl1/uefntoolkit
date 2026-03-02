@@ -75,12 +75,6 @@ function fmtPercent(v: number, locale: string): string {
   return `${normalized.toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
 }
 
-function fmtSignedPercent(v: number, locale: string): string {
-  if (!Number.isFinite(v)) return "0%";
-  const sign = v > 0 ? "+" : "";
-  return `${sign}${v.toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
-}
-
 function formatTs(ts: string, range: IslandChartRange, locale: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return String(ts);
@@ -379,104 +373,6 @@ export default function IslandPage() {
 
     return enriched.slice(-4).reverse();
   }, [bundleForRange, locale]);
-
-  const radarInsights = useMemo(() => {
-    const oneDaySeries = bundleForRange("1D").playerCount24h || [];
-    const currentValues = oneDaySeries.map((p) => asNum(p.current)).filter((v) => v > 0);
-    const previousValues = oneDaySeries.map((p) => asNum(p.previous)).filter((v) => v > 0);
-    const take = Math.max(4, Math.min(8, currentValues.length));
-    const avg = (arr: number[]) => (arr.length ? arr.reduce((s, n) => s + n, 0) / arr.length : 0);
-
-    let momentumPct = 0;
-    if (currentValues.length >= take && previousValues.length >= take) {
-      const curAvg = avg(currentValues.slice(-take));
-      const prevAvg = avg(previousValues.slice(-take));
-      momentumPct = prevAvg > 0 ? ((curAvg - prevAvg) / prevAvg) * 100 : 0;
-    } else if (currentValues.length >= 6) {
-      const mid = Math.floor(currentValues.length / 2);
-      const early = avg(currentValues.slice(0, mid));
-      const late = avg(currentValues.slice(mid));
-      momentumPct = early > 0 ? ((late - early) / early) * 100 : 0;
-    }
-
-    const nowVsPeakPct = asNum(data?.kpisNow.peak24h) > 0
-      ? (asNum(data?.kpisNow.playersNow) / asNum(data?.kpisNow.peak24h)) * 100
-      : 0;
-
-    const mean = avg(currentValues);
-    const variance = mean > 0
-      ? avg(currentValues.map((v) => (v - mean) ** 2))
-      : 0;
-    const volatilityPct = mean > 0 ? (Math.sqrt(variance) / mean) * 100 : 0;
-
-    const d1PctRaw = asNum(data?.overview24h.retentionD1);
-    const d7PctRaw = asNum(data?.overview24h.retentionD7);
-    const d1Pct = Math.abs(d1PctRaw) <= 1 ? d1PctRaw * 100 : d1PctRaw;
-    const d7Pct = Math.abs(d7PctRaw) <= 1 ? d7PctRaw * 100 : d7PctRaw;
-    const retentionScore = d1Pct * 0.7 + d7Pct * 0.3;
-
-    const unique24h = Math.max(0, asNum(data?.overview24h.uniquePlayers));
-    const favorites24h = Math.max(0, asNum(data?.overview24h.favorites));
-    const recommends24h = Math.max(0, asNum(data?.overview24h.recommends));
-    const favPer1k = unique24h > 0 ? (favorites24h / unique24h) * 1000 : 0;
-    const recPer1k = unique24h > 0 ? (recommends24h / unique24h) * 1000 : 0;
-
-    const panelMinutes = (data?.panelTimeline24h.rows || [])
-      .map((row) => row.segments.reduce((sum, seg) => sum + asNum(seg.minutes), 0))
-      .filter((n) => n > 0);
-    const totalPanelMinutes = panelMinutes.reduce((sum, n) => sum + n, 0);
-    const panelConcentrationPct = totalPanelMinutes > 0
-      ? (Math.max(...panelMinutes) / totalPanelMinutes) * 100
-      : 0;
-
-    let growthStageKey = "stageStable";
-    if (momentumPct >= 18 && nowVsPeakPct >= 80) growthStageKey = "stageBreakout";
-    else if (momentumPct >= 8) growthStageKey = "stageAccelerating";
-    else if (momentumPct <= -10) growthStageKey = "stageCooling";
-
-    let stabilityKey = "stabilityModerate";
-    if (retentionScore >= 20 && volatilityPct <= 25) stabilityKey = "stabilityStrong";
-    else if (retentionScore < 10 || volatilityPct > 45) stabilityKey = "stabilityFragile";
-
-    const actions: string[] = [];
-    if (d1Pct < 15 || d7Pct < 6) actions.push("actionRetention");
-    if (favPer1k < 30 || recPer1k < 10) actions.push("actionAdvocacy");
-    if (panelConcentrationPct > 65) actions.push("actionDiversify");
-    if (momentumPct >= 10) actions.push("actionCapitalize");
-    if (momentumPct <= -10) actions.push("actionRefresh");
-    if (!actions.length) actions.push("actionCapitalize", "actionDiversify");
-
-    const lastMeaningful = data?.updates.lastMeaningfulUpdateAt
-      ? new Date(data.updates.lastMeaningfulUpdateAt).toLocaleString(locale)
-      : null;
-
-    return {
-      growthStageKey,
-      stabilityKey,
-      momentumPct,
-      nowVsPeakPct,
-      volatilityPct,
-      panelConcentrationPct,
-      d1Pct,
-      d7Pct,
-      favPer1k,
-      recPer1k,
-      actions: actions.slice(0, 3),
-      lastMeaningful,
-    };
-  }, [
-    bundleForRange,
-    data?.kpisNow.peak24h,
-    data?.kpisNow.playersNow,
-    data?.overview24h.favorites,
-    data?.overview24h.recommends,
-    data?.overview24h.retentionD1,
-    data?.overview24h.retentionD7,
-    data?.overview24h.uniquePlayers,
-    data?.panelTimeline24h.rows,
-    data?.updates.lastMeaningfulUpdateAt,
-    locale,
-  ]);
 
   if (!isValidCode) {
     return (
@@ -976,69 +872,81 @@ export default function IslandPage() {
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-4xl font-semibold">{t("islandPage.radarInsights")}</h3>
-              <div className="rounded-3xl border border-primary/70 bg-card/70 p-5">
-                <div className="space-y-4">
-                  <p className="text-sm font-semibold uppercase tracking-[0.08em] text-primary">{t("islandPage.aiPerformanceAnalysis")}</p>
+              <h3 className="text-4xl font-semibold">{t("islandPage.promotionRadarTitle")}</h3>
+              <p className="text-sm text-muted-foreground">{t("islandPage.promotionRadarSubtitle")}</p>
 
-                  <div className="grid gap-3">
+              {data.dppi_radar ? (
+                <div className="rounded-3xl border border-border/60 bg-card/70 p-5">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-border/60 bg-background/40 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">{t("islandPage.growthStage")}</p>
-                      <p className="mt-1 text-2xl font-semibold text-zinc-100">
-                        {t(`islandPage.${radarInsights.growthStageKey}`)}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-300">
-                        {t("islandPage.momentumVsPrev", { value: fmtSignedPercent(radarInsights.momentumPct, locale) })}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-400">
-                        {t("islandPage.nowVsPeak", { value: fmtPercent(radarInsights.nowVsPeakPct, locale) })}
-                      </p>
+                      <p className="text-xs text-zinc-400">{t("islandPage.modelVersionUsed")}</p>
+                      <p className="mt-1 text-base font-semibold">{data.dppi_radar.model_version_used || "-"}</p>
                     </div>
-
                     <div className="rounded-2xl border border-border/60 bg-background/40 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[hsl(214,90%,58%)]">{t("islandPage.stability")}</p>
-                      <p className="mt-1 text-2xl font-semibold text-zinc-100">
-                        {t(`islandPage.${radarInsights.stabilityKey}`)}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-300">
-                        D1 {fmtPercent(radarInsights.d1Pct, locale)} / D7 {fmtPercent(radarInsights.d7Pct, locale)}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-400">
-                        {t("islandPage.volatilityIntraday", { value: fmtPercent(radarInsights.volatilityPct, locale) })}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-border/60 bg-background/40 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-300">{t("islandPage.advocacySignal")}</p>
-                      <p className="mt-1 text-sm text-zinc-300">
-                        {t("islandPage.favoritesPer1k", { value: radarInsights.favPer1k.toLocaleString(locale, { maximumFractionDigits: 1 }) })}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-300">
-                        {t("islandPage.recommendsPer1k", { value: radarInsights.recPer1k.toLocaleString(locale, { maximumFractionDigits: 1 }) })}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-400">
-                        {t("islandPage.panelFocus", { value: fmtPercent(radarInsights.panelConcentrationPct, locale) })}
-                      </p>
-                      {radarInsights.lastMeaningful ? (
-                        <p className="mt-1 text-sm text-zinc-500">
-                          {t("islandPage.lastMeaningfulUpdate", { value: radarInsights.lastMeaningful })}
-                        </p>
-                      ) : null}
+                      <p className="text-xs text-zinc-400">{t("islandPage.predictionGeneratedAt")}</p>
+                      <p className="mt-1 text-base font-semibold">{data.dppi_radar.prediction_generated_at ? new Date(data.dppi_radar.prediction_generated_at).toLocaleString(locale) : "-"}</p>
                     </div>
                   </div>
 
-                  <div className="border-t border-border/60 pt-3">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-400">{t("islandPage.nextActions")}</p>
-                    <div className="space-y-1.5 text-sm text-zinc-300">
-                      {radarInsights.actions.map((key, idx) => (
-                        <p key={key}>
-                          {idx + 1}. {t(`islandPage.${key}`)}
-                        </p>
+                  {data.dppi_radar.headline ? (
+                    <div className="mt-3 rounded-2xl border border-primary/40 bg-primary/10 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">{t("islandPage.headlinePanel")}</p>
+                      <p className="mt-1 text-xl font-semibold">{data.dppi_radar.headline.panel_name}</p>
+                      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                        <p>{t("islandPage.entryChance2h")}: <span className="font-semibold">{fmtPercent(data.dppi_radar.headline.score_h2, locale)}</span></p>
+                        <p>{t("islandPage.openingSignal")}: <span className="font-semibold">{fmtPercent(data.dppi_radar.headline.opening_signal, locale)}</span></p>
+                        <p>{t("islandPage.pressureForecast")}: <span className="font-semibold capitalize">{data.dppi_radar.headline.pressure_forecast}</span></p>
+                        <p>{t("islandPage.confidenceBucket")}: <span className="font-semibold capitalize">{data.dppi_radar.headline.confidence_bucket}</span></p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-400">{t("islandPage.topPanelOpportunities")}</p>
+                      {(data.dppi_radar.top_panel_opportunities || []).slice(0, 5).map((row, idx) => (
+                        <div key={`${row.panel_name}:${idx}`} className="rounded-xl border border-border/60 bg-background/35 p-3 text-sm">
+                          <p className="font-semibold">{row.panel_name}</p>
+                          <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-zinc-300">
+                            <p>{t("islandPage.entryChance2h")}: {fmtPercent(row.score.h2, locale)}</p>
+                            <p>{t("islandPage.entryChance5h")}: {fmtPercent(row.score.h5, locale)}</p>
+                            <p>{t("islandPage.entryChance12h")}: {fmtPercent(row.score.h12, locale)}</p>
+                            <p>{t("islandPage.openingSignal")}: {fmtPercent(row.opening_signal, locale)}</p>
+                          </div>
+                        </div>
                       ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-400">{t("islandPage.survivalSignals")}</p>
+                      {(data.dppi_radar.survival_signals || []).slice(0, 6).map((row, idx) => (
+                        <div key={`${row.panel_name}:${row.horizon}:${idx}`} className="rounded-xl border border-border/60 bg-background/35 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold">{row.panel_name}</p>
+                            <p className="text-xs uppercase text-zinc-400">{row.horizon}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-zinc-300">
+                            {t("islandPage.confidenceBucket")}: <span className="capitalize">{row.confidence_bucket}</span> • {fmtPercent(row.score, locale)}
+                          </p>
+                        </div>
+                      ))}
+
+                      <div className="rounded-xl border border-border/60 bg-background/35 p-3 text-sm">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-400">{t("islandPage.attemptHistory")}</p>
+                        <div className="grid grid-cols-3 gap-2 text-xs text-zinc-300">
+                          <p>{t("islandPage.attempts14d")}: <span className="font-semibold text-zinc-100">{fmtCompact(asNum(data.dppi_radar.attempts.total_14d), locale)}</span></p>
+                          <p>{t("islandPage.entries48h")}: <span className="font-semibold text-zinc-100">{fmtCompact(asNum(data.dppi_radar.attempts.entries_48h), locale)}</span></p>
+                          <p>{t("islandPage.exits48h")}: <span className="font-semibold text-zinc-100">{fmtCompact(asNum(data.dppi_radar.attempts.exits_48h), locale)}</span></p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-3xl border border-border/60 bg-card/70 p-5 text-sm text-muted-foreground">
+                  {t("islandPage.noDppiData")}
+                </div>
+              )}
             </section>
           </div>
         </>
