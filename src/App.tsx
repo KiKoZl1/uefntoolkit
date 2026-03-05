@@ -29,6 +29,10 @@ import GenerateToolPage from "./pages/thumb-tools/GenerateToolPage";
 import EditStudioPage from "./pages/thumb-tools/EditStudioPage";
 import CameraControlPage from "./pages/thumb-tools/CameraControlPage";
 import LayerDecompositionPage from "./pages/thumb-tools/LayerDecompositionPage";
+import WidgetKit from "./pages/WidgetKit";
+import WidgetKitShell from "./pages/widgetkit/WidgetKitShell";
+import PsdToUmgPage from "./pages/widgetkit/PsdToUmgPage";
+import UmgToVersePage from "./pages/widgetkit/UmgToVersePage";
 
 // Admin pages
 import AdminOverview from "./pages/admin/AdminOverview";
@@ -85,6 +89,11 @@ const App = () => (
               <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
               <Route path="island-lookup" element={<IslandLookup />} />
               <Route path="thumb-generator" element={<Navigate to="/app/thumb-tools/generate" replace />} />
+              <Route path="widgetkit" element={<WidgetKitShell />}>
+                <Route index element={<WidgetKit />} />
+                <Route path="psd-umg" element={<PsdToUmgPage />} />
+                <Route path="umg-verse" element={<UmgToVersePage />} />
+              </Route>
               <Route path="thumb-tools" element={<ThumbToolsShell />}>
                 <Route index element={<ThumbToolsHub />} />
                 <Route path="generate" element={<GenerateToolPage />} />
