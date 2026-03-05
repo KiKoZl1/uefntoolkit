@@ -54,6 +54,11 @@
     --info-foreground: 0 0% 100%;
     --purple: 260 80% 60%;
     --purple-foreground: 0 0% 100%;
+
+    --motion-nav-fast: 140ms;
+    --motion-nav-base: 180ms;
+    --motion-nav-slow: 220ms;
+    --ease-nav: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .dark {
@@ -103,6 +108,31 @@
     --info-foreground: 0 0% 100%;
     --purple: 260 80% 60%;
     --purple-foreground: 0 0% 100%;
+  }
+}
+
+@layer utilities {
+  .nav-motion-fast {
+    transition-duration: var(--motion-nav-fast);
+    transition-timing-function: var(--ease-nav);
+  }
+
+  .nav-motion-base {
+    transition-duration: var(--motion-nav-base);
+    transition-timing-function: var(--ease-nav);
+  }
+
+  .nav-motion-slow {
+    transition-duration: var(--motion-nav-slow);
+    transition-timing-function: var(--ease-nav);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-nav-fast: 1ms;
+    --motion-nav-base: 1ms;
+    --motion-nav-slow: 1ms;
   }
 }
 
