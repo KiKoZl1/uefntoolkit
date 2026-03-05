@@ -17,6 +17,8 @@ scripts/_out/
 migration_artifacts/exports/
 migration_artifacts/logs/
 .playwright-cli/
+playwright-report/
+test-results/
 
 # Logs
 logs/

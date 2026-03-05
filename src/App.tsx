@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AdminRoute } from "@/components/AdminRoute";
@@ -23,7 +23,12 @@ import AppDashboard from "./pages/AppDashboard";
 import ProjectDetail from "./pages/ProjectDetail";
 import ReportDashboard from "./pages/ReportDashboard";
 import IslandLookup from "./pages/IslandLookup";
-import ThumbGenerator from "./pages/ThumbGenerator";
+import ThumbToolsShell from "./pages/thumb-tools/ThumbToolsShell";
+import ThumbToolsHub from "./pages/thumb-tools/ThumbToolsHub";
+import GenerateToolPage from "./pages/thumb-tools/GenerateToolPage";
+import EditStudioPage from "./pages/thumb-tools/EditStudioPage";
+import CameraControlPage from "./pages/thumb-tools/CameraControlPage";
+import LayerDecompositionPage from "./pages/thumb-tools/LayerDecompositionPage";
 
 // Admin pages
 import AdminOverview from "./pages/admin/AdminOverview";
@@ -48,6 +53,7 @@ import AdminTgisModels from "./pages/admin/tgis/AdminTgisModels";
 import AdminTgisInference from "./pages/admin/tgis/AdminTgisInference";
 import AdminTgisCosts from "./pages/admin/tgis/AdminTgisCosts";
 import AdminTgisSafety from "./pages/admin/tgis/AdminTgisSafety";
+import AdminTgisThumbTools from "./pages/admin/tgis/AdminTgisThumbTools";
 
 import NotFound from "./pages/NotFound";
 
@@ -78,7 +84,14 @@ const App = () => (
               <Route path="projects/:id" element={<ProjectDetail />} />
               <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
               <Route path="island-lookup" element={<IslandLookup />} />
-              <Route path="thumb-generator" element={<ThumbGenerator />} />
+              <Route path="thumb-generator" element={<Navigate to="/app/thumb-tools/generate" replace />} />
+              <Route path="thumb-tools" element={<ThumbToolsShell />}>
+                <Route index element={<ThumbToolsHub />} />
+                <Route path="generate" element={<GenerateToolPage />} />
+                <Route path="edit-studio" element={<EditStudioPage />} />
+                <Route path="camera-control" element={<CameraControlPage />} />
+                <Route path="layer-decomposition" element={<LayerDecompositionPage />} />
+              </Route>
             </Route>
 
             {/* Admin (admin/editor role required) */}
@@ -103,6 +116,7 @@ const App = () => (
               <Route path="tgis/training" element={<AdminTgisTraining />} />
               <Route path="tgis/models" element={<AdminTgisModels />} />
               <Route path="tgis/inference" element={<AdminTgisInference />} />
+              <Route path="tgis/thumb-tools" element={<AdminTgisThumbTools />} />
               <Route path="tgis/costs" element={<AdminTgisCosts />} />
               <Route path="tgis/safety" element={<AdminTgisSafety />} />
             </Route>

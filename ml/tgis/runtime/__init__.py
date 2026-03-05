@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import psycopg
 import yaml
@@ -26,31 +27,41 @@ class RuntimeConfig:
 
 def _normalize_db_url(url: str) -> str:
     """
-    Normalize DSN when password contains raw '@' (common in local .env files).
-    Keeps URL unchanged when already valid.
+    Normalize DB URL for common local .env mistakes:
+    - wrapped quotes around value
+    - raw '@' in password (needs percent-encoding)
+    - unescaped username/password characters
     """
     try:
-        if "://" not in url:
-            return url
-        scheme, rest = url.split("://", 1)
-        if "/" in rest:
-            authority, tail = rest.split("/", 1)
-            suffix = f"/{tail}"
+        s = str(url or "").strip()
+        if not s:
+            return s
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            s = s[1:-1].strip()
+        if "://" not in s:
+            return s
+
+        parts = urlsplit(s)
+        if not parts.netloc:
+            return s
+
+        netloc = parts.netloc
+        if "@" not in netloc:
+            return s
+
+        userinfo, hostinfo = netloc.rsplit("@", 1)
+        if ":" in userinfo:
+            user, password = userinfo.split(":", 1)
         else:
-            authority = rest
-            suffix = ""
-        if "@" not in authority:
-            return url
-        userinfo, host = authority.rsplit("@", 1)
-        if ":" not in userinfo:
-            return url
-        user, password = userinfo.split(":", 1)
-        if "@" not in password:
-            return url
-        password = password.replace("@", "%40")
-        return f"{scheme}://{user}:{password}@{host}{suffix}"
+            user, password = userinfo, ""
+
+        user_enc = quote(unquote(user), safe="")
+        pass_enc = quote(unquote(password), safe="")
+        userinfo_enc = f"{user_enc}:{pass_enc}" if password != "" else user_enc
+
+        return urlunsplit((parts.scheme, f"{userinfo_enc}@{hostinfo}", parts.path, parts.query, parts.fragment))
     except Exception:
-        return url
+        return str(url or "").strip().strip('"').strip("'")
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -64,6 +75,7 @@ def load_runtime(config_path: str | Path) -> RuntimeConfig:
     db_url = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL") or cfg.get("database", {}).get("url")
     if not db_url:
         raise RuntimeError("SUPABASE_DB_URL or DATABASE_URL is required")
+    db_url = _normalize_db_url(str(db_url))
 
     supabase_url = os.getenv("SUPABASE_URL") or cfg.get("supabase", {}).get("url") or ""
     service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or cfg.get("supabase", {}).get("service_role_key") or ""
@@ -86,14 +98,7 @@ def load_runtime(config_path: str | Path) -> RuntimeConfig:
 
 
 def connect_db(runtime: RuntimeConfig) -> psycopg.Connection:
-    dsn = runtime.supabase_db_url
-    try:
-        return psycopg.connect(dsn)
-    except Exception:
-        normalized = _normalize_db_url(dsn)
-        if normalized == dsn:
-            raise
-        return psycopg.connect(normalized)
+    return psycopg.connect(_normalize_db_url(runtime.supabase_db_url))
 
 
 def write_json(path: str | Path, payload: Any) -> None:

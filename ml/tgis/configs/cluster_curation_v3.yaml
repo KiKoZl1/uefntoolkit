@@ -1,0 +1,216 @@
+blacklist:
+  - 0219-5966-5638
+  - 2535-4586-1991
+  - 8972-9292-4557
+  - 9480-5578-7614
+  - 7166-8494-7805
+  - 4774-9260-4779
+  - 2125-1033-1280
+  - 1672-9384-7519
+  - 1002-2809-7659
+  - 2202-9105-4524
+  - 2734-0414-7938
+  - 9783-9049-7726
+  - 3179-6826-1647
+  - 9177-7366-1079
+  - 0475-3033-6182
+  - 0248-7199-3136
+  - 3807-0141-0844
+  - 1435-9684-0515
+  - 8544-4258-1845
+  - 0860-0696-6226
+  - 8478-8217-8705
+  - 0788-8501-1465
+  - 9474-3111-1040
+  - 2734-7999-5180
+  - 5933-8252-4834
+  - 8954-3863-4977
+  - 7100-2883-1484
+  - 7224-4331-4657
+  - 5288-7447-8415
+  - 5299-5204-4456
+  - 7752-8466-9171
+  - 7254-3430-5766
+  - 8377-3349-9404
+  - 3569-6189-9874
+  - 8427-1538-3659
+  - 6795-1276-2397
+  - 3215-1365-6865
+  - 2964-1809-6976
+  - 5690-4345-6525
+  - 3837-5258-6307
+  - 1089-7304-9350
+
+cluster_merges:
+  # Global consolidations
+  team_deathmatch: red_vs_blue
+  parkour: deathrun
+  open_world: role_playing
+  minigame: party_game
+  casual: tycoon
+  base: bedwars
+
+  # Combat small clusters -> final combat buckets
+  chaos: pvp
+  sandbox: pvp
+  arena: pvp
+  fighting: pvp
+  point_capture: pvp
+  competitive: pvp
+  action: pvp
+  attack: pvp
+  battle: pvp
+  solo: pvp
+  respawn: pvp
+  adventure: pvp
+  battle_royale: free_for_all
+  duo: red_vs_blue
+  trio: red_vs_blue
+  trios: red_vs_blue
+  "4v4": red_vs_blue
+  "5v5": red_vs_blue
+  "6v6": red_vs_blue
+  teams: red_vs_blue
+  squad: red_vs_blue
+  building: boxfight
+  edit_course: deathrun
+  trick: deathrun
+  training: deathrun
+  aim_course: gun_game
+  first_person: gun_game
+  one_shot: sniper
+
+  # Horror / PvE
+  survival_horror: horror
+  creatures: horror
+  infection: horror
+  pve: roguelike
+  survival: roguelike
+  co_op: roguelike
+  boss_battle: roguelike
+
+  # Party / casual / misc
+  party_world: party_game
+  friendly: party_game
+  funny: party_game
+  mystery: party_game
+  event: party_game
+  music: party_game
+  arcade: party_game
+  sports: party_game
+  objective: party_game
+  collection: party_game
+
+  # Race / sim
+  driver_simulator: race
+  timed: race
+  middle: race
+
+  # Roleplay / prop
+  heroes: role_playing
+  rpg: role_playing
+  exploration: role_playing
+  prop: prop_hunt
+  stealth: prop_hunt
+
+  # Board game
+  card_game: board_game
+  pinball: board_game
+
+  # Remaining sparse labels
+  uefn: tycoon
+  streamer: tycoon
+  artistic: tycoon
+  bed: bedwars
+  difficulty_easy: tycoon
+
+overrides:
+  # Bedwars corrections
+  0194-5658-9949: bedwars
+  0951-1597-5424: bedwars
+  7313-7865-0844: bedwars
+  4183-5460-8712: bedwars
+  1188-8174-4193: bedwars
+  1866-7335-3712: bedwars
+  2277-1097-5437: bedwars
+  9695-7654-5104: bedwars
+  7028-6879-7261: bedwars
+  1710-9903-1260: bedwars
+  3347-1233-2011: bedwars
+  2014-4015-6446: bedwars
+  2425-8463-6321: bedwars
+  3575-5402-3965: bedwars
+  3939-4165-5586: bedwars
+  5471-4550-8290: bedwars
+  5519-4226-1471: bedwars
+  5851-1086-2260: bedwars
+  6433-1381-5183: bedwars
+  6525-7185-6518: bedwars
+  6562-8989-7707: bedwars
+  7574-3028-3388: bedwars
+  7810-9857-0879: bedwars
+  8475-1223-1606: bedwars
+  9833-9236-3042: bedwars
+  9385-7509-0735: bedwars
+  2822-9844-2060: bedwars
+  8363-2249-7015: bedwars
+  9364-3819-8977: bedwars
+  3423-2134-2829: bedwars
+
+  # Zonewars
+  0710-4354-6737: zonewars
+  3237-7822-8160: zonewars
+  3527-1909-3776: zonewars
+  3837-6453-5498: zonewars
+  6506-0734-4208: zonewars
+  7352-3927-8070: zonewars
+  5463-3114-1614: zonewars
+  7374-7392-5290: zonewars
+
+  # Party game
+  1568-2059-4740: party_game
+
+  # Horror
+  9217-3432-0162: horror
+  6278-5658-4944: horror
+  6458-4820-1280: horror
+  6929-8285-3846: horror
+  0493-0848-9838: horror
+  1146-3861-5687: horror
+  8406-4338-3879: horror
+  9855-0570-0519: horror
+
+  # Tycoon
+  9963-0395-0659: tycoon
+
+  # Sniper
+  2917-2470-3921: sniper
+  2942-5593-2442: sniper
+
+  # Free for all
+  0798-9188-5291: free_for_all
+
+  # Red vs blue
+  1877-1674-9770: red_vs_blue
+  6341-7863-1264: red_vs_blue
+
+  # Boxfight
+  0771-7249-6629: boxfight
+
+family_overrides:
+  red_vs_blue: combat
+  bedwars: combat
+  pvp: combat
+  boxfight: combat
+  zonewars: combat
+  free_for_all: combat
+  gun_game: combat
+  sniper: combat
+  "1v1": combat
+  "2v2": combat
+  "3v3": combat
+  deathrun: deathrun
+  horror: horror
+  tycoon: tycoon
+  party_game: party_games
+  role_playing: roleplay

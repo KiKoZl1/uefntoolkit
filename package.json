@@ -11,6 +11,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
     "ralph:local": "node scripts/ralph_local_runner.mjs",
     "ralph:loop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ralph_loop.ps1",
     "ralph:memory:ingest": "node scripts/ralph_memory_ingest.mjs",
@@ -73,9 +77,11 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "three": "^0.183.2",
     "vaul": "^0.9.9"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@eslint/js": "^9.32.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@types/node": "^22.16.5",

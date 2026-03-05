@@ -1,151 +1,121 @@
-# TGIS Runbook (fal Trainer v2 + Z-Image-Turbo i2i)
+# TGIS Runbook (Nano Banana Production)
 
 ## Goal
-Run TGIS training and inference with:
-1. Async training on `fal-ai/z-image-turbo-trainer-v2`
-2. Manual model promotion (`candidate -> active`)
-3. i2i inference on `fal-ai/z-image/turbo/image-to-image/lora`
-4. Final output fixed at `1920x1080`
-
-## Official Architecture
-1. Admin queues training via `tgis-admin-start-training`
-2. Worker consumes queue in `ml/tgis/runtime/process_training_queue.py`
-3. Worker submits trainer job via `ml/tgis/train/fal_trainer.py`
-4. fal calls `tgis-training-webhook` when job ends
-5. Webhook updates `tgis_training_runs` and upserts `tgis_model_versions` as `candidate`
-6. Admin promotes model manually via `tgis-admin-promote-model`
-7. Runtime generation uses `tgis-generate` (i2i + LoRA + reference selection)
+Operate TGIS generation in production using `fal-ai/nano-banana-2/edit`, with:
+1. `num_images` fixed at `1`
+2. dynamic reference slots (`skin1`, `skin2`, optional user ref, remaining cluster refs)
+3. mandatory normalized output `1920x1080` stored in `tgis-generated`
+4. no LoRA dependency for runtime generation
 
 ## Required Environment
-Set in worker and edge env:
 1. `SUPABASE_URL`
-2. `SUPABASE_SERVICE_ROLE_KEY`
-3. `SUPABASE_DB_URL` (worker only)
-4. `FAL_KEY` (or `FAL_API_KEY`)
-5. `TGIS_WEBHOOK_URL` (public URL for `tgis-training-webhook`)
-6. `TGIS_WEBHOOK_SECRET`
-7. `TGIS_FAL_TRAINER_MODEL` (optional override, default `fal-ai/z-image-turbo-trainer-v2`)
+2. `SUPABASE_ANON_KEY`
+3. `SUPABASE_SERVICE_ROLE_KEY`
+4. `SUPABASE_DB_URL` (for local scripts)
+5. `FAL_API_KEY` (or `FAL_KEY`)
 
-## First-Time Setup
-1. Apply migrations:
+## Deploy Order
+1. Apply DB migrations:
 ```bash
 supabase db push
 ```
-2. Deploy functions:
+2. Deploy edge functions:
 ```bash
-supabase functions deploy tgis-admin-start-training
-supabase functions deploy tgis-training-webhook
 supabase functions deploy tgis-generate
-```
-3. Install/update worker deps:
-```bash
-pip install -r ml/tgis/requirements.txt
-```
-4. Validate worker preflight:
-```bash
-python -m ml.tgis.train.preflight_check --config ml/tgis/configs/base.yaml
+supabase functions deploy tgis-skins-search
+supabase functions deploy tgis-health
 ```
 
-## Dataset + Reference Sync
-Run the data pipeline before training:
+## Hard Reset (Phase 1)
+Run once before Nano go-live:
 ```bash
-python -m ml.tgis.pipelines.thumb_pipeline --config ml/tgis/configs/base.yaml
-python -m ml.tgis.pipelines.reference_sync --config ml/tgis/configs/base.yaml --top-n 3
+python -m ml.tgis.runtime.reset_tgis_nano_state --config ml/tgis/configs/base.yaml --yes-i-know --clean-local-artifacts
+```
+
+This resets:
+1. `tgis_training_runs`
+2. `tgis_model_versions`
+3. `tgis_generation_log`
+4. `tgis_prompt_rewrite_log`
+5. `tgis_cost_usage_daily`
+6. `tgis_skin_usage_daily`
+7. local train/caption artifacts
+
+Keeps:
+1. `tgis_cluster_registry`
+2. `tgis_reference_images`
+3. taxonomy/merge rules
+
+## Recluster V3 (metadata-first + p70 quality)
+```bash
+python -m ml.tgis.pipelines.recluster_v3 --config ml/tgis/configs/base.yaml --quality-percentile 0.70 --small-cluster-threshold 50
+python -m ml.tgis.pipelines.sync_cluster_registry_v2 --config ml/tgis/configs/base.yaml --input ml/tgis/artifacts/clusters_v3.csv
 python -m ml.tgis.pipelines.manifest_writer --config ml/tgis/configs/base.yaml
 ```
 
-`reference_sync` populates:
-1. `public.tgis_reference_images` (top images by cluster/tag)
-2. `public.tgis_cluster_registry.reference_image_url` (cluster fallback)
+Generated artifacts:
+1. `ml/tgis/artifacts/clusters_v3.csv`
+2. `ml/tgis/artifacts/cluster_purity_report_v3.json`
+3. `ml/tgis/artifacts/cluster_size_report_v3.json`
+4. `ml/tgis/artifacts/cluster_conflicts_v3.csv` (only if conflict exists)
 
-## Queue and Process Training
-1. Queue one cluster from admin or API (`tgis-admin-start-training`).
-2. `clusterId` is mandatory. Bulk queue (`all clusters`) is intentionally disabled.
-3. Run worker supervisor (recommended):
-```bash
-python -m ml.tgis.runtime.local_worker_supervisor --config ml/tgis/configs/base.yaml --max-training-runs 1 --poll-seconds 20
-```
-4. One-shot queue tick (fallback/debug only):
-```bash
-python -m ml.tgis.runtime.process_training_queue --config ml/tgis/configs/base.yaml --max-runs 1
-```
-5. Expect run transitions:
-1. `queued`
-2. `running` (with `fal_request_id`, `dataset_zip_url`, `dataset_images_count`)
-3. `success` or `failed` after webhook callback
+Gate:
+1. `conflicting_pairs = 0`
+2. purity target `>= 0.90`
+3. clusters `< 50` rows marked for manual merge
 
-Local Windows auto-recovery:
-```bash
-powershell -ExecutionPolicy Bypass -File ml/tgis/deploy/ensure_local_worker.ps1
-```
-You can schedule this script every minute in Task Scheduler to keep worker always up.
+## Runtime Generation Flow
+1. Frontend sends `prompt`, `tags`, optional `mapTitle`, `cameraAngle`, `moodOverride`, `skinIds`, `referenceImageUrl`, `contextBoost`
+2. `tgis-generate` routes `cluster_slug` by taxonomy rules + keyword fallback
+3. refs are assembled in fixed order:
+1. skins (max 2)
+2. user reference (0/1)
+3. cluster refs (remaining slots up to 14)
+4. Nano Banana is called with:
+1. `resolution: "2K"`
+2. `aspect_ratio: "16:9"`
+3. `num_images: 1`
+4. `enable_web_search: contextBoost`
+5. result is normalized and stored in `tgis-generated/final/..._1920x1080.png`
 
-## Manual Promotion
-After visual QA:
-1. Promote candidate version in admin page `AdminTgisModels`
-2. Or call `tgis-admin-promote-model`
-3. Confirm:
-1. `tgis_model_versions.status='active'`
-2. `tgis_cluster_registry.lora_version` and `lora_fal_path` updated
-3. Manifest synced if requested
+## Skins Strategy
+1. No full skins catalog in DB
+2. Search endpoint: `tgis-skins-search` proxies `fortnite-api.com`
+3. usage ranking stored only in `tgis_skin_usage_daily`
+4. counter increments on successful generation when skins are used
 
-## Inference Behavior
-`tgis-generate` uses i2i with this reference priority:
-1. `referenceImageUrl` sent by user
-2. `tgis_reference_images` top-3 by `cluster + tagHint`
-3. `tgis_cluster_registry.reference_image_url`
-4. Fail with `no_reference_image_available`
+## Retention Policy
+1. `tgis_cleanup_logs_30d()` removes generation + rewrite logs older than 30 days
+2. cron `tgis-log-retention-30d` runs daily
 
-Output enforcement:
-1. Function requests `1920x1080` from fal.
-2. If provider returns other dimensions, function normalizes server-side via storage transform and returns `1920x1080`.
-
-Security:
-1. User references must come from `tgis-user-references` bucket
-2. System fallback URLs allowed only for `cdn-*.qstv.on.epicgames.com`
-
-## Operational Checks
-1. Stuck `running` runs:
+Manual execution:
 ```sql
-update public.tgis_training_runs
-set status='failed', ended_at=now(), updated_at=now(), error_text='stale_running_cleanup'
-where status='running' and ended_at is null and started_at < now() - interval '30 minutes';
+select public.tgis_cleanup_logs_30d();
 ```
-2. Latest runs:
-```sql
-select id, cluster_id, status, fal_request_id, target_version, started_at, ended_at, error_text
-from public.tgis_training_runs
-order by id desc
-limit 20;
+
+## Smoke Test
+```bash
+curl -s -X POST "$SUPABASE_URL/functions/v1/tgis-generate" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt":"fortnite thumbnail with intense 1v1 action",
+    "tags":["1v1","zonewars"],
+    "cameraAngle":"eye",
+    "contextBoost":true
+  }'
 ```
-3. Latest candidates:
-```sql
-select cluster_id, version, status, lora_fal_path, updated_at
-from public.tgis_model_versions
-order by updated_at desc
-limit 20;
-```
+
+Expect:
+1. `success: true`
+2. `image.width = 1920`
+3. `image.height = 1080`
+4. `normalized_image_url` populated in `tgis_generation_log`
 
 ## Troubleshooting
-1. `missing_tgis_webhook_url`: set `TGIS_WEBHOOK_URL` in worker env.
-2. `forbidden` on webhook: `TGIS_WEBHOOK_SECRET` mismatch between worker and edge env.
-3. `fal_train_submit_failed:*payload*`: rerun queue with smaller `maxImagesOverride`.
-4. `cluster_model_missing` on generate: no active model promoted for that cluster.
-5. `invalid_reference_image_url`: user reference URL not in whitelist.
-6. 500 on `tgis-generate`: inspect `tgis_generation_log.error_text`.
-
-## Reinforcement Loop
-Nightly can auto-queue reinforcement retrains from new high-score rows in `training_metadata.csv`:
-```bash
-python -m ml.tgis.runtime.queue_score_reinforcement --config ml/tgis/configs/base.yaml
-```
-
-Config knobs (`base.yaml -> runtime`):
-1. `reinforcement_min_new_rows`
-2. `reinforcement_min_score`
-3. `reinforcement_steps`
-4. `reinforcement_learning_rate`
-5. `reinforcement_max_images`
-
-## Legacy Path
-`ml/tgis/train/runpod_train_cluster.py` remains in repo as legacy fallback only.
+1. `missing_tags`: frontend did not send tags array
+2. `invalid_reference_image_url`: user URL not in whitelist
+3. `no_reference_image_available`: cluster refs empty and no fallback available
+4. `nano_http_*`: upstream fal request failed
+5. `final_dimension_mismatch`: normalization pipeline failed to produce 1920x1080

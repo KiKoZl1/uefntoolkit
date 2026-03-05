@@ -25,6 +25,7 @@ The Epic Insight Engine frontend is a **React 18** application built with **Type
 src/
 +-- components/           # Reusable React components
 |   +-- ui/              # shadcn/ui components (40+)
+|   +-- navigation/      # Global topbar and mobile drawer
 |   +-- discover/        # Discovery-specific components
 |   +-- admin/           # Admin-specific components
 |   +-- *.tsx            # Layout and routing components
@@ -40,6 +41,7 @@ src/
 +-- i18n/                # Internationalization
 |   +-- config.ts        # i18n configuration
 |   +-- locales/         # Translation files
++-- navigation/          # Unified nav contracts and visibility rules
 +-- test/                # Test files
 +-- App.tsx              # Root application component
 +-- main.tsx             # Application entry point
@@ -86,8 +88,8 @@ The application uses **React Router v6** with a nested route structure:
 
 ```text
 SmartLayout decides layout by auth state:
-- user authenticated -> AppLayout (sidebar)
-- user anonymous -> PublicLayout (top navigation + footer)
+- user authenticated -> AppLayout (sticky topbar)
+- user anonymous -> PublicLayout (sticky topbar + footer)
 
 Admin routes are wrapped by AdminRoute + AdminLayout.
 ```
@@ -101,8 +103,8 @@ Admin routes are wrapped by AdminRoute + AdminLayout.
 | `PublicLayout` | `PublicLayout.tsx` | Public pages wrapper |
 | `AppLayout` | `AppLayout.tsx` | Authenticated app wrapper |
 | `AdminLayout` | `AdminLayout.tsx` | Admin dashboard wrapper |
-| `AppSidebar` | `AppSidebar.tsx` | App navigation sidebar |
-| `AdminSidebar` | `AdminSidebar.tsx` | Admin navigation sidebar |
+| `TopBar` | `navigation/TopBar.tsx` | Unified sticky navigation bar |
+| `MobileTopNav` | `navigation/MobileTopNav.tsx` | Sectioned mobile drawer navigation |
 
 ### 2. Route Protection Components
 
@@ -110,7 +112,16 @@ Admin routes are wrapped by AdminRoute + AdminLayout.
 |-----------|------|---------|
 | `ProtectedRoute` | `ProtectedRoute.tsx` | Authentication guard |
 | `AdminRoute` | `AdminRoute.tsx` | Role-based access control |
-| `NavLink` | `NavLink.tsx` | Active state navigation links |
+
+### Navigation Contracts
+
+Unified contracts live in `src/navigation/`:
+- `NavItem`
+- `NavSection`
+- `NavVisibilityRule` (`anon`, `authenticated`, `client`, `editor`, `admin`)
+- `TopBarContext` (`public`, `app`, `admin`)
+
+The top bar resolves items by route context + role visibility and keeps platform/app/admin navigation in one source of truth.
 
 ### 3. UI Components (shadcn/ui)
 

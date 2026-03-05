@@ -196,26 +196,9 @@ def _build_caption(
         if phrase in lower_combined:
             parts.append(phrase)
 
-    # Keep language stable (EN-only style) by avoiding free token extraction
-    # from arbitrary descriptions/titles.
-    if cluster_norm == "combat":
-        parts.append("high energy action")
-    elif cluster_norm == "horror":
-        parts.append("dark atmosphere")
-    elif cluster_norm == "tycoon":
-        parts.append("economy progression")
-    elif cluster_norm == "driving":
-        parts.append("vehicle gameplay")
-    elif cluster_norm == "prop hunt":
-        parts.append("hide and seek gameplay")
-    elif cluster_norm == "deathrun":
-        parts.append("parkour challenge")
-    elif cluster_norm == "party games":
-        parts.append("social minigame")
-    elif cluster_norm == "roleplay":
-        parts.append("open world roleplay")
-    elif cluster_norm == "fashion":
-        parts.append("style showcase")
+    # Dynamic family phrase (no fixed cluster hardcode).
+    if cluster_norm and cluster_norm not in {"general", "misc"}:
+        parts.append(f"{cluster_norm.replace('_', ' ')} gameplay")
 
     if isinstance(max_players, int) and max_players > 0:
         parts.append(f"up to {max_players} players")
@@ -353,8 +336,11 @@ def main() -> None:
         raise FileNotFoundError(f"clusters file not found: {input_path}")
 
     df = pd.read_csv(input_path)
-    if args.exclude_misc and not args.include_misc and "cluster_name" in df.columns:
-        df = df[df["cluster_name"].astype(str).str.lower() != "cluster_misc"].copy()
+    if args.exclude_misc and not args.include_misc:
+        if "cluster_slug" in df.columns:
+            df = df[df["cluster_slug"].astype(str).str.lower() != "misc_unclassified"].copy()
+        elif "cluster_name" in df.columns:
+            df = df[df["cluster_name"].astype(str).str.lower() != "cluster_misc"].copy()
     if args.limit:
         df = df.head(args.limit)
     if df.empty:
@@ -362,6 +348,24 @@ def main() -> None:
 
     link_codes = sorted(set(df["link_code"].astype(str).tolist()))
     meta_map = _fetch_metadata_map(runtime, link_codes=link_codes, chunk_size=args.chunk_size)
+
+    # If cluster_id is not present (V2 pre-registry sync), assign stable local ids.
+    has_cluster_id = "cluster_id" in df.columns
+    slug_to_local_id: dict[str, int] = {}
+    next_local_id = 1
+    if not has_cluster_id:
+        if "cluster_slug" in df.columns:
+            for s in sorted(set(df["cluster_slug"].astype(str).tolist())):
+                slug = _to_ascii_lower(s).replace(" ", "_")
+                if slug and slug not in slug_to_local_id:
+                    slug_to_local_id[slug] = next_local_id
+                    next_local_id += 1
+        elif "cluster_name" in df.columns:
+            for s in sorted(set(df["cluster_name"].astype(str).tolist())):
+                slug = _to_ascii_lower(str(s).replace("cluster_", "", 1)).replace(" ", "_")
+                if slug and slug not in slug_to_local_id:
+                    slug_to_local_id[slug] = next_local_id
+                    next_local_id += 1
 
     rows_out: list[dict[str, Any]] = []
     coverage = {
@@ -375,9 +379,38 @@ def main() -> None:
 
     for row in df.itertuples(index=False):
         link_code = str(getattr(row, "link_code", "") or "")
-        cluster_id = int(getattr(row, "cluster_id", 0) or 0)
-        cluster_name = str(getattr(row, "cluster_name", "cluster_general") or "cluster_general")
-        cluster = cluster_name.replace("cluster_", "", 1) if cluster_name.startswith("cluster_") else cluster_name
+        cluster_slug_raw = str(getattr(row, "cluster_slug", "") or "").strip()
+        cluster_family_raw = str(getattr(row, "cluster_family", "") or "").strip()
+        cluster_name = str(getattr(row, "cluster_name", "") or "").strip()
+
+        if cluster_slug_raw:
+            cluster_slug = _to_ascii_lower(cluster_slug_raw).replace(" ", "_")
+        elif cluster_name:
+            cluster_slug = _to_ascii_lower(cluster_name.replace("cluster_", "", 1)).replace(" ", "_")
+        else:
+            cluster_slug = "general"
+
+        if cluster_family_raw:
+            cluster_family = _to_ascii_lower(cluster_family_raw).replace(" ", "_")
+        elif cluster_slug.startswith("combat_"):
+            cluster_family = "combat"
+        elif "_" in cluster_slug:
+            cluster_family = cluster_slug.split("_", 1)[0]
+        else:
+            cluster_family = cluster_slug
+
+        if cluster_name:
+            cluster_name_out = cluster_name
+        else:
+            cluster_name_out = f"cluster_{cluster_slug}"
+
+        cluster_id_raw = getattr(row, "cluster_id", None)
+        if cluster_id_raw is not None and str(cluster_id_raw).strip():
+            cluster_id = int(cluster_id_raw)
+        else:
+            cluster_id = int(slug_to_local_id.get(cluster_slug, 0))
+
+        cluster = cluster_family or "general"
         quality_score = float(getattr(row, "quality_score", 0.0) or 0.0)
         input_image_url = str(getattr(row, "image_url", "") or "")
         meta = meta_map.get(link_code, {})
@@ -401,7 +434,8 @@ def main() -> None:
         if title.strip():
             coverage["has_title"] += 1
 
-        image_url = str(meta.get("image_url") or input_image_url)
+        # Keep image URL from clustered row to avoid cross-row metadata contamination.
+        image_url = str(input_image_url or meta.get("image_url") or "")
         rating_short = _parse_rating_short(ratings)
 
         cap = vision_caption(image_url, cluster, model) if use_vision and image_url.startswith("http") else None
@@ -427,7 +461,9 @@ def main() -> None:
                 "link_code": link_code,
                 "image_url": image_url,
                 "cluster_id": cluster_id,
-                "cluster_name": cluster_name,
+                "cluster_name": cluster_name_out,
+                "cluster_slug": cluster_slug,
+                "cluster_family": cluster_family,
                 "cluster": cluster,
                 "quality_score": quality_score,
                 "title": title,

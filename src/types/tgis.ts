@@ -7,26 +7,43 @@ export type TgisImageVariant = {
 
 export type TgisGenerateRequest = {
   prompt: string;
-  category: string;
-  tagHint?: string;
+  tags: string[];
+  mapTitle?: string;
+  cameraAngle?: "low" | "eye" | "high" | "dutch";
+  moodOverride?: string;
+  styleMode?: "auto" | "3d_cinematic_stylized" | "3d_cinematic_cartoon" | "2d_flat_illustration";
+  skinIds?: string[];
   referenceImageUrl?: string;
-  variants?: number;
-  aspect_ratio?: "16:9";
+  contextBoost?: boolean;
 };
 
 export type TgisGenerateResponse = {
   success: boolean;
   generation_id?: string;
-  cluster_id?: number;
+  asset_id?: string | null;
+  image?: {
+    url: string;
+    width: number;
+    height: number;
+  };
   cluster_name?: string;
-  model_version?: string | null;
+  cluster_slug?: string | null;
+  cluster_family?: string | null;
+  slots_used?: {
+    skins: number;
+    user_ref: number;
+    cluster_refs: number;
+  };
   images?: TgisImageVariant[];
   cost_usd?: number;
   latency_ms?: number;
-  rewritten_prompt?: string;
-  reference_source?: string;
-  reference_tag?: string | null;
-  reference_url?: string;
+  prompt_used?: string;
+  context_boost?: boolean;
+  provider_model?: string;
+  routing_reason?: string;
+  routing_score?: number;
+  template_source?: string;
+  template_version?: string;
   error?: string;
   reason?: string;
 };

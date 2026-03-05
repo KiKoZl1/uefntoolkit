@@ -1349,20 +1349,39 @@ Exibir sempre abaixo das imagens geradas:
 
 ---
 
-## Addendum 2026-03-01 (Operational Decision)
+## Addendum 2026-03-01 (Historical Note)
 
-After production smoke validation on RunPod, training moved from Turbo+adapter path to De-Turbo path:
+This addendum documents a temporary De-Turbo experiment executed during incident mitigation.
+It is no longer the official production path.
 
-1. Training model baseline: `Z-Image-De-Turbo-Complete` (local merged folder).
-2. Mandatory training model flags:
-   - `arch: zimage`
-   - `is_flux: false`
-   - `quantize: false`
-3. `assistant_lora_path` removed from training configs.
-4. Training bucket uses single `train_resolution` (default `1024`) for stability and VRAM control on 24GB GPUs.
-5. Default 24GB LoRA profile uses `network_linear=8` and `network_linear_alpha=8`.
-6. Product policy remains final user output at `1920x1080`.
-
-See:
-- `docs/TGIS_ZIMAGE_DETURBO_MIGRATION.md`
+Official path is defined in:
+- `docs/TGIS_FAL_TRAINER_MIGRATION.md`
 - `docs/TGIS_RUNBOOK.md`
+
+Current production strategy:
+1. Training: `fal-ai/z-image-turbo-trainer-v2`
+2. Inference: `fal-ai/z-image/turbo/image-to-image/lora`
+3. Base model policy: `Z-Image-Turbo` (De-Turbo path deprecated for V1 operations)
+4. Output policy: final delivery target remains `1920x1080`
+
+## Addendum 2026-03-02 (V1 Closure Status With Caveats)
+
+V1 can be considered **functionally concluded** for platform scope, with two explicit caveats.
+
+What is considered closed in V1 scope:
+1. End-to-end training pipeline migrated to fal Trainer v2 (queue -> submit -> webhook -> candidate model).
+2. Manual promotion/rollback flow active in admin.
+3. Runtime generation active on i2i + LoRA with prompt rewrite and reference selection fallback.
+4. Operational runbook and first-training guide documented for new pod/worker cycles.
+
+Mandatory caveats before calling V1 quality fully complete:
+1. **Remaining clusters training**: only part of the cluster set is trained/validated in production quality level; remaining clusters must be trained and QA-approved.
+2. **Thumb separation quality**: current visual clustering/caption separation is still noisy ("poluida") in some groups and needs refinement before V2 quality targets.
+
+Operational disclaimer to keep in all V1 planning and reviews:
+> V1 platform is delivered, but model quality is still dependent on (a) full cluster training coverage and (b) improved thumbnail separation/curation quality.
+
+Recommended gate to start V2 implementation:
+1. Train and promote all remaining active clusters.
+2. Run visual QA pass per cluster with acceptance checklist.
+3. Execute one refinement cycle on dataset separation (cluster purity + caption specificity).

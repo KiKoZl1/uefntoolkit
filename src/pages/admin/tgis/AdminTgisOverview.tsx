@@ -49,14 +49,23 @@ export default function AdminTgisOverview() {
     () => [
       { label: "Generations (24h)", value: fmtCompact(ov.generations_24h) },
       { label: "Errors (24h)", value: fmtCompact(ov.errors_24h) },
+      { label: "Error rate (24h)", value: `${(Number(ov.error_rate_24h || 0) * 100).toFixed(1)}%` },
+      { label: "Avg latency (24h)", value: `${fmtCompact(ov.avg_latency_ms_24h)}ms` },
+      { label: "P95 latency (24h)", value: `${fmtCompact(ov.p95_latency_ms_24h)}ms` },
       { label: "Cost today", value: `$${Number(ov.cost_today_usd || 0).toFixed(4)}` },
       { label: "Clusters active", value: `${fmtCompact(ov.clusters_active)} / ${fmtCompact(ov.clusters_total)}` },
       { label: "Active models", value: fmtCompact(ov.active_models) },
       { label: "Training running", value: fmtCompact(ov.training_running) },
       { label: "Training queued", value: fmtCompact(ov.training_queued) },
+      { label: "Taxonomy rules", value: fmtCompact(ov.taxonomy_rules_active) },
     ],
     [ov],
   );
+  const latestClustering = useMemo(() => {
+    const rows = Array.isArray(payload?.dataset_recent) ? payload.dataset_recent : [];
+    return rows.find((r: any) => String(r?.run_type || "") === "clustering") || null;
+  }, [payload?.dataset_recent]);
+  const latestClusteringSummary = latestClustering?.summary_json || {};
   const workerLatest = payload?.worker_latest || null;
   const workerTs = workerLatest?.ts ? new Date(workerLatest.ts).getTime() : 0;
   const workerAgeSec = workerTs > 0 ? Math.max(0, Math.floor((Date.now() - workerTs) / 1000)) : null;
@@ -95,7 +104,7 @@ export default function AdminTgisOverview() {
 
       {!loading && !error ? (
         <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
             {cards.map((c) => (
               <Card key={c.label}>
                 <CardContent className="pt-5">
@@ -116,8 +125,29 @@ export default function AdminTgisOverview() {
                 <div className="flex items-center justify-between"><span>Training enabled</span><Badge variant="outline">{payload?.runtime_config?.training_enabled ? "true" : "false"}</Badge></div>
                 <div className="flex items-center justify-between"><span>User quota/day</span><span>{fmtCompact(payload?.runtime_config?.max_generations_per_user_per_day)}</span></div>
                 <div className="flex items-center justify-between"><span>Global budget/day</span><span>${Number(payload?.runtime_config?.global_daily_budget_usd || 0).toFixed(2)}</span></div>
-                <div className="flex items-center justify-between"><span>OpenRouter model</span><span>{String(payload?.runtime_config?.openrouter_model || "-")}</span></div>
-                <div className="flex items-center justify-between"><span>FAL model</span><span>{String(payload?.runtime_config?.fal_model || "-")}</span></div>
+                <div className="flex items-center justify-between"><span>Generate provider</span><span>{String(payload?.runtime_config?.generate_provider || "-")}</span></div>
+                <div className="flex items-center justify-between"><span>Nano model</span><span>{String(payload?.runtime_config?.nano_model || "-")}</span></div>
+                <div className="flex items-center justify-between"><span>Context boost default</span><span>{String(Boolean(payload?.runtime_config?.context_boost_default))}</span></div>
+                <div className="flex items-center justify-between"><span>Max refs total</span><span>{fmtCompact(payload?.runtime_config?.max_total_refs)}</span></div>
+                <div className="flex items-center justify-between"><span>Max skin refs</span><span>{fmtCompact(payload?.runtime_config?.max_skin_refs)}</span></div>
+                <p className="pt-2 text-xs text-muted-foreground">Cluster families</p>
+                {Object.entries(payload?.cluster_family_distribution || {}).map(([k, v]) => (
+                  <div key={`fam:${k}`} className="flex items-center justify-between text-xs">
+                    <span>{k}</span>
+                    <span>{fmtCompact(Number(v || 0))}</span>
+                  </div>
+                ))}
+                <p className="pt-2 text-xs text-muted-foreground">Provider model (24h)</p>
+                {Object.entries(payload?.provider_model_distribution_24h || {}).map(([k, v]) => (
+                  <div key={`mdl:${k}`} className="flex items-center justify-between text-xs">
+                    <span>{k}</span>
+                    <span>{fmtCompact(Number(v || 0))}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between text-xs">
+                  <span>Context boost ON/OFF (24h)</span>
+                  <span>{fmtCompact(payload?.context_boost_24h?.on || 0)}/{fmtCompact(payload?.context_boost_24h?.off || 0)}</span>
+                </div>
               </CardContent>
             </Card>
 
@@ -154,6 +184,41 @@ export default function AdminTgisOverview() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Recluster audit (latest)</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2 text-sm md:grid-cols-4">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Rows</p>
+                <p className="mt-1 text-lg font-semibold">{fmtCompact(latestClusteringSummary?.rows_total || 0)}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Clusters</p>
+                <p className="mt-1 text-lg font-semibold">{fmtCompact(latestClusteringSummary?.clusters_total || 0)}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Purity</p>
+                <p className="mt-1 text-lg font-semibold">
+                  {latestClusteringSummary?.global_weighted_purity != null
+                    ? `${(Number(latestClusteringSummary.global_weighted_purity) * 100).toFixed(1)}%`
+                    : "-"}
+                </p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Misc rate</p>
+                <p className="mt-1 text-lg font-semibold">
+                  {latestClusteringSummary?.misc_rate != null
+                    ? `${(Number(latestClusteringSummary.misc_rate) * 100).toFixed(1)}%`
+                    : "-"}
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground md:col-span-4">
+                Last clustering run: {latestClustering ? fmtDate(latestClustering.created_at) : "-"}
+              </p>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-2">

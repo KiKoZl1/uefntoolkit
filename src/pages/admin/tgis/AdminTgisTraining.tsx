@@ -20,6 +20,7 @@ export default function AdminTgisTraining() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<any[]>([]);
   const [clusters, setClusters] = useState<any[]>([]);
+  const [clusterMeta, setClusterMeta] = useState<Record<string, { name: string; slug: string; family: string }>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -32,11 +33,21 @@ export default function AdminTgisTraining() {
         .limit(200),
       (supabase as any)
         .from("tgis_cluster_registry")
-        .select("cluster_id,cluster_name")
+        .select("cluster_id,cluster_name,cluster_slug,cluster_family")
         .order("cluster_id", { ascending: true }),
     ]);
     setRows(Array.isArray(runsRes.data) ? runsRes.data : []);
-    setClusters(Array.isArray(clustersRes.data) ? clustersRes.data : []);
+    const cRows = Array.isArray(clustersRes.data) ? clustersRes.data : [];
+    setClusters(cRows);
+    const meta: Record<string, { name: string; slug: string; family: string }> = {};
+    for (const c of cRows) {
+      meta[String(c.cluster_id)] = {
+        name: String(c.cluster_name || ""),
+        slug: String(c.cluster_slug || ""),
+        family: String(c.cluster_family || ""),
+      };
+    }
+    setClusterMeta(meta);
     setLoading(false);
   }, []);
 
@@ -133,7 +144,9 @@ export default function AdminTgisTraining() {
               <SelectTrigger className="w-[210px]"><SelectValue placeholder="Target cluster" /></SelectTrigger>
               <SelectContent>
                 {clusters.map((c) => (
-                  <SelectItem key={`c:${c.cluster_id}`} value={String(c.cluster_id)}>#{c.cluster_id} {c.cluster_name}</SelectItem>
+                  <SelectItem key={`c:${c.cluster_id}`} value={String(c.cluster_id)}>
+                    #{c.cluster_id} {c.cluster_name}{c.cluster_slug ? ` (${c.cluster_slug})` : ""}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -220,7 +233,17 @@ export default function AdminTgisTraining() {
                   {rows.map((row) => (
                     <tr key={`tr:${row.id}`} className="border-b border-border/30">
                       <td className="px-2 py-2">{row.id}</td>
-                      <td className="px-2 py-2">{row.cluster_id ?? "-"}</td>
+                      <td className="px-2 py-2">
+                        {row.cluster_id ?? "-"}
+                        {row.cluster_id && clusterMeta[String(row.cluster_id)]?.slug ? (
+                          <div className="text-[11px] text-muted-foreground">
+                            {clusterMeta[String(row.cluster_id)]?.slug}
+                            {clusterMeta[String(row.cluster_id)]?.family
+                              ? ` (${clusterMeta[String(row.cluster_id)]?.family})`
+                              : ""}
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="px-2 py-2">{row.run_mode}</td>
                       <td className="px-2 py-2">{row.training_provider || "-"}</td>
                       <td className="px-2 py-2 text-xs">{row.fal_request_id || "-"}</td>

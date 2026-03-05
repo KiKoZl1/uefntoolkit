@@ -66,6 +66,12 @@ verify_jwt = false
 [functions.tgis-health]
 verify_jwt = false
 
+[functions.tgis-skins-search]
+verify_jwt = false
+
+[functions.tgis-skins-sync]
+verify_jwt = false
+
 [functions.tgis-admin-refresh-dataset]
 verify_jwt = false
 
@@ -88,5 +94,20 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.tgis-training-webhook]
+verify_jwt = false
+
+[functions.tgis-edit-studio]
+verify_jwt = false
+
+[functions.tgis-camera-control]
+verify_jwt = false
+
+[functions.tgis-layer-decompose]
+verify_jwt = false
+
+[functions.tgis-layer-download]
+verify_jwt = false
+
+[functions.tgis-delete-asset]
 verify_jwt = false
 

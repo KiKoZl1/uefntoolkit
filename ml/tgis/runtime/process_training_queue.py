@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from ml.tgis.runtime import connect_db, load_runtime, load_yaml
@@ -53,6 +54,75 @@ def _load_training_enabled(runtime: dict[str, Any]) -> bool:
             row = cur.fetchone()
         conn.commit()
     return bool(row[0]) if row is not None else False
+
+
+def _is_truthy(v: Any) -> bool:
+    return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _check_recluster_gate(train_cfg: dict[str, Any], run_payload: dict[str, Any]) -> tuple[bool, str]:
+    if _is_truthy(os.getenv("TGIS_SKIP_RECLUSTER_GATE")):
+        return True, "skipped_by_env"
+    if _is_truthy(run_payload.get("skipReclusterGate")):
+        return True, "skipped_by_run_payload"
+
+    gate_enabled = bool(train_cfg.get("require_recluster_gate", True))
+    if not gate_enabled:
+        return True, "disabled_in_config"
+
+    min_purity = float(train_cfg.get("recluster_min_purity", 0.90))
+    max_misc_rate = float(train_cfg.get("recluster_max_misc_rate", 0.30))
+    purity_report_path = Path(
+        str(train_cfg.get("recluster_purity_report", "ml/tgis/artifacts/cluster_purity_report_v2_keyword.json"))
+    )
+    conflicts_path = Path(
+        str(train_cfg.get("recluster_conflicts_csv", "ml/tgis/artifacts/cluster_conflicts_v2_keyword.csv"))
+    )
+    final_clusters_path = Path(str(train_cfg.get("recluster_final_csv", "ml/tgis/artifacts/clusters_v2.csv")))
+
+    if not purity_report_path.exists():
+        return False, f"missing_purity_report:{purity_report_path}"
+    if not final_clusters_path.exists():
+        return False, f"missing_final_clusters:{final_clusters_path}"
+
+    try:
+        payload = json.loads(purity_report_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return False, f"invalid_purity_report:{e}"
+
+    purity_rows = list(payload.get("purity_rows") or [])
+    if not purity_rows:
+        return False, "empty_purity_rows"
+
+    failing: list[str] = []
+    for row in purity_rows:
+        fam = str(row.get("cluster_family") or "misc").strip().lower()
+        if fam == "misc":
+            continue
+        slug = str(row.get("cluster_slug") or fam or "unknown")
+        purity = float(row.get("purity_against_seed_tag_group") or 0.0)
+        if purity < min_purity:
+            failing.append(f"{slug}:{purity:.3f}")
+    if failing:
+        return False, f"purity_below_gate(min={min_purity:.2f}):" + ",".join(failing[:12])
+
+    global_purity = float(payload.get("global_weighted_purity") or 0.0)
+    if global_purity < min_purity:
+        return False, f"global_purity_below_gate:{global_purity:.3f}< {min_purity:.3f}"
+
+    misc_rate = float(payload.get("misc_rate") or 0.0)
+    if misc_rate > max_misc_rate:
+        return False, f"misc_rate_above_gate:{misc_rate:.3f}> {max_misc_rate:.3f}"
+
+    if conflicts_path.exists():
+        try:
+            lines = conflicts_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if len(lines) > 1:
+                return False, f"conflicts_detected:{conflicts_path}"
+        except Exception:
+            return False, f"unable_to_read_conflicts:{conflicts_path}"
+
+    return True, "ok"
 
 
 def _estimate_seconds_per_step(runtime: dict[str, Any]) -> float:
@@ -319,6 +389,7 @@ def _run_tick(
     default_steps: int,
     default_lr: float,
     default_trainer_model: str,
+    train_cfg: dict[str, Any],
 ) -> tuple[int, int]:
     processed = 0
     training_enabled = _load_training_enabled(runtime)
@@ -369,6 +440,27 @@ def _run_tick(
                 conn.commit()
             processed += 1
             continue
+
+        if run_mode != "dry_run":
+            gate_ok, gate_reason = _check_recluster_gate(train_cfg, run_payload)
+            if not gate_ok:
+                with connect_db(runtime) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            update public.tgis_training_runs
+                            set status = 'failed',
+                                ended_at = now(),
+                                updated_at = now(),
+                                error_text = %s
+                            where id = %s
+                              and status = 'queued'
+                            """,
+                            (f"recluster_gate_failed:{gate_reason}", run_id),
+                        )
+                    conn.commit()
+                processed += 1
+                continue
 
         # Claim the queued row immediately so UI does not look stuck while we build ZIP/upload/submit.
         with connect_db(runtime) as conn:
@@ -545,6 +637,7 @@ def main() -> None:
             default_steps=default_steps,
             default_lr=default_lr,
             default_trainer_model=default_trainer_model,
+            train_cfg=train_cfg,
         )
         print(f"[TGIS] training queue processed={processed} polled_running={polled}")
 

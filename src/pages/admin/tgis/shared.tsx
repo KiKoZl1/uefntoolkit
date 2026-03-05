@@ -10,6 +10,7 @@ export const TGIS_ADMIN_LINKS = [
   { to: "/admin/tgis/training", labelKey: "adminTgis.training" },
   { to: "/admin/tgis/models", labelKey: "adminTgis.models" },
   { to: "/admin/tgis/inference", labelKey: "adminTgis.inference" },
+  { to: "/admin/tgis/thumb-tools", labelKey: "adminTgis.thumbTools" },
   { to: "/admin/tgis/costs", labelKey: "adminTgis.costs" },
   { to: "/admin/tgis/safety", labelKey: "adminTgis.safety" },
 ] as const;

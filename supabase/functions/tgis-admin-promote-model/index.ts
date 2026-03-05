@@ -75,7 +75,7 @@ async function resolveAuth(req: Request, serviceClient: ReturnType<typeof create
 async function syncManifest(service: ReturnType<typeof createClient>) {
   const { data: rows, error } = await service
     .from("tgis_cluster_registry")
-    .select("cluster_id,cluster_name,trigger_word,categories_json,lora_fal_path,lora_version,is_active,updated_at")
+    .select("cluster_id,cluster_name,cluster_slug,cluster_family,routing_tags,trigger_word,categories_json,lora_fal_path,lora_version,is_active,updated_at")
     .eq("is_active", true)
     .order("cluster_id", { ascending: true });
   if (error) throw new Error(error.message);
@@ -83,6 +83,9 @@ async function syncManifest(service: ReturnType<typeof createClient>) {
   const clusters = (rows || []).map((r: any) => ({
     cluster_id: Number(r.cluster_id),
     cluster_name: String(r.cluster_name || ""),
+    cluster_slug: r.cluster_slug ? String(r.cluster_slug) : null,
+    cluster_family: r.cluster_family ? String(r.cluster_family) : null,
+    routing_tags: Array.isArray(r.routing_tags) ? r.routing_tags.map((x: any) => String(x)) : [],
     trigger_word: String(r.trigger_word || ""),
     categories: Array.isArray(r.categories_json) ? r.categories_json.map((x: any) => String(x)) : [],
     lora_fal_path: r.lora_fal_path || null,

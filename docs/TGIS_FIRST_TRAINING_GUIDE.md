@@ -1,113 +1,84 @@
-# TGIS First Training Guide (fal Trainer v2)
+# TGIS First Nano Generation Guide
 
-This is the shortest safe path to train and publish cluster 01 with the new fal pipeline.
+Legacy training UI still exists in admin, but production generation is now Nano Banana based.
+Use this guide as the first operational checklist after setup/reset.
 
 ## 1) Prepare env
 ```bash
-cd /workspace/epic-insight-engine
-source /workspace/.venv_tgis/bin/activate
-set -a; source ml/tgis/deploy/worker.env; set +a
-python -m ml.tgis.train.preflight_check --config ml/tgis/configs/base.yaml
+cd c:/DEV/Surprise/epic-insight-engine
 ```
 
-Required green checks:
-1. DB connectivity
-2. Supabase keys
-3. `FAL_KEY` or `FAL_API_KEY`
-4. `TGIS_WEBHOOK_URL` and `TGIS_WEBHOOK_SECRET`
+Required env:
+1. `SUPABASE_URL`
+2. `SUPABASE_ANON_KEY`
+3. `SUPABASE_SERVICE_ROLE_KEY`
+4. `SUPABASE_DB_URL`
+5. `FAL_API_KEY`
 
-## 2) Ensure dataset and references exist
+## 2) Apply schema + deploy functions
 ```bash
-python -m ml.tgis.pipelines.thumb_captioner --config ml/tgis/configs/base.yaml
-python -m ml.tgis.pipelines.reference_sync --config ml/tgis/configs/base.yaml --top-n 3
+supabase db push
+supabase functions deploy tgis-generate
+supabase functions deploy tgis-skins-search
+supabase functions deploy tgis-health
+```
+
+## 3) Run hard reset (once, before first Nano validation)
+```bash
+python -m ml.tgis.runtime.reset_tgis_nano_state --config ml/tgis/configs/base.yaml --yes-i-know --clean-local-artifacts
+```
+
+## 4) Regenerate clusters V3
+```bash
+python -m ml.tgis.pipelines.recluster_v3 --config ml/tgis/configs/base.yaml --quality-percentile 0.70 --small-cluster-threshold 50
+python -m ml.tgis.pipelines.sync_cluster_registry_v2 --config ml/tgis/configs/base.yaml --input ml/tgis/artifacts/clusters_v3.csv
+python -m ml.tgis.pipelines.reference_sync --config ml/tgis/configs/base.yaml --top-n 20
 python -m ml.tgis.pipelines.manifest_writer --config ml/tgis/configs/base.yaml
 ```
 
-## 3) Queue training (cluster 01)
-Use admin UI or API:
+Validate:
+1. `cluster_conflicts_v3.csv` does not exist (or empty)
+2. purity report target near/above 0.90 for approved clusters
+
+## 5) Smoke generation
 ```bash
-curl -s -X POST "$SUPABASE_URL/functions/v1/tgis-admin-start-training" \
+curl -s -X POST "$SUPABASE_URL/functions/v1/tgis-generate" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
   -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"clusterId":1,"runMode":"manual","dryRun":false,"targetVersion":"v1.1.0","stepsOverride":2000,"learningRateOverride":0.0005}'
+  -d '{
+    "prompt":"fortnite creative thumbnail, intense combat",
+    "tags":["combat","1v1","zonewars"],
+    "cameraAngle":"eye",
+    "contextBoost":true
+  }'
 ```
 
-## 4) Submit queued run to fal
-```bash
-python -m ml.tgis.runtime.local_worker_supervisor --config ml/tgis/configs/base.yaml --max-training-runs 1 --poll-seconds 20
-```
+Expected:
+1. `success=true`
+2. `image.width=1920`
+3. `image.height=1080`
+4. `normalized_image_url` filled in DB
 
-One-shot debug tick (optional):
-```bash
-python -m ml.tgis.runtime.process_training_queue --config ml/tgis/configs/base.yaml --max-runs 1
-```
+## 6) Frontend smoke
+1. Open `/thumb-generator`
+2. Enter prompt + tags
+3. Optional: search/select up to 2 skins
+4. Optional: upload reference image
+5. Generate
+6. Confirm result metadata (cluster, cost, latency, slots)
 
-On Windows local dev, you can use helper scripts:
-```bash
-powershell -ExecutionPolicy Bypass -File ml/tgis/deploy/start_local_worker.ps1
-powershell -ExecutionPolicy Bypass -File ml/tgis/deploy/ensure_local_worker.ps1
-powershell -ExecutionPolicy Bypass -File ml/tgis/deploy/status_local_worker.ps1
-powershell -ExecutionPolicy Bypass -File ml/tgis/deploy/stop_local_worker.ps1
-```
-
-Expected immediate state:
-1. `status='running'`
-2. `fal_request_id` filled
-3. `dataset_zip_url` filled
-4. `dataset_images_count` filled
-
-## 5) Wait webhook completion
-Check DB:
-```bash
-python - << 'PY'
-import os, psycopg
-conn = psycopg.connect(os.environ["SUPABASE_DB_URL"])
-with conn, conn.cursor() as cur:
-    cur.execute("""
-      select id, cluster_id, status, fal_request_id, target_version, output_lora_url, error_text
-      from public.tgis_training_runs
-      where cluster_id = 1
-      order by id desc
-      limit 5
-    """)
-    for r in cur.fetchall():
-      print(r)
-PY
-```
-
-On success, webhook also upserts candidate:
+## 7) Operational checks
 ```sql
-select cluster_id, version, status, lora_fal_path
-from public.tgis_model_versions
-where cluster_id = 1
-order by updated_at desc
-limit 3;
+select id, status, cluster_slug, normalized_image_url, normalized_width, normalized_height, error_text
+from public.tgis_generation_log
+order by created_at desc
+limit 20;
 ```
 
-## 6) Visual QA + manual promote
-1. Generate samples from admin/front runtime.
-2. If approved, promote candidate in `AdminTgisModels` or call `tgis-admin-promote-model`.
-
-## 7) Validate production path
-1. `tgis_cluster_registry` has active `lora_version` + `lora_fal_path`.
-2. `tgis-generate` returns images at `1920x1080`.
-3. `tgis_generation_log` entries are `success`.
-
-## 8) Automatic reinforcement queue (nightly)
-```bash
-python -m ml.tgis.runtime.queue_score_reinforcement --config ml/tgis/configs/base.yaml
+```sql
+select date, skin_id, count
+from public.tgis_skin_usage_daily
+order by date desc, count desc
+limit 20;
 ```
-
-## 8) If trainer submit fails (payload limits)
-Requeue with smaller cap:
-```json
-{
-  "clusterId": 1,
-  "stepsOverride": 2000,
-  "learningRateOverride": 0.0005,
-  "maxImagesOverride": 3000
-}
-```
-
-The worker already has adaptive fallback (`all -> 4000 -> 3000 -> 2500`) for payload/timeout errors.

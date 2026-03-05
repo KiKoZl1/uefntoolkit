@@ -4,8 +4,7 @@ import AppLayout from "./AppLayout";
 import PublicLayout from "./PublicLayout";
 
 /**
- * Shows AppLayout (with sidebar) when logged in,
- * PublicLayout (with top nav) when not logged in.
+ * Uses the app shell when authenticated and the public shell when anonymous.
  */
 export default function SmartLayout() {
   const { user, loading } = useAuth();

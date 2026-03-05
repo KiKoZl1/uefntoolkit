@@ -21,7 +21,6 @@ export default function AdminTgisModels() {
   const [qaPrompt, setQaPrompt] = useState<string>("Fortnite Creative thumbnail, dynamic action, strong focal subject, high contrast");
   const [qaCategory, setQaCategory] = useState<string>("combat");
   const [qaReferenceImageUrl, setQaReferenceImageUrl] = useState<string>("");
-  const [qaVariants, setQaVariants] = useState<string>("2");
   const [qaLoading, setQaLoading] = useState(false);
   const [qaResult, setQaResult] = useState<any | null>(null);
 
@@ -130,14 +129,18 @@ export default function AdminTgisModels() {
     }
     setQaLoading(true);
     setQaResult(null);
+    const qaTags = qaCategory
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .slice(0, 8);
     const { data, error } = await supabase.functions.invoke("tgis-generate", {
       body: {
         prompt: qaPrompt.trim(),
-        category: qaCategory.trim(),
-        variants: Number(qaVariants || "2"),
+        tags: qaTags.length ? qaTags : ["combat"],
+        cameraAngle: "eye",
+        contextBoost: true,
         referenceImageUrl: qaReferenceImageUrl.trim() || undefined,
-        clusterIdOverride: Number(clusterId),
-        loraVersionOverride: version.trim(),
       },
     });
     if (error || data?.success === false) {
@@ -201,7 +204,7 @@ export default function AdminTgisModels() {
             <Input value={qaCategory} onChange={(e) => setQaCategory(e.target.value)} placeholder="category (ex: combat)" />
             <Input value={qaPrompt} onChange={(e) => setQaPrompt(e.target.value)} placeholder="prompt" />
             <Input value={qaReferenceImageUrl} onChange={(e) => setQaReferenceImageUrl(e.target.value)} placeholder="referenceImageUrl (optional)" />
-            <Input value={qaVariants} onChange={(e) => setQaVariants(e.target.value.replace(/[^0-9]/g, ""))} placeholder="variants" />
+            <Input value={clusterId} readOnly placeholder="cluster id" />
           </div>
           <div className="flex items-center gap-2">
             <Button className="gap-2" onClick={runQa} disabled={qaLoading || !clusterId || !version}>
@@ -210,9 +213,12 @@ export default function AdminTgisModels() {
             </Button>
             <span className="text-xs text-muted-foreground">Selected: cluster {clusterId || "-"} / version {version || "-"}</span>
           </div>
-          {qaResult?.images?.length ? (
+          {(qaResult?.images?.length || qaResult?.image?.url) ? (
             <div className="grid gap-3 md:grid-cols-2">
-              {qaResult.images.map((img: any, idx: number) => (
+              {(qaResult?.images?.length
+                ? qaResult.images
+                : [{ url: qaResult?.image?.url, seed: 0 }]
+              ).map((img: any, idx: number) => (
                 <a key={`qa:${idx}`} href={String(img.url)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-md border border-border/60">
                   <img src={String(img.url)} alt={`qa-${idx}`} className="h-auto w-full object-cover" />
                   <div className="px-2 py-1 text-xs text-muted-foreground">seed: {img.seed}</div>
@@ -292,4 +298,3 @@ export default function AdminTgisModels() {
     </div>
   );
 }
-
