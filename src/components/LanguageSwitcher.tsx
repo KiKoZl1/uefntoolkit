@@ -26,7 +26,7 @@ export function LanguageSwitcher() {
           <span className="text-sm">{current.flag}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="z-[120]">
         {LANGUAGES.map((lang) => (
           <DropdownMenuItem
             key={lang.code}

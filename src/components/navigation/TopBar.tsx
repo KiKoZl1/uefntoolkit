@@ -5,7 +5,6 @@ import {
   LogOut,
   Radar,
   Shield,
-  Sparkles,
   User,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -20,17 +19,12 @@ import {
 import { NavAccessState, TopBarContext } from "@/navigation/types";
 import { Button } from "@/components/ui/button";
 import { MobileTopNav } from "@/components/navigation/MobileTopNav";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -39,14 +33,34 @@ interface TopBarProps {
   context: TopBarContext;
 }
 
-function getUserInitials(email?: string | null) {
-  if (!email) return "U";
-  const [first, second] = email.split("@")[0].split(/[.\-_]/);
+function getUserDisplayName(user: { email?: string | null; user_metadata?: Record<string, unknown> } | null) {
+  const fromMetadata = user?.user_metadata;
+  const candidate =
+    (typeof fromMetadata?.display_name === "string" && fromMetadata.display_name) ||
+    (typeof fromMetadata?.full_name === "string" && fromMetadata.full_name) ||
+    (typeof fromMetadata?.name === "string" && fromMetadata.name);
+
+  if (candidate && candidate.trim().length > 0) return candidate.trim();
+  if (user?.email) return user.email.split("@")[0];
+  return "User";
+}
+
+function getUserAvatarUrl(user: { user_metadata?: Record<string, unknown> } | null) {
+  const fromMetadata = user?.user_metadata;
+  const candidate =
+    (typeof fromMetadata?.avatar_url === "string" && fromMetadata.avatar_url) ||
+    (typeof fromMetadata?.picture === "string" && fromMetadata.picture);
+
+  return candidate || undefined;
+}
+
+function getUserInitials(name: string) {
+  const [first, second] = name.split(/[.\-_\s]/);
   return `${(first?.[0] || "U").toUpperCase()}${(second?.[0] || "").toUpperCase()}`;
 }
 
 export function TopBar({ context }: TopBarProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const location = useLocation();
   const { user, isAdmin, isEditor, signOut } = useAuth();
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -67,12 +81,8 @@ export function TopBar({ context }: TopBarProps) {
   const primaryItems = useMemo(() => getTopBarPrimaryItems(context, access), [access, context]);
   const toolsShortcuts = useMemo(() => getToolsShortcutItems(context, access), [access, context]);
   const mobileSections = useMemo(() => getVisibleNavSections(context, access), [access, context]);
-
-  const contextLabelKey = useMemo(() => {
-    if (context === "admin") return "nav.contextAdmin";
-    if (context === "app") return "nav.contextApp";
-    return "nav.contextPublic";
-  }, [context]);
+  const displayName = useMemo(() => getUserDisplayName(user), [user]);
+  const avatarUrl = useMemo(() => getUserAvatarUrl(user), [user]);
 
   const clearCloseTimeout = useCallback(() => {
     if (closeTimeoutRef.current !== null) {
@@ -143,7 +153,7 @@ export function TopBar({ context }: TopBarProps) {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/84 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/70">
+    <header className="sticky top-0 z-[90] border-b border-border/60 bg-background/84 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6">
         <Link to="/" className="group flex items-center gap-2.5 shrink-0">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_0_0_1px_rgba(255,127,0,0.2)]">
@@ -167,7 +177,7 @@ export function TopBar({ context }: TopBarProps) {
               <div
                 key={item.id}
                 ref={toolsContainerRef}
-                className="relative"
+                className="relative z-[91]"
                 onMouseEnter={() => {
                   clearCloseTimeout();
                   setToolsOpen(true);
@@ -215,7 +225,7 @@ export function TopBar({ context }: TopBarProps) {
                 <div
                   id={toolsMenuId}
                   className={cn(
-                    "absolute left-1/2 top-full mt-2 w-[320px] -translate-x-1/2 rounded-xl border border-border/70 bg-card/96 p-2 shadow-2xl backdrop-blur-sm",
+                    "absolute left-1/2 top-full z-[99] mt-2 w-[320px] -translate-x-1/2 rounded-xl border border-border/80 bg-background p-2 shadow-[0_20px_60px_rgba(0,0,0,0.55)]",
                     "nav-motion-base transition-[opacity,transform]",
                     toolsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
                   )}
@@ -243,20 +253,17 @@ export function TopBar({ context }: TopBarProps) {
         </nav>
 
         <div className="ml-auto hidden items-center gap-2 lg:flex">
-          <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-primary">
-            {t(contextLabelKey)}
-          </span>
-
           {access.isAuthenticated ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-10 gap-2 rounded-full border border-border/60 pl-2.5 pr-3" aria-label={t("nav.profileMenu")}>
                   <Avatar className="h-6 w-6 border border-border/70">
+                    {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
                     <AvatarFallback className="bg-muted text-[11px] font-semibold text-foreground">
-                      {getUserInitials(user?.email)}
+                      {getUserInitials(displayName)}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="max-w-36 truncate text-xs text-muted-foreground">{user?.email}</span>
+                  <span className="max-w-36 truncate text-xs text-muted-foreground">{displayName}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64">
@@ -274,18 +281,6 @@ export function TopBar({ context }: TopBarProps) {
                     </Link>
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <Sparkles className="h-4 w-4" />
-                    {t("nav.language")}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuRadioGroup value={i18n.resolvedLanguage} onValueChange={(value) => void i18n.changeLanguage(value)}>
-                      <DropdownMenuRadioItem value="pt-BR">Português (Brasil)</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="en">English</DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
@@ -301,7 +296,6 @@ export function TopBar({ context }: TopBarProps) {
             </DropdownMenu>
           ) : (
             <>
-              <LanguageSwitcher />
               <Button variant="ghost" size="sm" asChild>
                 <Link to="/auth">{t("nav.signIn")}</Link>
               </Button>
@@ -310,6 +304,7 @@ export function TopBar({ context }: TopBarProps) {
               </Button>
             </>
           )}
+          <LanguageSwitcher />
         </div>
 
         <div className="ml-auto lg:hidden">
