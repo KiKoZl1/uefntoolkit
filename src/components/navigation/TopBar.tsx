@@ -143,7 +143,7 @@ export function TopBar({ context }: TopBarProps) {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/84 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/70">
+    <header className="sticky top-0 z-[90] border-b border-border/60 bg-background/84 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6">
         <Link to="/" className="group flex items-center gap-2.5 shrink-0">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_0_0_1px_rgba(255,127,0,0.2)]">
@@ -167,7 +167,7 @@ export function TopBar({ context }: TopBarProps) {
               <div
                 key={item.id}
                 ref={toolsContainerRef}
-                className="relative"
+                className="relative z-[91]"
                 onMouseEnter={() => {
                   clearCloseTimeout();
                   setToolsOpen(true);
@@ -215,7 +215,7 @@ export function TopBar({ context }: TopBarProps) {
                 <div
                   id={toolsMenuId}
                   className={cn(
-                    "absolute left-1/2 top-full mt-2 w-[320px] -translate-x-1/2 rounded-xl border border-border/70 bg-card/96 p-2 shadow-2xl backdrop-blur-sm",
+                    "absolute left-1/2 top-full z-[99] mt-2 w-[320px] -translate-x-1/2 rounded-xl border border-border/70 bg-card/96 p-2 shadow-2xl backdrop-blur-sm",
                     "nav-motion-base transition-[opacity,transform]",
                     toolsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
                   )}
