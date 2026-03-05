@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -17,6 +17,8 @@ export type RecentAssetItem = {
   image_url: string;
   title?: string;
   canDelete?: boolean;
+  kind?: "asset" | "action";
+  actionLabel?: string;
 };
 
 type RecentAssetsPickerProps = {
@@ -41,7 +43,15 @@ export default function RecentAssetsPicker({
   const [pendingDelete, setPendingDelete] = useState<RecentAssetItem | null>(null);
   const [deletingId, setDeletingId] = useState<string>("");
 
-  const safeItems = useMemo(() => items.filter((x) => String(x.id || "").trim() && String(x.image_url || "").trim()), [items]);
+  const safeItems = useMemo(
+    () =>
+      items.filter((x) => {
+        if (!String(x.id || "").trim()) return false;
+        if ((x.kind || "asset") === "action") return true;
+        return Boolean(String(x.image_url || "").trim());
+      }),
+    [items],
+  );
 
   async function confirmDelete() {
     if (!pendingDelete || !onDelete) return;
@@ -62,6 +72,23 @@ export default function RecentAssetsPicker({
         ) : null}
 
         {safeItems.map((item) => {
+          if ((item.kind || "asset") === "action") {
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onSelect(item)}
+                className="group relative flex aspect-video flex-col items-center justify-center rounded border border-dashed border-white/20 bg-card/30 transition hover:border-primary/70 hover:bg-primary/5"
+                title={item.title || item.actionLabel || "Ação"}
+              >
+                <span className="mb-1 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/30 text-white/90 transition group-hover:border-primary group-hover:text-primary">
+                  <Plus className="h-4 w-4" />
+                </span>
+                <span className="px-2 text-center text-[11px] text-muted-foreground">{item.actionLabel || "Adicionar"}</span>
+              </button>
+            );
+          }
+
           const selected = selectedId && selectedId === item.id;
           const deleting = deletingId === item.id;
           return (
@@ -122,4 +149,3 @@ export default function RecentAssetsPicker({
     </>
   );
 }
-

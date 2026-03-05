@@ -140,8 +140,23 @@ export function ThumbToolsProvider({ children }: { children: React.ReactNode }) 
   const deleteAsset = useCallback(async (assetId: string) => {
     const id = String(assetId || "").trim();
     if (!id) throw new Error("asset_id_required");
-    const target = historyRef.current.find((item) => item.id === id) || null;
+    const prevHistory = [...historyRef.current];
+    const prevCurrent = currentAssetRef.current;
+    const target = prevHistory.find((item) => item.id === id) || null;
     const imageUrl = String(target?.image_url || "").trim();
+
+    const nextHistory = imageUrl
+      ? prevHistory.filter((item) => String(item.image_url || "").trim() !== imageUrl)
+      : prevHistory.filter((item) => item.id !== id);
+
+    // Optimistic UI: remove immediately from recent assets.
+    setHistory(nextHistory);
+    const active = prevCurrent;
+    if (active && (active.id === id || (imageUrl && String(active.image_url || "").trim() === imageUrl))) {
+      setCurrentAsset(nextHistory[0] ?? null);
+    }
+
+    try {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) throw new Error(sessionError.message);
     const token = sessionData.session?.access_token;
@@ -156,14 +171,11 @@ export function ThumbToolsProvider({ children }: { children: React.ReactNode }) 
     if (error || data?.success === false) {
       throw new Error(String(error?.message || data?.error || "delete_asset_failed"));
     }
-
-    const nextHistory = imageUrl
-      ? historyRef.current.filter((item) => String(item.image_url || "").trim() !== imageUrl)
-      : historyRef.current.filter((item) => item.id !== id);
-    setHistory(nextHistory);
-    const active = currentAssetRef.current;
-    if (active && (active.id === id || (imageUrl && String(active.image_url || "").trim() === imageUrl))) {
-      setCurrentAsset(nextHistory[0] ?? null);
+    } catch (e) {
+      // Rollback optimistic update on failure.
+      setHistory(prevHistory);
+      setCurrentAsset(prevCurrent ?? null);
+      throw e;
     }
   }, [setCurrentAsset]);
 

@@ -99,6 +99,14 @@ export default function EditStudioPage() {
 
   const sourceCandidates = useMemo(() => history.slice(0, 12), [history]);
   const unifiedSourceItems = useMemo<RecentAssetItem[]>(() => {
+    const actionItem: RecentAssetItem = {
+      id: "action:upload-source",
+      image_url: "",
+      title: "Upload source",
+      kind: "action",
+      actionLabel: "Upload source",
+      canDelete: false,
+    };
     const localItems = localSourceUploads.map((item) => ({
       id: `local:${item.id}`,
       image_url: item.image_url,
@@ -111,7 +119,7 @@ export default function EditStudioPage() {
       title: item.id,
       canDelete: true,
     }));
-    return [...localItems, ...historyItems];
+    return [actionItem, ...localItems, ...historyItems];
   }, [localSourceUploads, sourceCandidates]);
 
   const selectedSourceItemId = useMemo(() => {
@@ -408,20 +416,18 @@ export default function EditStudioPage() {
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label>Source (asset recente)</Label>
-                  <>
-                    <input ref={sourceUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handleSourceUpload} className="hidden" />
-                    <Button type="button" variant="outline" size="sm" className="h-8 gap-1" disabled={uploadingSource} onClick={() => sourceUploadInputRef.current?.click()}>
-                      {uploadingSource ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
-                      Upload source
-                    </Button>
-                  </>
+                  <Label>Galeria</Label>
+                  <input ref={sourceUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handleSourceUpload} className="hidden" />
                 </div>
 
                 <RecentAssetsPicker
                   items={unifiedSourceItems}
                   selectedId={selectedSourceItemId}
                   onSelect={(item) => {
+                    if (item.id === "action:upload-source") {
+                      sourceUploadInputRef.current?.click();
+                      return;
+                    }
                     if (item.id.startsWith("local:")) {
                       const localId = item.id.replace("local:", "");
                       const local = localSourceUploads.find((x) => x.id === localId);
@@ -433,6 +439,7 @@ export default function EditStudioPage() {
                     if (asset) selectHistorySource(asset);
                   }}
                   onDelete={async (item) => {
+                    if (item.id === "action:upload-source") return;
                     if (item.id.startsWith("local:")) {
                       const localId = item.id.replace("local:", "");
                       const local = localSourceUploads.find((x) => x.id === localId);

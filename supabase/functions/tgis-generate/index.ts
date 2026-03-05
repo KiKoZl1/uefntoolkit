@@ -890,7 +890,7 @@ async function resolveSkinRefs(ids: string[], maxCount: number): Promise<SkinRef
 }
 
 function safeVisionText(value: unknown): string {
-  const text = normalizeText(value).slice(0, 520);
+  const text = sanitizeVisionAppearanceText(normalizeText(value)).slice(0, 520);
   if (!text) return "";
 
   const low = text.toLowerCase();
@@ -911,14 +911,82 @@ function safeVisionText(value: unknown): string {
   return text;
 }
 
+function sanitizeVisionAppearanceText(input: string): string {
+  let text = normalizeText(input);
+  if (!text) return "";
+
+  text = text
+    .replace(/\b(with|showing|featuring)\s+an?\s+[^,.]{0,80}\s+expression\b/gi, "")
+    .replace(/\b(an?\s+)?[^,.]{0,80}\s+expression\b/gi, "");
+
+  const blockedTerms = [
+    " expression",
+    " facial ",
+    " emotion",
+    " emotional",
+    " smile",
+    " smiling",
+    " grin",
+    " grinning",
+    " laugh",
+    " laughing",
+    " cry",
+    " crying",
+    " angry",
+    " happy",
+    " sad ",
+    " playful",
+    " scared",
+    " frightened",
+    " terrified",
+    " shocked",
+    " surprised",
+    " pose",
+    " posed",
+    " posing",
+    " crossing arms",
+    " crossed arms",
+    " arms crossed",
+    " arms folded",
+    " waving",
+    " pointing",
+    " holding",
+    " running",
+    " jumping",
+    " crouching",
+    " kneeling",
+    " looking back",
+    " looking at",
+    " staring",
+    " gaze",
+    " gesturing",
+  ];
+
+  const pieces = text
+    .split(/[.;,]/g)
+    .map((part) => normalizeText(part))
+    .filter(Boolean)
+    .filter((part) => {
+      const low = ` ${part.toLowerCase()} `;
+      return !blockedTerms.some((term) => low.includes(term));
+    });
+
+  const cleaned = normalizeText(pieces.join(", "))
+    .replace(/\s+,/g, ",")
+    .replace(/,+/g, ",")
+    .replace(/^,+|,+$/g, "");
+
+  return cleaned;
+}
+
 async function describeSkinWithVision(skin: SkinRef, model: string): Promise<string> {
   const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") || "";
   if (!openRouterApiKey) throw new Error("missing_openrouter_key");
 
   const systemPrompt =
     "You describe Fortnite skins for image-generation conditioning. " +
-    "Output one concise sentence with only visual traits: outfit, colors, silhouette, accessories, hair/helmet. " +
-    "Do not mention text overlays, logos, UI, game mode, or composition.";
+    "Output one concise sentence with only visual traits: outfit, colors, silhouette, accessories, hair/helmet, and materials. " +
+    "Do not mention pose, action, facial expression, emotion, camera angle, text overlays, logos, UI, game mode, or composition.";
   const userPrompt = `Skin name: ${skin.name}. Describe this skin visual identity for prompt grounding.`;
 
   const resp = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {

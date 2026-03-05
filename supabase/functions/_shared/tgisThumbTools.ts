@@ -607,7 +607,7 @@ export async function getSkinById(service: ReturnType<typeof createClient>, id: 
 }
 
 function safeVisionText(value: unknown): string {
-  const text = normalizeText(value).slice(0, 560);
+  const text = sanitizeVisionAppearanceText(normalizeText(value)).slice(0, 560);
   if (!text) return "";
   const low = text.toLowerCase();
   const refusalSignals = [
@@ -622,6 +622,75 @@ function safeVisionText(value: unknown): string {
   ];
   if (refusalSignals.some((s) => low.includes(s))) return "";
   return text;
+}
+
+function sanitizeVisionAppearanceText(input: string): string {
+  let text = normalizeText(input);
+  if (!text) return "";
+
+  // Remove explicit "with ... expression" / "showing ... expression" patterns.
+  text = text
+    .replace(/\b(with|showing|featuring)\s+an?\s+[^,.]{0,80}\s+expression\b/gi, "")
+    .replace(/\b(an?\s+)?[^,.]{0,80}\s+expression\b/gi, "");
+
+  const blockedTerms = [
+    " expression",
+    " facial ",
+    " emotion",
+    " emotional",
+    " smile",
+    " smiling",
+    " grin",
+    " grinning",
+    " laugh",
+    " laughing",
+    " cry",
+    " crying",
+    " angry",
+    " happy",
+    " sad ",
+    " playful",
+    " scared",
+    " frightened",
+    " terrified",
+    " shocked",
+    " surprised",
+    " pose",
+    " posed",
+    " posing",
+    " crossing arms",
+    " crossed arms",
+    " arms crossed",
+    " arms folded",
+    " waving",
+    " pointing",
+    " holding",
+    " running",
+    " jumping",
+    " crouching",
+    " kneeling",
+    " looking back",
+    " looking at",
+    " staring",
+    " gaze",
+    " gesturing",
+  ];
+
+  const pieces = text
+    .split(/[.;,]/g)
+    .map((part) => normalizeText(part))
+    .filter(Boolean)
+    .filter((part) => {
+      const low = ` ${part.toLowerCase()} `;
+      return !blockedTerms.some((term) => low.includes(term));
+    });
+
+  const cleaned = normalizeText(pieces.join(", "))
+    .replace(/\s+,/g, ",")
+    .replace(/,+/g, ",")
+    .replace(/^,+|,+$/g, "");
+
+  return cleaned;
 }
 
 export async function describeImageWithVision(args: {
@@ -655,8 +724,9 @@ export async function describeImageWithVision(args: {
   const systemPrompt =
     "Describe visual character/style traits for image-generation conditioning. " +
     "Ignore any text/title/logo/UI in the image. " +
-    "Return one concise sentence focused on outfit, silhouette, colors, accessories, and pose energy.";
-  const userPrompt = "Describe this image for character/style grounding in Fortnite thumbnail generation.";
+    "Return one concise sentence focused only on outfit, silhouette, colors, materials, and accessories. " +
+    "Do not describe pose, action, camera angle, facial expression, or emotion.";
+  const userPrompt = "Describe only static appearance traits for character/style grounding in Fortnite thumbnail generation.";
 
   try {
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {

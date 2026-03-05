@@ -34,6 +34,11 @@ type CameraValues = {
   zoom: number;
 };
 
+function normalizeHorizontalAngleForFal(azimuth: number): number {
+  const normalized = ((azimuth % 360) + 360) % 360;
+  return Number(normalized.toFixed(2));
+}
+
 const PRESETS: Record<Exclude<CameraPreset, "custom">, CameraValues> = {
   heroic: { azimuth: 22, elevation: -12, distance: 0.85 },
   confronto: { azimuth: 0, elevation: -6, distance: 0.95 },
@@ -56,12 +61,15 @@ function resolveCameraValues(body: Record<string, unknown>, preset: CameraPreset
 }
 
 function buildCameraPrompt(values: CameraValues, preset: CameraPreset) {
+  const apiHorizontal = normalizeHorizontalAngleForFal(values.azimuth);
+  const sideHint = values.azimuth < 0 ? "left-side orbit bias" : values.azimuth > 0 ? "right-side orbit bias" : "front-facing orbit";
   return normalizeText([
     "Fortnite thumbnail camera-control transform.",
     "Apply a clear camera viewpoint change to the current image.",
     "Keep character identities and scene elements, but reframe from the new camera position.",
     "Do not keep the original framing if it conflicts with the requested camera movement.",
-    `Horizontal rotation target: ${values.azimuth.toFixed(1)} degrees.`,
+    `Horizontal rotation target (user axis): ${values.azimuth.toFixed(1)} degrees.`,
+    `Horizontal rotation target (API axis 0..360): ${apiHorizontal.toFixed(1)} degrees (${sideHint}).`,
     `Vertical tilt target: ${values.elevation.toFixed(1)} degrees.`,
     `Distance target: ${values.distance.toFixed(2)} (0.5 close, 1.5 far).`,
     `Zoom target: ${values.zoom.toFixed(2)} (0 wide, 10 close).`,
@@ -89,6 +97,7 @@ serve(async (req) => {
       ? presetRaw
       : "custom") as CameraPreset;
     const values = resolveCameraValues(body, preset);
+    const horizontalAngleApi = normalizeHorizontalAngleForFal(values.azimuth);
 
     let parentAssetId: string | null = null;
     let sourceImageUrl = sourceImageUrlRaw;
@@ -113,6 +122,7 @@ serve(async (req) => {
         source_image_url: sourceImageUrl,
         preset,
         azimuth: values.azimuth,
+        horizontal_angle_api: horizontalAngleApi,
         elevation: values.elevation,
         distance: values.distance,
         zoom: values.zoom,
@@ -125,7 +135,7 @@ serve(async (req) => {
       model: cfg.camera_model,
       input: {
         image_urls: [sourceImageUrl],
-        horizontal_angle: values.azimuth,
+        horizontal_angle: horizontalAngleApi,
         vertical_angle: values.elevation,
         distance: Number(values.distance.toFixed(2)),
         zoom: values.zoom,
@@ -152,6 +162,7 @@ serve(async (req) => {
       metadata_json: {
         preset,
         azimuth: values.azimuth,
+        horizontal_angle_api: horizontalAngleApi,
         elevation: values.elevation,
         distance: values.distance,
         zoom: values.zoom,
@@ -181,6 +192,7 @@ serve(async (req) => {
         provider_image_url: providerImageUrl,
         preset,
         azimuth: values.azimuth,
+        horizontal_angle_api: horizontalAngleApi,
         elevation: values.elevation,
         distance: values.distance,
         zoom: values.zoom,

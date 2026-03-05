@@ -108,3 +108,6 @@ verify_jwt = false
 [functions.tgis-layer-download]
 verify_jwt = false
 
+[functions.tgis-delete-asset]
+verify_jwt = false
+

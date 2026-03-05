@@ -151,7 +151,7 @@ export default function LayerDecompositionPage() {
             <CardHeader><CardTitle className="text-base">Configuracao</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Source (asset recente)</Label>
+                <Label>Galeria</Label>
                 <RecentAssetsPicker
                   items={sourceCandidates.map((asset) => ({
                     id: asset.id,
