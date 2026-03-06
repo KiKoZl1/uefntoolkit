@@ -16,6 +16,7 @@
     "linkCopied": "Link copiado!",
     "or": "ou",
     "tools": "Ferramentas",
+    "openTool": "Abrir ferramenta",
     "signOut": "Sair",
     "admin": "Admin",
     "backToApp": "Voltar ao App",
@@ -77,6 +78,7 @@
     "sectionPlatform": "Plataforma",
     "sectionWorkspace": "Ferramentas",
     "sectionTools": "Ferramentas",
+    "sectionWidgetKit": "WidgetKit",
     "sectionAdmin": "Admin",
     "toolsGenerate": "Generate",
     "toolsGenerateDesc": "Crie novos conceitos de thumbnail.",
@@ -86,6 +88,10 @@
     "toolsCameraControlDesc": "Controle enquadramento e perspectiva.",
     "toolsLayerDecomposition": "Layer Decomposition",
     "toolsLayerDecompositionDesc": "Inspecione e ajuste camadas da cena.",
+    "widgetKitPsdUmg": "PSD -> UMG",
+    "widgetKitPsdUmgDesc": "Converta PSD em estrutura UMG para o UEFN.",
+    "widgetKitUmgVerse": "UMG -> VerseFields",
+    "widgetKitUmgVerseDesc": "Extraia campos Expose to Verse e gere scaffolding.",
     "signIn": "Entrar",
     "getStarted": "Começar Grátis"
   },
@@ -152,7 +158,8 @@
     "notFound": "Report não encontrado",
     "viewAll": "Ver todos",
     "allReports": "Todos os reports",
-    "editorNote": "Nota Editorial"
+    "editorNote": "Nota Editorial",
+    "latest": "Mais recente"
   },
   "reportSections": {
     "section": "Seção",
@@ -540,7 +547,8 @@
     "attempts14d": "Tentativas (14d)",
     "entries48h": "Entradas (48h)",
     "exits48h": "Saidas (48h)",
-    "noDppiData": "DPPI ainda sem dados para esta ilha."
+    "noDppiData": "DPPI ainda sem dados para esta ilha.",
+    "copyLink": "Copiar link da pagina"
   },
   "thumbGenerator": {
     "title": "Thumb Generator",
@@ -571,6 +579,9 @@
       "missingCategory": "Selecione uma categoria.",
       "generationFailed": "Falha ao gerar thumbs."
     }
+  },
+  "thumbTools": {
+    "subtitle": "Conjunto completo de geração e pós-produção para thumbnails."
   },
   "widgetKit": {
     "subtitle": "Converta layouts PSD em UMG e widgets UMG em scaffolding Verse.",
@@ -660,7 +671,16 @@
     "createdAt": "Criado em",
     "projectCreated": "Projeto criado!",
     "csvAnalytics": "CSV Analytics",
-    "discoverTrends": "Discover Trends"
+    "discoverTrends": "Discover Trends",
+    "loadingProjects": "Carregando seus projetos...",
+    "searchProjects": "Buscar projetos...",
+    "sortBy": "Ordenar",
+    "sortRecent": "Mais recentes",
+    "sortName": "Nome A-Z",
+    "sortReports": "Mais reports",
+    "noProjectsMatch": "Nenhum projeto encontrado",
+    "noProjectsMatchDesc": "Tente outro termo de busca.",
+    "lastUpload": "Ultimo upload"
   },
   "project": {
     "backToProjects": "Voltar aos projetos",

@@ -24,16 +24,16 @@ import {
   YAxis,
   Line,
 } from "recharts";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useIslandPageQuery } from "@/hooks/queries/publicQueries";
+import { PageState } from "@/components/ui/page-state";
 import type { IslandChartRange, IslandPageResponse, IslandSeriesBundle, IslandSeriesPoint } from "@/types/discover-island-page";
 
-const DISCOVERY_SURFACE = "CreativeDiscoverySurface_Frontend";
 const ISLAND_CODE_RE = /^\d{4}-\d{4}-\d{4}$/;
 const CHART_RANGES: IslandChartRange[] = ["1D", "1W", "1M", "ALL"];
 const CHART_CURRENT = "hsl(214,90%,58%)";
@@ -196,37 +196,23 @@ export default function IslandPage() {
   const [totalPlaytimeRange, setTotalPlaytimeRange] = useState<IslandChartRange>("1D");
   const [sessionsRange, setSessionsRange] = useState<IslandChartRange>("1D");
   const [data, setData] = useState<IslandPageResponse | null>(null);
-  const [loading, setLoading] = useState(false);
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [overlayProgress, setOverlayProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ src: string; label: string } | null>(null);
 
   const isValidCode = ISLAND_CODE_RE.test(code);
-
-  const runFetch = useCallback(async () => {
-    if (!isValidCode) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const { data: payload, error: fnError } = await supabase.functions.invoke("discover-island-page", {
-        body: { islandCode: code, region: "NAE", surfaceName: DISCOVERY_SURFACE },
-      });
-      if (fnError) throw fnError;
-      if (payload?.error) throw new Error(String(payload.error));
-      setData(payload as IslandPageResponse);
-    } catch (e: any) {
-      const message = e?.message || t("islandPage.loadFailed");
-      setError(message);
-      toast({ title: t("common.error"), description: message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [code, isValidCode, t, toast]);
+  const islandQuery = useIslandPageQuery(code, isValidCode);
+  const loading = islandQuery.isLoading;
+  const error = islandQuery.error instanceof Error ? islandQuery.error.message : null;
 
   useEffect(() => {
-    void runFetch();
-  }, [runFetch]);
+    setData((islandQuery.data as IslandPageResponse | undefined) ?? null);
+  }, [islandQuery.data]);
+
+  useEffect(() => {
+    if (!error) return;
+    toast({ title: t("common.error"), description: error || t("islandPage.loadFailed"), variant: "destructive" });
+  }, [error, t, toast]);
 
   useEffect(() => {
     let intervalId: number | undefined;
@@ -377,9 +363,29 @@ export default function IslandPage() {
   if (!isValidCode) {
     return (
       <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
-        <SurfaceCard>
-          <CardContent className="pt-6 text-zinc-400">{t("islandPage.invalidCode")}</CardContent>
-        </SurfaceCard>
+        <PageState variant="section" tone="error" title={t("common.error")} description={t("islandPage.invalidCode")} />
+      </div>
+    );
+  }
+
+  if (loading && !data) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
+        <PageState variant="section" title={t("common.loading")} description={t("islandPage.loading")} />
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
+        <PageState
+          variant="section"
+          tone="error"
+          title={t("common.error")}
+          description={error}
+          action={{ label: t("common.reload"), onClick: () => void islandQuery.refetch() }}
+        />
       </div>
     );
   }
@@ -432,7 +438,12 @@ export default function IslandPage() {
                       <ExternalLink className="mr-2 h-4 w-4" />
                       {t("islandPage.openInFortnite")}
                     </Button>
-                    <Button variant="outline" onClick={sharePage} className="h-12 w-12 border-border/60 bg-background/35 p-0">
+                    <Button
+                      variant="outline"
+                      onClick={sharePage}
+                      aria-label={t("islandPage.copyLink")}
+                      className="h-12 w-12 border-border/60 bg-background/35 p-0"
+                    >
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>

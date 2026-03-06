@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
@@ -20,7 +20,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Eye, TrendingUp, AlertTriangle, Loader2, Clock3, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { dataSelect } from "@/lib/discoverDataApi";
+import { useDiscoverLiveQuery } from "@/hooks/queries/publicQueries";
+import { PageState } from "@/components/ui/page-state";
 
 type PremiumRow = {
   as_of: string;
@@ -270,134 +271,40 @@ export default function DiscoverLive() {
   const navigate = useNavigate();
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [premium, setPremium] = useState<PremiumRow[]>([]);
-  const [emerging, setEmerging] = useState<EmergingRow[]>([]);
-  const [pollution, setPollution] = useState<PollutionRow[]>([]);
-  const initialLoadDoneRef = useRef(false);
-  const initialRailsDoneRef = useRef(false);
-  const preservedScrollYRef = useRef<number | null>(null);
+  const [region, setRegion] = useState<string>("NAE");
+  const discoverQuery = useDiscoverLiveQuery(region);
+  const loading = discoverQuery.isLoading;
+  const refreshing = discoverQuery.isFetching && !discoverQuery.isLoading;
+  const railsLoading = loading;
+  const railsError = discoverQuery.isError ? (discoverQuery.error as Error)?.message || t("common.error") : null;
+
+  const premium = useMemo(
+    () => ((discoverQuery.data?.premium || []) as PremiumRow[]),
+    [discoverQuery.data?.premium],
+  );
+  const emerging = useMemo(
+    () => ((discoverQuery.data?.emerging || []) as EmergingRow[]),
+    [discoverQuery.data?.emerging],
+  );
+  const pollution = useMemo(
+    () => ((discoverQuery.data?.pollution || []) as PollutionRow[]),
+    [discoverQuery.data?.pollution],
+  );
+  const rails = useMemo(
+    () => sortByFixedOrder((discoverQuery.data?.rails || []) as Rail[]),
+    [discoverQuery.data?.rails],
+  );
+
   const [initialOverlayVisible, setInitialOverlayVisible] = useState(true);
   const [initialOverlayProgress, setInitialOverlayProgress] = useState(0);
 
-  const [rails, setRails] = useState<Rail[]>([]);
-  const [railsLoading, setRailsLoading] = useState(false);
-  const [railsError, setRailsError] = useState<string | null>(null);
-
-  const [region, setRegion] = useState<string>("NAE");
   const [jumpPanel, setJumpPanel] = useState<string>("");
 
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [timelineData, setTimelineData] = useState<PanelTimelinePayload | null>(null);
-
-  const preserveScroll = useCallback(() => {
-    if (typeof window === "undefined") return;
-    preservedScrollYRef.current = window.scrollY;
-  }, []);
-
-  const restoreScroll = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const y = preservedScrollYRef.current;
-    if (y == null) return;
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: y, left: 0, behavior: "auto" });
-      preservedScrollYRef.current = null;
-    });
-  }, []);
-
-  const load = useCallback(async (background = false) => {
-    const firstLoad = !initialLoadDoneRef.current;
-    if (firstLoad && !background) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-      preserveScroll();
-    }
-    try {
-      const [p, e, pol] = await Promise.all([
-        dataSelect<PremiumRow[]>({
-          table: "discovery_public_premium_now",
-          columns: "*",
-          limit: 5000,
-        }),
-        dataSelect<EmergingRow[]>({
-          table: "discovery_public_emerging_now",
-          columns: "*",
-          limit: 5000,
-        }),
-        dataSelect<PollutionRow[]>({
-          table: "discovery_public_pollution_creators_now",
-          columns: "*",
-          limit: 2000,
-        }),
-      ]);
-
-      if (p.data) setPremium(p.data as PremiumRow[]);
-      if (e.data) setEmerging(e.data as EmergingRow[]);
-      if (pol.data) setPollution(pol.data as PollutionRow[]);
-    } finally {
-      if (firstLoad) {
-        initialLoadDoneRef.current = true;
-        setLoading(false);
-      } else {
-        setRefreshing(false);
-        restoreScroll();
-      }
-    }
-  }, [preserveScroll, restoreScroll]);
-
-  const loadRails = useCallback(async (background = false) => {
-    const firstLoad = !initialRailsDoneRef.current;
-    setRailsLoading(true);
-    setRailsError(null);
-    if (background) preserveScroll();
-    try {
-      const { data, error } = await supabase.functions.invoke("discover-rails-resolver", {
-        body: {
-          region,
-          surfaceName: DISCOVERY_SURFACE,
-          maxPanels: 40,
-          maxItemsPerPanel: 60,
-          maxChildrenPerCollection: 24,
-          includeChildren: true,
-        },
-      });
-
-      if (error) {
-        setRailsError(error.message || "Failed to load rails");
-        return;
-      }
-
-      const railsPayload = data as { rails?: Rail[] } | null;
-      const rows = Array.isArray(railsPayload?.rails) ? railsPayload.rails : [];
-      setRails(sortByFixedOrder(rows));
-    } finally {
-      if (firstLoad) initialRailsDoneRef.current = true;
-      setRailsLoading(false);
-      if (background) restoreScroll();
-    }
-  }, [region, preserveScroll, restoreScroll]);
-
-  useEffect(() => {
-    void load(false);
-    const timer = setInterval(() => {
-      void load(true);
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  useEffect(() => {
-    void loadRails(false);
-    const timer = setInterval(() => {
-      void loadRails(true);
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [loadRails]);
-
-  const initialBusy = !initialLoadDoneRef.current || !initialRailsDoneRef.current;
+  const initialBusy = loading;
 
   useEffect(() => {
     let intervalId: number | undefined;
@@ -632,6 +539,28 @@ export default function DiscoverLive() {
     navigate(`/island?code=${encodeURIComponent(islandCode)}`);
   }, [navigate]);
 
+  if (loading && !discoverQuery.data) {
+    return (
+      <div className="mx-auto max-w-[1380px] px-6 py-10">
+        <PageState variant="section" title={t("common.loading")} description={t("discover.initialLoading")} />
+      </div>
+    );
+  }
+
+  if (discoverQuery.isError && !discoverQuery.data) {
+    return (
+      <div className="mx-auto max-w-[1380px] px-6 py-10">
+        <PageState
+          variant="section"
+          tone="error"
+          title={t("common.error")}
+          description={t("discover.railsFallback")}
+          action={{ label: t("common.reload"), onClick: () => void discoverQuery.refetch() }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="px-6 py-10 max-w-[1380px] mx-auto space-y-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -726,19 +655,17 @@ export default function DiscoverLive() {
 
       <div className="space-y-6">
         {railsError && (
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-sm text-muted-foreground">{t("discover.railsFallback")}</p>
-            </CardContent>
-          </Card>
+          <PageState
+            variant="compact"
+            tone="error"
+            title={t("common.error")}
+            description={t("discover.railsFallback")}
+            action={{ label: t("common.reload"), onClick: () => void discoverQuery.refetch() }}
+          />
         )}
 
         {mainRails.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">{t("discover.noDataFilter")}</p>
-            </CardContent>
-          </Card>
+          <PageState variant="section" title={t("discover.noDataFilter")} description={t("discover.highlightsSubtitle")} />
         ) : (
           mainRails.map((rail) => {
             const isHomebar = rail.panelKey === "homebar";

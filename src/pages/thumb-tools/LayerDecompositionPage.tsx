@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Layers3, Loader2 } from "lucide-react";
+import { Download, Layers3, Loader2, ArrowLeft } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useThumbTools } from "@/features/tgis-thumb-tools/ThumbToolsProvider";
@@ -141,6 +142,12 @@ export default function LayerDecompositionPage() {
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5 px-6 py-6">
       <header className="space-y-1">
+        <Button variant="ghost" asChild className="-ml-2 h-8 w-fit px-2 text-muted-foreground hover:text-foreground">
+          <Link to="/app/thumb-tools">
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Thumb Tools
+          </Link>
+        </Button>
         <h1 className="font-display text-3xl font-bold">Layer Decomposition</h1>
         <p className="text-sm text-muted-foreground">Separacao em camadas com preview e export.</p>
       </header>

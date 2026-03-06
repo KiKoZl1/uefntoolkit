@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { Camera, Loader2, Save } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Camera, Loader2, Save, ArrowLeft, Download } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useThumbTools } from "@/features/tgis-thumb-tools/ThumbToolsProvider";
-import CameraGizmo3D from "@/features/tgis-thumb-tools/CameraGizmo3D";
 import RecentAssetsPicker from "@/features/tgis-thumb-tools/RecentAssetsPicker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 
 type Preset = "heroic" | "confronto" | "epicidade" | "overview" | "cinematic" | "god_view" | "custom";
+const CameraGizmo3D = lazy(() => import("@/features/tgis-thumb-tools/CameraGizmo3D"));
+const CAMERA_CONTROL_PHASES = [
+  "Analisando composicao e profundidade...",
+  "Reprojetando enquadramento e angulo...",
+  "Ajustando perspectiva e foco visual...",
+  "Renderizando frame final...",
+] as const;
 
 const PRESETS: Array<{ id: Preset; label: string; values: { azimuth: number; elevation: number; distance: number } }> = [
   { id: "heroic", label: "Heroic", values: { azimuth: 22, elevation: -12, distance: 0.85 } },
@@ -35,6 +42,7 @@ export default function CameraControlPage() {
   const [errorText, setErrorText] = useState("");
   const [resultUrl, setResultUrl] = useState("");
   const [pendingResultAssetId, setPendingResultAssetId] = useState("");
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
 
   const sourceCandidates = useMemo(() => history.slice(0, 20), [history]);
   const selectedSourceId = useMemo(() => {
@@ -46,6 +54,18 @@ export default function CameraControlPage() {
   useEffect(() => {
     if (currentAsset?.image_url) setSourceImageUrl(currentAsset.image_url);
   }, [currentAsset?.id, currentAsset?.image_url]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setLoadingElapsedSec(Math.max(1, Math.floor((Date.now() - started) / 1000)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   function applyPreset(nextPreset: Preset) {
     setPreset(nextPreset);
@@ -113,16 +133,57 @@ export default function CameraControlPage() {
     toast({ title: "Resultado salvo", description: "Imagem definida como base atual para o proximo passo." });
   }
 
+  async function downloadResultImage(url: string) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("download_failed");
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `camera-control-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+      return;
+    } catch {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
+
+  const loadingPhase = useMemo(
+    () => CAMERA_CONTROL_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % CAMERA_CONTROL_PHASES.length],
+    [loadingElapsedSec],
+  );
+
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-5 px-6 py-6">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-bold">Camera Control</h1>
-        <p className="text-sm text-muted-foreground">Controle de perspectiva com presets e ajustes finos.</p>
+    <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
+      <header className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card/85 via-card/60 to-background p-5 md:p-7">
+        <div className="absolute -right-14 -top-14 h-40 w-40 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+        <div className="relative space-y-3">
+          <Button variant="ghost" asChild className="-ml-2 h-8 w-fit px-2 text-muted-foreground hover:text-foreground">
+            <Link to="/app/thumb-tools">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Thumb Tools
+            </Link>
+          </Button>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Camera Control</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground md:text-base">
+            Ajuste enquadramento, inclinacao e distancia com presets ou controle fino em gizmo 3D interativo.
+          </p>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-        <section className="space-y-4 lg:col-span-5">
-          <Card>
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <section className="space-y-4">
+          <Card className="border-border/70 bg-card/30">
             <CardHeader><CardTitle className="text-base">Parametros</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1.5">
@@ -192,46 +253,75 @@ export default function CameraControlPage() {
                 <Slider value={[distance]} min={0.5} max={1.5} step={0.01} onValueChange={(v) => { setPreset("custom"); setDistance(v[0] ?? 1); }} />
               </div>
 
-              <Button onClick={runCameraControl} disabled={loading} className="w-full gap-2">
+              <Button onClick={runCameraControl} disabled={loading} className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                 Gerar ajuste de camera
               </Button>
-              {resultUrl && pendingResultAssetId ? (
-                <Button onClick={saveResult} disabled={savingResult} variant="secondary" className="w-full gap-2">
-                  {savingResult ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Salvar resultado
-                </Button>
-              ) : null}
+              <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                {loading ? `Processando (${loadingElapsedSec || 1}s)` : "Ajuste estimado: ~20-40s"}
+              </p>
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
             </CardContent>
           </Card>
         </section>
 
-        <section className="space-y-4 lg:col-span-7">
-          <Card>
+        <section className="space-y-4">
+          {resultUrl ? (
+            <Card className="border-border/70 bg-card/35">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Resultado</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <img src={resultUrl} alt="after" className="aspect-video w-full rounded border border-primary/40 object-cover" />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => downloadResultImage(resultUrl)}>
+                    <Download className="h-3.5 w-3.5" />
+                    Baixar
+                  </Button>
+                  {pendingResultAssetId ? (
+                    <Button type="button" size="sm" variant="secondary" className="h-8 gap-1.5" onClick={saveResult} disabled={savingResult}>
+                      {savingResult ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      Salvar resultado
+                    </Button>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="border-border/70">
             <CardHeader><CardTitle className="text-base">Preview</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">Controle 3D interativo</p>
-                <CameraGizmo3D
-                  sourceImageUrl={sourceImageUrl}
-                  azimuth={azimuth}
-                  elevation={elevation}
-                  distance={distance}
-                  onAzimuthChange={(v) => {
-                    setPreset("custom");
-                    setAzimuth(v);
-                  }}
-                  onElevationChange={(v) => {
-                    setPreset("custom");
-                    setElevation(v);
-                  }}
-                  onDistanceChange={(v) => {
-                    setPreset("custom");
-                    setDistance(v);
-                  }}
-                  onInteractionStart={() => setPreset("custom")}
-                />
+                <Suspense
+                  fallback={(
+                    <div className="flex h-[360px] items-center justify-center rounded-xl border border-border/60 bg-card/70 text-sm text-muted-foreground">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading 3D preview...
+                    </div>
+                  )}
+                >
+                  <CameraGizmo3D
+                    sourceImageUrl={sourceImageUrl}
+                    azimuth={azimuth}
+                    elevation={elevation}
+                    distance={distance}
+                    onAzimuthChange={(v) => {
+                      setPreset("custom");
+                      setAzimuth(v);
+                    }}
+                    onElevationChange={(v) => {
+                      setPreset("custom");
+                      setElevation(v);
+                    }}
+                    onDistanceChange={(v) => {
+                      setPreset("custom");
+                      setDistance(v);
+                    }}
+                    onInteractionStart={() => setPreset("custom")}
+                  />
+                </Suspense>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -263,7 +353,8 @@ export default function CameraControlPage() {
           <div className="w-full max-w-md rounded-xl border border-border/70 bg-card/95 p-6 text-center shadow-2xl">
             <Loader2 className="mx-auto mb-3 h-10 w-10 animate-spin text-primary" />
             <p className="text-sm font-medium">Aplicando camera control...</p>
-            <p className="mt-1 text-xs text-muted-foreground">Isso pode levar alguns segundos.</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadingPhase}</p>
+            <p className="mt-3 text-xs uppercase tracking-[0.1em] text-muted-foreground">{loadingElapsedSec || 1}s decorridos</p>
           </div>
         </div>
       ) : null}

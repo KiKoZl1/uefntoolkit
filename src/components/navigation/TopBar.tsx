@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   getTopBarPrimaryItems,
   getToolsShortcutItems,
+  getWidgetKitShortcutItems,
   getVisibleNavSections,
   isNavItemActive,
 } from "@/navigation/config";
@@ -63,11 +64,14 @@ export function TopBar({ context }: TopBarProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const { user, isAdmin, isEditor, signOut } = useAuth();
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [openFlyoutMenu, setOpenFlyoutMenu] = useState<"thumbToolsHub" | "widgetKitHub" | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
   const toolsContainerRef = useRef<HTMLDivElement | null>(null);
+  const widgetKitContainerRef = useRef<HTMLDivElement | null>(null);
   const firstShortcutRef = useRef<HTMLAnchorElement | null>(null);
+  const firstWidgetShortcutRef = useRef<HTMLAnchorElement | null>(null);
   const toolsMenuId = useId();
+  const widgetKitMenuId = useId();
 
   const access = useMemo<NavAccessState>(
     () => ({
@@ -80,9 +84,14 @@ export function TopBar({ context }: TopBarProps) {
 
   const primaryItems = useMemo(() => getTopBarPrimaryItems(context, access), [access, context]);
   const toolsShortcuts = useMemo(() => getToolsShortcutItems(context, access), [access, context]);
+  const widgetKitShortcuts = useMemo(() => getWidgetKitShortcutItems(context, access), [access, context]);
   const mobileSections = useMemo(() => getVisibleNavSections(context, access), [access, context]);
   const displayName = useMemo(() => getUserDisplayName(user), [user]);
   const avatarUrl = useMemo(() => getUserAvatarUrl(user), [user]);
+  const isInAdminArea = location.pathname.startsWith("/admin");
+  const contextSwitchTo = isInAdminArea ? "/app" : "/admin";
+  const contextSwitchLabel = isInAdminArea ? t("common.backToApp") : t("common.admin");
+  const ContextSwitchIcon = isInAdminArea ? Radar : Shield;
 
   const clearCloseTimeout = useCallback(() => {
     if (closeTimeoutRef.current !== null) {
@@ -93,7 +102,7 @@ export function TopBar({ context }: TopBarProps) {
 
   const scheduleToolsClose = useCallback(() => {
     clearCloseTimeout();
-    closeTimeoutRef.current = window.setTimeout(() => setToolsOpen(false), 120);
+    closeTimeoutRef.current = window.setTimeout(() => setOpenFlyoutMenu(null), 120);
   }, [clearCloseTimeout]);
 
   useEffect(() => {
@@ -101,21 +110,24 @@ export function TopBar({ context }: TopBarProps) {
   }, [clearCloseTimeout]);
 
   useEffect(() => {
-    setToolsOpen(false);
+    setOpenFlyoutMenu(null);
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!toolsOpen) return;
+    if (!openFlyoutMenu) return;
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!toolsContainerRef.current?.contains(event.target as Node)) {
-        setToolsOpen(false);
+      const target = event.target as Node;
+      const insideTools = toolsContainerRef.current?.contains(target);
+      const insideWidgetKit = widgetKitContainerRef.current?.contains(target);
+      if (!insideTools && !insideWidgetKit) {
+        setOpenFlyoutMenu(null);
       }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setToolsOpen(false);
+        setOpenFlyoutMenu(null);
       }
     };
 
@@ -126,7 +138,7 @@ export function TopBar({ context }: TopBarProps) {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [toolsOpen]);
+  }, [openFlyoutMenu]);
 
   const handleSignOut = useCallback(() => {
     void signOut();
@@ -167,25 +179,35 @@ export function TopBar({ context }: TopBarProps) {
         <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
           {primaryItems.map((item) => {
             const active = isNavItemActive(item, location.pathname);
-            const isToolsHub = item.id === "thumbToolsHub" && toolsShortcuts.length > 0;
+            const isToolsHub = item.id === "thumbToolsHub";
+            const isWidgetKitHub = item.id === "widgetKitHub";
+            const shortcutItems = isToolsHub ? toolsShortcuts : isWidgetKitHub ? widgetKitShortcuts : [];
+            const hasFlyout = shortcutItems.length > 0 && (isToolsHub || isWidgetKitHub);
 
-            if (!isToolsHub) {
+            if (!hasFlyout) {
               return renderPrimaryLink(item.id, item.labelKey, item.to, active);
             }
+
+            const flyoutId = isToolsHub ? "thumbToolsHub" : "widgetKitHub";
+            const isOpen = openFlyoutMenu === flyoutId;
+            const menuId = isToolsHub ? toolsMenuId : widgetKitMenuId;
+            const containerRef = isToolsHub ? toolsContainerRef : widgetKitContainerRef;
+            const primaryShortcutRef = isToolsHub ? firstShortcutRef : firstWidgetShortcutRef;
+            const menuAriaLabel = isToolsHub ? "nav.sectionTools" : "nav.sectionWidgetKit";
 
             return (
               <div
                 key={item.id}
-                ref={toolsContainerRef}
+                ref={containerRef}
                 className="relative z-[91]"
                 onMouseEnter={() => {
                   clearCloseTimeout();
-                  setToolsOpen(true);
+                  setOpenFlyoutMenu(flyoutId);
                 }}
                 onMouseLeave={scheduleToolsClose}
                 onFocusCapture={() => {
                   clearCloseTimeout();
-                  setToolsOpen(true);
+                  setOpenFlyoutMenu(flyoutId);
                 }}
                 onBlurCapture={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -194,13 +216,13 @@ export function TopBar({ context }: TopBarProps) {
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
-                    setToolsOpen(false);
+                    setOpenFlyoutMenu(null);
                     (event.currentTarget as HTMLElement).blur();
                   }
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    setToolsOpen(true);
-                    window.requestAnimationFrame(() => firstShortcutRef.current?.focus());
+                    setOpenFlyoutMenu(flyoutId);
+                    window.requestAnimationFrame(() => primaryShortcutRef.current?.focus());
                   }
                 }}
               >
@@ -213,29 +235,29 @@ export function TopBar({ context }: TopBarProps) {
                       : "text-foreground/80 hover:bg-muted/70 hover:text-foreground",
                   )}
                   aria-haspopup="menu"
-                  aria-expanded={toolsOpen}
-                  aria-controls={toolsMenuId}
-                  aria-label={t("nav.thumbTools")}
-                  onClick={() => setToolsOpen(false)}
+                  aria-expanded={isOpen}
+                  aria-controls={menuId}
+                  aria-label={t(item.labelKey)}
+                  onClick={() => setOpenFlyoutMenu(null)}
                 >
                   {t(item.labelKey)}
-                  <ChevronDown className={cn("nav-motion-base h-3.5 w-3.5 transition-transform", toolsOpen && "rotate-180")} />
+                  <ChevronDown className={cn("nav-motion-base h-3.5 w-3.5 transition-transform", isOpen && "rotate-180")} />
                 </Link>
 
                 <div
-                  id={toolsMenuId}
+                  id={menuId}
                   className={cn(
                     "absolute left-1/2 top-full z-[99] mt-2 w-[320px] -translate-x-1/2 rounded-xl border border-border/80 bg-background p-2 shadow-[0_20px_60px_rgba(0,0,0,0.55)]",
                     "nav-motion-base transition-[opacity,transform]",
-                    toolsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
+                    isOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
                   )}
                   role="menu"
-                  aria-label={t("nav.sectionTools")}
+                  aria-label={t(menuAriaLabel)}
                 >
-                  {toolsShortcuts.map((shortcut) => (
+                  {shortcutItems.map((shortcut) => (
                     <Link
                       key={shortcut.id}
-                      ref={shortcut === toolsShortcuts[0] ? firstShortcutRef : null}
+                      ref={shortcut === shortcutItems[0] ? primaryShortcutRef : null}
                       to={shortcut.to}
                       role="menuitem"
                       className="nav-motion-fast block rounded-lg px-3 py-2 transition-[background-color,transform] hover:bg-primary/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -275,9 +297,9 @@ export function TopBar({ context }: TopBarProps) {
                 </DropdownMenuItem>
                 {(isAdmin || isEditor) && (
                   <DropdownMenuItem asChild>
-                    <Link to="/admin">
-                      <Shield className="h-4 w-4" />
-                      {t("common.admin")}
+                    <Link to={contextSwitchTo}>
+                      <ContextSwitchIcon className="h-4 w-4" />
+                      {contextSwitchLabel}
                     </Link>
                   </DropdownMenuItem>
                 )}

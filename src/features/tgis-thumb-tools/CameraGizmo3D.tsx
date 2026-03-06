@@ -86,9 +86,7 @@ function visualTiltToElevation(visualTiltDeg: number) {
 }
 
 function statusText(azimuth: number, elevation: number, distance: number) {
-  const moved = Math.abs(azimuth) > 0.01 || Math.abs(elevation) > 0.01 || Math.abs(distance - 1) > 0.01;
-  if (!moved) return "No camera movement";
-  return `A:${azimuth.toFixed(1)} E:${elevation.toFixed(1)} D:${distance.toFixed(2)}`;
+  return `Az ${azimuth.toFixed(1)} | El ${elevation.toFixed(1)} | Dist ${distance.toFixed(2)}`;
 }
 
 function createTubeFromPoints(points: THREE.Vector3[], color: string) {
@@ -337,6 +335,7 @@ export default function CameraGizmo3D({
   const isDraggingRef = useRef(false);
   const dragStartYRef = useRef(0);
   const dragStartForwardRef = useRef(0);
+  const sourceImageUrlRef = useRef(sourceImageUrl);
   const controlsRef = useRef<ControlsState>({
     rotateDeg: azimuth,
     elevationDeg: elevation,
@@ -347,6 +346,10 @@ export default function CameraGizmo3D({
   useEffect(() => {
     callbacksRef.current = { onAzimuthChange, onElevationChange, onDistanceChange, onInteractionStart };
   }, [onAzimuthChange, onElevationChange, onDistanceChange, onInteractionStart]);
+
+  useEffect(() => {
+    sourceImageUrlRef.current = sourceImageUrl;
+  }, [sourceImageUrl]);
 
   useEffect(() => {
     if (isDraggingRef.current) return;
@@ -485,6 +488,14 @@ export default function CameraGizmo3D({
       applyState(true);
     };
 
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      callbacksRef.current.onInteractionStart?.();
+      const next = clamp(controlsRef.current.moveForward + (-event.deltaY * 0.01), 0, 10);
+      controlsRef.current.moveForward = next;
+      applyState(true);
+    };
+
     const renderLoop = () => {
       if (!sceneRef.current) return;
       sceneRef.current.renderer.render(sceneRef.current.scene, sceneRef.current.viewerCamera);
@@ -492,18 +503,20 @@ export default function CameraGizmo3D({
     };
 
     scene.renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    scene.renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("resize", resize);
 
     resize();
     applyState(false);
-    loadTexture(scene, sourceImageUrl);
+    loadTexture(scene, sourceImageUrlRef.current);
     animationFrameRef.current = requestAnimationFrame(renderLoop);
 
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       scene.renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      scene.renderer.domElement.removeEventListener("wheel", onWheel);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("resize", resize);
@@ -531,15 +544,15 @@ export default function CameraGizmo3D({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border/60 bg-[#121418] p-2">
-      <div ref={hostRef} className="relative h-[420px] w-full select-none rounded-lg bg-[#171b21]">
-        <div className="pointer-events-none absolute left-4 top-4 rounded-xl bg-black/75 px-4 py-3 text-[18px] text-white shadow-lg">
-          <div className="mb-2 flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#20f0c2]" /> Rotation (&lt;-&gt;)</div>
-          <div className="mb-2 flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ff78de]" /> Vertical Tilt (^ v)</div>
-          <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ffd22f]" /> Distance/Zoom</div>
+      <div ref={hostRef} className="relative h-[min(64vh,560px)] w-full select-none rounded-lg bg-[#171b21]">
+        <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-[11px] text-white/90 shadow-lg backdrop-blur-sm">
+          <div className="mb-1 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#20f0c2]" /> Rotation</div>
+          <div className="mb-1 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#ff78de]" /> Tilt</div>
+          <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#ffd22f]" /> Distance (drag/scroll)</div>
         </div>
         <div
           ref={labelRef}
-          className="pointer-events-none absolute bottom-3 right-4 rounded-xl bg-black/85 px-4 py-1.5 font-mono text-[28px] text-[#39ff9f] shadow-lg"
+          className="pointer-events-none absolute bottom-3 right-3 rounded-lg border border-[#39ff9f]/30 bg-black/70 px-3 py-1 font-mono text-[12px] text-[#39ff9f] shadow-lg"
         >
           {statusText(azimuth, elevation, distance)}
         </div>

@@ -92,40 +92,32 @@ export default function RecentAssetsPicker({
           const selected = selectedId && selectedId === item.id;
           const deleting = deletingId === item.id;
           return (
-            <button
+            <div
               key={item.id}
-              type="button"
-              onClick={() => onSelect(item)}
               className={cn(
                 "group relative overflow-hidden rounded border transition",
                 selected ? "border-primary ring-1 ring-primary" : "border-border/60 hover:border-primary/60",
               )}
               title={item.title || item.id}
             >
-              <img src={item.image_url} alt={item.title || item.id} className="aspect-video w-full object-cover" />
+              <button type="button" onClick={() => onSelect(item)} className="block w-full">
+                <img src={item.image_url} alt={item.title || item.id} className="aspect-video w-full object-cover" />
+              </button>
               {onDelete && item.canDelete !== false ? (
-                <span
-                  role="button"
-                  tabIndex={0}
+                <button
+                  type="button"
                   onClick={(ev) => {
                     ev.preventDefault();
                     ev.stopPropagation();
                     setPendingDelete(item);
                   }}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter" || ev.key === " ") {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      setPendingDelete(item);
-                    }
-                  }}
                   className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/30 bg-black/65 text-white opacity-0 transition group-hover:opacity-100"
                   aria-label="Delete asset"
                 >
                   {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                </span>
+                </button>
               ) : null}
-            </button>
+            </div>
           );
         })}
       </div>

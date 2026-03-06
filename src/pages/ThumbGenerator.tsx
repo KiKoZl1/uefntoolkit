@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { Sparkles, Loader2, Download, X, ImagePlus, Globe, Check } from "lucide-react";
+import { Sparkles, Loader2, Download, X, ImagePlus, Globe, Check, ArrowLeft } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,6 +90,13 @@ const STYLE_MODE_OPTIONS: Array<{ id: StyleModeValue; label: string }> = [
   { id: "2d_flat_illustration", label: "2D Flat" },
 ];
 
+const GENERATION_PHASES = [
+  "Analisando prompt e contexto...",
+  "Ajustando composição e enquadramento...",
+  "Refinando iluminação e contraste...",
+  "Renderizando variação final...",
+] as const;
+
 async function invokeSkinSearch(q: string, limit = SKIN_RESULT_LIMIT): Promise<SkinSearchItem[]> {
   const { data, error } = await supabase.functions.invoke("tgis-skins-search", {
     body: { q, limit, page: 1 },
@@ -113,7 +121,7 @@ export default function ThumbGenerator() {
   const [styleMode, setStyleMode] = useState<StyleModeValue | "">("");
   const [contextBoost, setContextBoost] = useState(true);
   const [maxSkinRefs, setMaxSkinRefs] = useState(2);
-  const [selectedTags, setSelectedTags] = useState<string[]>([TAG_OPTIONS[0]]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   const [skinQuery, setSkinQuery] = useState("");
   const [skinResults, setSkinResults] = useState<SkinSearchItem[]>([]);
@@ -173,10 +181,9 @@ export default function ThumbGenerator() {
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      setSearchingSkins(true);
-
       const rawQuery = skinQuery.trim();
-      const items = await invokeSkinSearch(rawQuery);
+      setSearchingSkins(true);
+      const items = await invokeSkinSearch(rawQuery, SKIN_RESULT_LIMIT);
 
       if (cancelled) return;
       setSkinResults(items);
@@ -253,7 +260,6 @@ export default function ThumbGenerator() {
   async function handleGenerate(ev?: FormEvent) {
     ev?.preventDefault();
     setError(null);
-    setResult(null);
 
     if (!prompt.trim()) {
       setError("Prompt e obrigatorio.");
@@ -381,30 +387,42 @@ export default function ThumbGenerator() {
   }
 
   const resultUrl = result?.image?.url || result?.images?.[0]?.url || "";
+  const loadingPhase = useMemo(
+    () => GENERATION_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % GENERATION_PHASES.length],
+    [loadingElapsedSec],
+  );
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-5 px-6 py-6">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-bold">Thumb Generator</h1>
-        <p className="text-sm text-muted-foreground">Create high-fidelity AI thumbnails for your maps</p>
+    <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
+      <header className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card/85 via-card/60 to-background p-5 md:p-7">
+        <div className="absolute -right-14 -top-14 h-40 w-40 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+        <div className="relative space-y-3">
+          <Button variant="ghost" asChild className="-ml-2 h-8 w-fit px-2 text-muted-foreground hover:text-foreground">
+            <Link to="/app/thumb-tools">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              {t("nav.thumbTools")}
+            </Link>
+          </Button>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Thumb Generator</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground md:text-base">
+            Gere thumbnails com IA e refine o conceito com prompt, câmera, mood, estilo, referência visual e skins.
+          </p>
+        </div>
       </header>
 
-      <form onSubmit={handleGenerate} className="grid grid-cols-1 gap-5 md:grid-cols-12">
-        <section className="space-y-5 md:col-span-8">
-          <div className="space-y-3 rounded-xl border border-border/60 bg-card/25 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-semibold">Descreva a thumbnail desejada</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleRewritePrompt}
-                disabled={rewritingPrompt || loading || uploadingRef}
-              >
-                {rewritingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {rewriteApplied ? t("thumbGenerator.undoButton") : t("thumbGenerator.improveButton")}
-              </Button>
-            </div>
+      <form onSubmit={handleGenerate} className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+        <section className="space-y-5 xl:col-span-8">
+          <Card className="border-border/70 bg-card/30">
+            <CardContent className="space-y-4 pt-6">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-semibold">Descreva a thumbnail desejada</Label>
+                <div className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5">
+                  <Globe className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-[11px] text-muted-foreground">Contexto web</span>
+                  <Switch checked={contextBoost} onCheckedChange={setContextBoost} />
+                </div>
+              </div>
+
             <Textarea
               value={prompt}
               maxLength={PROMPT_MAX}
@@ -414,135 +432,169 @@ export default function ThumbGenerator() {
               placeholder="Ex.: Uma batalha epica de Fortnite Creative, foco no personagem principal, explosoes no fundo, composicao cinematica e leitura clara."
               className="min-h-[108px] rounded-xl border-border/60 bg-card/60 p-3 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary"
             />
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">{prompt.length}/{PROMPT_MAX}</p>
-              <div className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5">
-                <Globe className="h-3.5 w-3.5 text-primary" />
-                <span className="text-[11px] text-muted-foreground">Contexto web</span>
-                <Switch checked={contextBoost} onCheckedChange={setContextBoost} />
-              </div>
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label className="text-sm">Tags</Label>
-            <div className="rounded-lg border border-white/10 bg-card/20 p-2">
-              <div className="flex max-h-[64px] flex-wrap gap-1.5 overflow-y-auto pr-1">
-                {TAG_OPTIONS.map((tag) => {
-                  const selected = selectedTags.includes(tag);
-                  return (
-                    <button
-                      key={`tag-${tag}`}
-                      type="button"
-                      onClick={() => toggleTag(tag)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] leading-4 transition ${
-                        selected
-                          ? "border-primary bg-primary text-black"
-                          : "border-white/10 bg-transparent text-foreground hover:border-primary"
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">{prompt.length}/{PROMPT_MAX}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRewritePrompt}
+                  disabled={rewritingPrompt || loading || uploadingRef}
+                >
+                  {rewritingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  {rewriteApplied ? t("thumbGenerator.undoButton") : t("thumbGenerator.improveButton")}
+                </Button>
               </div>
-            </div>
-            <p className="text-xs text-muted-foreground">Selecionadas: {tags.join(", ")}</p>
-          </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
             <div className="space-y-2">
-              <Label className="text-sm">Style mode (opcional)</Label>
-              <div className="flex flex-wrap gap-2">
-                {STYLE_MODE_OPTIONS.map((style) => {
-                  const isSelected = styleMode === style.id;
+              <Label className="text-sm">Tags</Label>
+              <div className="rounded-lg border border-white/10 bg-card/20 p-2">
+                <div className="flex max-h-[64px] flex-wrap gap-1.5 overflow-y-auto pr-1">
+                  {TAG_OPTIONS.map((tag) => {
+                    const selected = selectedTags.includes(tag);
+                    return (
+                      <button
+                        key={`tag-${tag}`}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] leading-4 transition ${
+                          selected
+                            ? "border-primary bg-primary text-black"
+                            : "border-white/10 bg-transparent text-foreground hover:border-primary"
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Selecionadas: {tags.length ? tags.join(", ") : "nenhuma"}</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm">Style mode (opcional)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {STYLE_MODE_OPTIONS.map((style) => {
+                    const isSelected = styleMode === style.id;
+                    return (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => setStyleMode(isSelected ? "" : style.id)}
+                        className={`h-8 rounded-full border px-3 text-[11px] transition ${
+                          isSelected
+                            ? "border-primary bg-primary text-black"
+                            : "border-white/10 bg-transparent text-foreground hover:border-primary"
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">Sem selecao = Auto</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Mood</Label>
+                <div className="flex flex-wrap gap-2">
+                  {MOOD_OPTIONS.map((mood) => {
+                    const isSelected = moodOverride === mood.id;
+                    return (
+                      <button
+                        key={mood.id}
+                        type="button"
+                        onClick={() => setMoodOverride(isSelected ? "" : mood.id)}
+                        className={`h-8 rounded-full border px-3 text-sm transition ${
+                          isSelected
+                            ? "border-primary bg-primary text-black"
+                            : "border-white/10 bg-transparent text-foreground hover:border-primary"
+                        }`}
+                      >
+                        {mood.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm">Angulo de camera</Label>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {CAMERA_OPTIONS.map((camera) => {
+                  const isSelected = cameraAngle === camera.id;
                   return (
                     <button
-                      key={style.id}
+                      key={camera.id}
                       type="button"
-                      onClick={() => setStyleMode(isSelected ? "" : style.id)}
-                      className={`h-8 rounded-full border px-3 text-[11px] transition ${
+                      onClick={() => setCameraAngle(camera.id)}
+                      title={camera.description}
+                      aria-label={`${camera.label}: ${camera.description}`}
+                      className={`h-9 rounded-[10px] border px-2 text-sm transition ${
                         isSelected
                           ? "border-primary bg-primary text-black"
                           : "border-white/10 bg-transparent text-foreground hover:border-primary"
                       }`}
                     >
-                      {style.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-muted-foreground">Sem selecao = Auto</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm">Mood</Label>
-              <div className="flex flex-wrap gap-2">
-                {MOOD_OPTIONS.map((mood) => {
-                  const isSelected = moodOverride === mood.id;
-                  return (
-                    <button
-                      key={mood.id}
-                      type="button"
-                      onClick={() => setMoodOverride(isSelected ? "" : mood.id)}
-                      className={`h-8 rounded-full border px-3 text-sm transition ${
-                        isSelected
-                          ? "border-primary bg-primary text-black"
-                          : "border-white/10 bg-transparent text-foreground hover:border-primary"
-                      }`}
-                    >
-                      {mood.label}
+                      {camera.label}
                     </button>
                   );
                 })}
               </div>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label className="text-sm">Angulo de camera</Label>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              {CAMERA_OPTIONS.map((camera) => {
-                const isSelected = cameraAngle === camera.id;
-                return (
-                  <button
-                    key={camera.id}
-                    type="button"
-                    onClick={() => setCameraAngle(camera.id)}
-                    title={camera.description}
-                    aria-label={`${camera.label}: ${camera.description}`}
-                    className={`h-9 rounded-[10px] border px-2 text-sm transition ${
-                      isSelected
-                        ? "border-primary bg-primary text-black"
-                        : "border-white/10 bg-transparent text-foreground hover:border-primary"
-                    }`}
-                  >
-                    {camera.label}
-                  </button>
-                );
-              })}
+            <div className="space-y-2 pt-1">
+              <Button type="submit" disabled={loading || uploadingRef} className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {loading || uploadingRef ? "Gerando..." : "Gerar imagem"}
+              </Button>
+              <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                {loading ? `Processando (${loadingElapsedSec || 1}s)` : "Tempo medio estimado: ~60s"}
+              </p>
             </div>
-          </div>
 
-          <div className="space-y-2 pt-1">
-            <Button type="submit" disabled={loading || uploadingRef} className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {loading || uploadingRef ? "Gerando..." : "Gerar imagem"}
-            </Button>
-            <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-              {loading
-                ? `Gerando... ${loadingElapsedSec || 1}s`
-                : "Tempo medio de geracao: ~60s"}
-            </p>
-          </div>
-
-          {error ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-          ) : null}
+            {error ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+            ) : null}
+            </CardContent>
+          </Card>
         </section>
 
-        <aside className="flex flex-col gap-4 md:col-span-4">
-          <Card>
+        <aside className="flex flex-col gap-4 xl:col-span-4">
+          <div className="space-y-4 xl:sticky xl:top-20">
+          {resultUrl ? (
+            <Card className="border-border/70 bg-card/35">
+              <CardHeader className="px-4 pb-2 pt-4">
+                <CardTitle className="text-base">Resultado</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 px-4 pb-4">
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxUrl(resultUrl)}
+                    className="overflow-hidden rounded-lg border border-border/70 bg-card/30 transition hover:border-primary/50"
+                  >
+                    <img src={resultUrl} alt="tgis-result" className="aspect-video w-full object-cover" loading="lazy" />
+                  </button>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      {result?.image?.width || 1920}x{result?.image?.height || 1080}
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={() => downloadImage(resultUrl)}>
+                      <Download className="mr-1 h-3.5 w-3.5" />
+                      Baixar
+                    </Button>
+                  </div>
+                </>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="border-border/70">
             <CardHeader className="px-4 pb-2 pt-4">
               <CardTitle className="text-base">Imagem de referencia</CardTitle>
             </CardHeader>
@@ -575,7 +627,7 @@ export default function ThumbGenerator() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden border-border/70">
             <CardHeader className="px-4 pb-2 pt-4">
               <CardTitle className="text-base">Skins (max {maxSkinRefs})</CardTitle>
             </CardHeader>
@@ -637,43 +689,17 @@ export default function ThumbGenerator() {
               </div>
             </CardContent>
           </Card>
+          </div>
         </aside>
       </form>
-
-      {resultUrl ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Resultado</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <button
-              type="button"
-              onClick={() => setLightboxUrl(resultUrl)}
-              className="overflow-hidden rounded-lg border border-border/70 bg-card/30"
-            >
-              <img src={resultUrl} alt="tgis-result" className="aspect-video w-full object-cover" loading="lazy" />
-            </button>
-
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {result?.image?.width || 1920}x{result?.image?.height || 1080}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => downloadImage(resultUrl)}>
-                <Download className="mr-1 h-3.5 w-3.5" />
-                Baixar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
 
       {loading ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-md rounded-xl border border-border/70 bg-card/95 p-6 text-center shadow-2xl">
             <Loader2 className="mx-auto mb-3 h-10 w-10 animate-spin text-primary" />
             <p className="text-sm font-medium">Gerando thumbnail...</p>
-            <p className="mt-1 text-xs text-muted-foreground">Isso pode levar alguns segundos.</p>
-            <p className="mt-3 text-xs uppercase tracking-[0.1em] text-muted-foreground">{loadingElapsedSec || 1}s</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadingPhase}</p>
+            <p className="mt-3 text-xs uppercase tracking-[0.1em] text-muted-foreground">{loadingElapsedSec || 1}s decorridos</p>
           </div>
         </div>
       ) : null}
@@ -698,3 +724,4 @@ export default function ThumbGenerator() {
     </div>
   );
 }
+

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Plus, FolderOpen, Search, FileText, Upload, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { PageState } from "@/components/ui/page-state";
 
 interface Project {
   id: string;
@@ -142,41 +143,36 @@ export default function AppDashboard() {
       <div className="flex gap-3 mb-6">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar projetos..." className="pl-10" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("app.searchProjects")}
+            aria-label={t("app.searchProjects")}
+            className="pl-10"
+          />
         </div>
         <Select value={sort} onValueChange={(v) => setSort(v as SortMode)}>
           <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Ordenar" />
+            <SelectValue placeholder={t("app.sortBy")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="recent">Mais recentes</SelectItem>
-            <SelectItem value="name">Nome A-Z</SelectItem>
-            <SelectItem value="reports">Mais reports</SelectItem>
+            <SelectItem value="recent">{t("app.sortRecent")}</SelectItem>
+            <SelectItem value="name">{t("app.sortName")}</SelectItem>
+            <SelectItem value="reports">{t("app.sortReports")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-20">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        </div>
+        <PageState variant="section" title={t("common.loading")} description={t("app.loadingProjects")} />
       ) : filtered.length === 0 ? (
-        <Card className="text-center py-16">
-          <CardContent>
-            <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="font-display text-lg font-semibold mb-2">
-              {search ? "Nenhum projeto encontrado" : t("app.noProjects")}
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              {search ? "Tente outro termo de busca." : t("app.noProjectsDesc")}
-            </p>
-            {!search && (
-              <Button onClick={() => setDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" /> {t("app.createFirst")}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        <PageState
+          variant="section"
+          icon={<FolderOpen className="h-5 w-5 text-primary" />}
+          title={search ? t("app.noProjectsMatch") : t("app.noProjects")}
+          description={search ? t("app.noProjectsMatchDesc") : t("app.noProjectsDesc")}
+          action={!search ? { label: t("app.createFirst"), onClick: () => setDialogOpen(true) } : undefined}
+        />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((p) => (
@@ -198,7 +194,7 @@ export default function AppDashboard() {
                     </span>
                     {p.last_upload_at && (
                       <Badge variant="outline" className="text-[10px]">
-                        Último upload: {new Date(p.last_upload_at).toLocaleDateString(locale)}
+                        {t("app.lastUpload")}: {new Date(p.last_upload_at).toLocaleDateString(locale)}
                       </Badge>
                     )}
                   </div>

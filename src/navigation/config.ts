@@ -59,6 +59,24 @@ const navItems = {
     contexts: ["app", "admin"],
     visibility: ["authenticated", "client", "editor", "admin"],
   }),
+  widgetKitPsdUmg: navItem({
+    id: "widgetKitPsdUmg",
+    labelKey: "nav.widgetKitPsdUmg",
+    descriptionKey: "nav.widgetKitPsdUmgDesc",
+    to: "/app/widgetkit/psd-umg",
+    match: "exact",
+    contexts: ["app", "admin"],
+    visibility: ["authenticated", "client", "editor", "admin"],
+  }),
+  widgetKitUmgVerse: navItem({
+    id: "widgetKitUmgVerse",
+    labelKey: "nav.widgetKitUmgVerse",
+    descriptionKey: "nav.widgetKitUmgVerseDesc",
+    to: "/app/widgetkit/umg-verse",
+    match: "exact",
+    contexts: ["app", "admin"],
+    visibility: ["authenticated", "client", "editor", "admin"],
+  }),
   adminOverview: navItem({
     id: "adminOverview",
     labelKey: "nav.commandCenter",
@@ -195,6 +213,16 @@ const NAV_SECTIONS: NavSection[] = [
       navItems.toolsLayerDecomposition,
     ],
   },
+  {
+    id: "widgetKitTools",
+    labelKey: "nav.sectionWidgetKit",
+    contexts: ["app", "admin"],
+    visibility: ["authenticated", "client", "editor", "admin"],
+    items: [
+      navItems.widgetKitPsdUmg,
+      navItems.widgetKitUmgVerse,
+    ],
+  },
 ];
 
 const PRIMARY_ITEMS_BY_CONTEXT: Record<TopBarContext, string[]> = {
@@ -208,6 +236,11 @@ const TOOL_SHORTCUT_ITEM_IDS = [
   "toolsEditStudio",
   "toolsCameraControl",
   "toolsLayerDecomposition",
+] as const;
+
+const WIDGET_KIT_SHORTCUT_ITEM_IDS = [
+  "widgetKitPsdUmg",
+  "widgetKitUmgVerse",
 ] as const;
 
 function hasContext(contexts: TopBarContext[] | undefined, context: TopBarContext) {
@@ -254,6 +287,12 @@ export function getTopBarPrimaryItems(context: TopBarContext, access: NavAccessS
 
 export function getToolsShortcutItems(context: TopBarContext, access: NavAccessState): NavItem[] {
   return TOOL_SHORTCUT_ITEM_IDS.map(getItemById)
+    .filter((item): item is NavItem => Boolean(item))
+    .filter((item) => isItemVisible(item, context, access));
+}
+
+export function getWidgetKitShortcutItems(context: TopBarContext, access: NavAccessState): NavItem[] {
+  return WIDGET_KIT_SHORTCUT_ITEM_IDS.map(getItemById)
     .filter((item): item is NavItem => Boolean(item))
     .filter((item) => isItemVisible(item, context, access));
 }

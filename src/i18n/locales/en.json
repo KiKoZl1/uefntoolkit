@@ -16,6 +16,7 @@
     "linkCopied": "Link copied!",
     "or": "or",
     "tools": "Tools",
+    "openTool": "Open tool",
     "signOut": "Sign Out",
     "admin": "Admin",
     "backToApp": "Back to App",
@@ -77,6 +78,7 @@
     "sectionPlatform": "Platform",
     "sectionWorkspace": "Creator Tools",
     "sectionTools": "Tools",
+    "sectionWidgetKit": "WidgetKit",
     "sectionAdmin": "Admin",
     "toolsGenerate": "Generate",
     "toolsGenerateDesc": "Create new thumbnail concepts.",
@@ -86,6 +88,10 @@
     "toolsCameraControlDesc": "Tune framing and perspective.",
     "toolsLayerDecomposition": "Layer Decomposition",
     "toolsLayerDecompositionDesc": "Inspect and adjust scene layers.",
+    "widgetKitPsdUmg": "PSD -> UMG",
+    "widgetKitPsdUmgDesc": "Convert PSD layouts to UMG structure for UEFN.",
+    "widgetKitUmgVerse": "UMG -> VerseFields",
+    "widgetKitUmgVerseDesc": "Extract Expose to Verse fields and scaffold code.",
     "signIn": "Sign In",
     "getStarted": "Get Started Free"
   },
@@ -152,7 +158,8 @@
     "notFound": "Report not found",
     "viewAll": "View all",
     "allReports": "All reports",
-    "editorNote": "Editorial Note"
+    "editorNote": "Editorial Note",
+    "latest": "Latest"
   },
   "reportSections": {
     "section": "Section",
@@ -540,7 +547,8 @@
     "attempts14d": "Attempts (14d)",
     "entries48h": "Entries (48h)",
     "exits48h": "Exits (48h)",
-    "noDppiData": "DPPI has no data for this island yet."
+    "noDppiData": "DPPI has no data for this island yet.",
+    "copyLink": "Copy page link"
   },
   "thumbGenerator": {
     "title": "Thumb Generator",
@@ -571,6 +579,9 @@
       "missingCategory": "Select a category.",
       "generationFailed": "Failed to generate thumbnails."
     }
+  },
+  "thumbTools": {
+    "subtitle": "Complete generation and post-production suite for thumbnails."
   },
   "widgetKit": {
     "subtitle": "Convert PSD layouts to UMG and UMG widgets to Verse scaffolding.",
@@ -660,7 +671,16 @@
     "createdAt": "Created on",
     "projectCreated": "Project created!",
     "csvAnalytics": "CSV Analytics",
-    "discoverTrends": "Discover Trends"
+    "discoverTrends": "Discover Trends",
+    "loadingProjects": "Loading your projects...",
+    "searchProjects": "Search projects...",
+    "sortBy": "Sort",
+    "sortRecent": "Most recent",
+    "sortName": "Name A-Z",
+    "sortReports": "Most reports",
+    "noProjectsMatch": "No projects found",
+    "noProjectsMatchDesc": "Try another search term.",
+    "lastUpload": "Last upload"
   },
   "project": {
     "backToProjects": "Back to projects",

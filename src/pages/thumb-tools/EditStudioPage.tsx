@@ -1,5 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Eraser, ImagePlus, Loader2, Paintbrush, Save, Wand2, X } from "lucide-react";
+import { Check, Download, Eraser, ImagePlus, Loader2, Paintbrush, Save, Wand2, X, ArrowLeft } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useThumbTools } from "@/features/tgis-thumb-tools/ThumbToolsProvider";
@@ -27,6 +28,12 @@ const TAG_OPTIONS = [
 
 const TAGS_MAX = 24;
 const SKIN_RESULT_LIMIT = 100;
+const EDIT_STUDIO_PHASES = [
+  "Analisando mascara e estrutura da cena...",
+  "Aplicando substituicao e blend visual...",
+  "Refinando luz, bordas e consistencia...",
+  "Renderizando resultado final...",
+] as const;
 
 async function invokeSkinSearch(q: string, limit = SKIN_RESULT_LIMIT): Promise<SkinSearchItem[]> {
   const { data, error } = await supabase.functions.invoke("tgis-skins-search", { body: { q, limit, page: 1 } });
@@ -70,7 +77,7 @@ export default function EditStudioPage() {
   const [mode, setMode] = useState<EditMode>("mask_edit");
   const [prompt, setPrompt] = useState("");
   const [sourceImageUrl, setSourceImageUrl] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([TAG_OPTIONS[0]]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [contextBoost, setContextBoost] = useState(true);
   const [skinQuery, setSkinQuery] = useState("");
   const [skinResults, setSkinResults] = useState<SkinSearchItem[]>([]);
@@ -86,6 +93,7 @@ export default function EditStudioPage() {
   const [errorText, setErrorText] = useState("");
   const [resultUrl, setResultUrl] = useState("");
   const [pendingResultAssetId, setPendingResultAssetId] = useState("");
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
   const [localSourceUploads, setLocalSourceUploads] = useState<LocalSourceUpload[]>([]);
   const [brushSize, setBrushSize] = useState(22);
   const [maskOpacity, setMaskOpacity] = useState(0.45);
@@ -137,6 +145,18 @@ export default function EditStudioPage() {
   useEffect(() => {
     if (currentAsset?.image_url) setSourceImageUrl(currentAsset.image_url);
   }, [currentAsset?.id, currentAsset?.image_url]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setLoadingElapsedSec(Math.max(1, Math.floor((Date.now() - started) / 1000)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -391,16 +411,57 @@ export default function EditStudioPage() {
     toast({ title: "Resultado salvo", description: "Imagem definida como base atual para o proximo passo." });
   }
 
+  async function downloadResultImage(url: string) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("download_failed");
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `edit-studio-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+      return;
+    } catch {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
+
+  const loadingPhase = useMemo(
+    () => EDIT_STUDIO_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % EDIT_STUDIO_PHASES.length],
+    [loadingElapsedSec],
+  );
+
   return (
-    <div className="mx-auto w-full max-w-[1500px] space-y-5 px-6 py-6">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-bold">Edit Studio</h1>
-        <p className="text-sm text-muted-foreground">Mask edit e character replace com versionamento.</p>
+    <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
+      <header className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card/85 via-card/60 to-background p-5 md:p-7">
+        <div className="absolute -right-14 -top-14 h-40 w-40 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+        <div className="relative space-y-3">
+          <Button variant="ghost" asChild className="-ml-2 h-8 w-fit px-2 text-muted-foreground hover:text-foreground">
+            <Link to="/app/thumb-tools">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Thumb Tools
+            </Link>
+          </Button>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Edit Studio</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground md:text-base">
+            Mask edit e character replace com controle de mascara, referencia de skin e refinamento de estilo.
+          </p>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-        <section className="space-y-4 xl:col-span-5">
-          <Card>
+        <section className="space-y-4 xl:col-span-3">
+          <Card className="border-border/70 bg-card/30">
             <CardHeader><CardTitle className="text-base">Configuracao</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -486,7 +547,7 @@ export default function EditStudioPage() {
                     })}
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">Selecionadas: {tags.join(", ")}</p>
+                <p className="text-xs text-muted-foreground">Selecionadas: {tags.length ? tags.join(", ") : "nenhuma"}</p>
               </div>
 
               {mode === "character_replace" ? (
@@ -576,81 +637,88 @@ export default function EditStudioPage() {
                 <Switch checked={contextBoost} onCheckedChange={setContextBoost} />
               </div>
 
-              <Button onClick={submit} disabled={loading || uploadingSource || uploadingCustomCharacter} className="w-full gap-2">
+              <Button onClick={submit} disabled={loading || uploadingSource || uploadingCustomCharacter} className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                 Executar Edit Studio
               </Button>
-              {resultUrl && pendingResultAssetId ? (
-                <Button onClick={saveResult} disabled={savingResult} variant="secondary" className="w-full gap-2">
-                  {savingResult ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Salvar resultado
-                </Button>
-              ) : null}
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
             </CardContent>
           </Card>
         </section>
 
-        <section className="space-y-4 xl:col-span-7">
-          <Card>
+        <section className="space-y-4 xl:col-span-9">
+          {resultUrl ? (
+            <Card className="border-border/70 bg-card/35">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Resultado</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <img src={resultUrl} alt="result" className="aspect-video w-full rounded border border-border/70 object-cover" />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => downloadResultImage(resultUrl)}>
+                    <Download className="h-3.5 w-3.5" />
+                    Baixar
+                  </Button>
+                  {pendingResultAssetId ? (
+                    <Button type="button" size="sm" variant="secondary" className="h-8 gap-1.5" onClick={saveResult} disabled={savingResult}>
+                      {savingResult ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      Salvar resultado
+                    </Button>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="border-border/70">
             <CardHeader><CardTitle className="text-base">Mask Canvas</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-[1fr_220px]">
-                <div className="space-y-2">
-                  <div className="relative overflow-hidden rounded border border-border/60 bg-black/30">
-                    {sourceImageUrl ? (
-                      <>
-                        <img
-                          ref={imgRef}
-                          src={sourceImageUrl}
-                          alt="source"
-                          className="block max-h-[520px] w-full object-contain"
-                          onLoad={() => {
-                            ensureCanvasSize();
-                            clearMask();
-                          }}
-                        />
-                        <canvas
-                          ref={canvasRef}
-                          className="absolute inset-0 h-full w-full touch-none"
-                          style={{ opacity: maskOpacity }}
-                          onPointerDown={(ev) => {
-                            ensureCanvasSize();
-                            isDrawingRef.current = true;
-                            lastPointRef.current = null;
-                            const p = toLocalPoint(ev);
-                            drawPoint(p.x, p.y);
-                          }}
-                          onPointerMove={(ev) => {
-                            if (!isDrawingRef.current) return;
-                            const p = toLocalPoint(ev);
-                            drawPoint(p.x, p.y);
-                          }}
-                          onPointerUp={() => {
-                            isDrawingRef.current = false;
-                            lastPointRef.current = null;
-                          }}
-                          onPointerLeave={() => {
-                            isDrawingRef.current = false;
-                            lastPointRef.current = null;
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">Selecione um source image.</div>
-                    )}
-                  </div>
-
-                  {resultUrl ? (
-                    <div className="rounded border border-primary/40 bg-primary/5 p-2">
-                      <p className="mb-2 text-xs text-muted-foreground">Resultado</p>
-                      <img src={resultUrl} alt="result" className="aspect-video w-full rounded object-cover" />
-                    </div>
-                  ) : null}
-
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
+                <div className="relative overflow-hidden rounded border border-border/60 bg-black/30">
+                  {sourceImageUrl ? (
+                    <>
+                      <img
+                        ref={imgRef}
+                        src={sourceImageUrl}
+                        alt="source"
+                        className="block h-[min(72vh,760px)] w-full object-contain"
+                        onLoad={() => {
+                          ensureCanvasSize();
+                          clearMask();
+                        }}
+                      />
+                      <canvas
+                        ref={canvasRef}
+                        className="absolute inset-0 h-full w-full touch-none"
+                        style={{ opacity: maskOpacity }}
+                        onPointerDown={(ev) => {
+                          ensureCanvasSize();
+                          isDrawingRef.current = true;
+                          lastPointRef.current = null;
+                          const p = toLocalPoint(ev);
+                          drawPoint(p.x, p.y);
+                        }}
+                        onPointerMove={(ev) => {
+                          if (!isDrawingRef.current) return;
+                          const p = toLocalPoint(ev);
+                          drawPoint(p.x, p.y);
+                        }}
+                        onPointerUp={() => {
+                          isDrawingRef.current = false;
+                          lastPointRef.current = null;
+                        }}
+                        onPointerLeave={() => {
+                          isDrawingRef.current = false;
+                          lastPointRef.current = null;
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex h-[min(72vh,760px)] items-center justify-center text-sm text-muted-foreground">Selecione um source image.</div>
+                  )}
                 </div>
 
-                <div className="space-y-3 rounded border border-border/60 bg-card/30 p-3">
+                <div className="h-fit space-y-3 rounded border border-border/60 bg-card/30 p-3 xl:sticky xl:top-24">
                   <div className="space-y-1">
                     <Label className="text-xs">Brush size: {brushSize}</Label>
                     <Slider value={[brushSize]} min={4} max={120} step={1} onValueChange={(v) => setBrushSize(v[0] ?? 22)} />
@@ -680,7 +748,8 @@ export default function EditStudioPage() {
           <div className="w-full max-w-md rounded-xl border border-border/70 bg-card/95 p-6 text-center shadow-2xl">
             <Loader2 className="mx-auto mb-3 h-10 w-10 animate-spin text-primary" />
             <p className="text-sm font-medium">Aplicando edicao...</p>
-            <p className="mt-1 text-xs text-muted-foreground">Isso pode levar alguns segundos.</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadingPhase}</p>
+            <p className="mt-3 text-xs uppercase tracking-[0.1em] text-muted-foreground">{loadingElapsedSec || 1}s decorridos</p>
           </div>
         </div>
       ) : null}

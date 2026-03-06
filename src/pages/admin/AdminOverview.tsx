@@ -402,8 +402,8 @@ function getAlertInfo(alert: SystemAlert): { title: string; description: string;
       const edges = Number(d.edges_total || 0);
       if (collections === 0) return {
         title: "Link Edges Coverage",
-        description: "Sem collections resolvÃ­veis no recorte atual.",
-        detail: "A cobertura serÃ¡ calculada assim que houver collections set_* ativas na janela.",
+        description: "Sem collections resolvíveis no recorte atual.",
+        detail: "A cobertura será calculada assim que houver collections set_* ativas na janela.",
       };
       if (alert.severity === "ok") return {
         title: "Link Edges Coverage",

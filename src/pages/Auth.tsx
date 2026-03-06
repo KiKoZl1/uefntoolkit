@@ -63,16 +63,25 @@ export default function Auth() {
               {!isLogin && (
                 <div className="space-y-2">
                   <Label htmlFor="name">{t("auth.name")}</Label>
-                  <Input id="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={t("auth.namePlaceholder")} required />
+                  <Input id="name" autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={t("auth.namePlaceholder")} required />
                 </div>
               )}
               <div className="space-y-2">
                 <Label htmlFor="email">{t("auth.email")}</Label>
-                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("auth.emailPlaceholder")} required />
+                <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("auth.emailPlaceholder")} required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">{t("auth.password")}</Label>
-                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("auth.passwordPlaceholder")} minLength={6} required />
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete={isLogin ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={t("auth.passwordPlaceholder")}
+                  minLength={6}
+                  required
+                />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? t("auth.waiting") : isLogin ? t("auth.submitLogin") : t("auth.submitSignup")}
@@ -100,7 +109,7 @@ export default function Auth() {
             </Button>
             <div className="mt-4 text-center text-sm text-muted-foreground">
               {isLogin ? t("auth.noAccount") : t("auth.hasAccount")}
-              <button onClick={() => setIsLogin(!isLogin)} className="text-primary hover:underline font-medium">
+              <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-primary hover:underline font-medium">
                 {isLogin ? t("auth.createAccount") : t("auth.login")}
               </button>
             </div>
