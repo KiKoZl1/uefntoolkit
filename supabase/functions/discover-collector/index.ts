@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1242,6 +1250,21 @@ serve(async (req) => {
 
     let body: any = {};
     try { body = await req.json(); } catch { /* empty body ok */ }
+
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-collector",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 10000),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
 
     const mode = body.mode || "start";
 

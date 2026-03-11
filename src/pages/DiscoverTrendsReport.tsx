@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +17,7 @@ import { ReportPageSkeleton } from "@/components/discover/ReportSkeleton";
 import {
   PieChart as RPieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
 } from "recharts";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 const PIE_COLORS = [
   "hsl(252, 85%, 60%)", "hsl(168, 70%, 45%)", "hsl(38, 92%, 50%)",
@@ -71,15 +71,15 @@ export default function DiscoverTrendsReport() {
 
   const fetchReport = useCallback(() => {
     if (!reportId) return;
-    supabase
-      .from("discover_reports")
-      .select("*")
-      .eq("id", reportId)
-      .single()
-      .then(({ data }) => {
-        if (data) setReport(data as Report);
-        setLoading(false);
-      });
+    dataSelect<Report>({
+      table: "discover_reports",
+      columns: "*",
+      filters: [{ op: "eq", column: "id", value: reportId }],
+      single: "single",
+    }).then(({ data }) => {
+      if (data) setReport(data as Report);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [reportId]);
 
   useEffect(() => { fetchReport(); }, [fetchReport]);

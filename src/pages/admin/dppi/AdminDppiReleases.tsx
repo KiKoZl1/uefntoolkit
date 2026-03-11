@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { DppiAdminHeader, fmtDate } from "./shared";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 const CHANNELS = ["shadow", "candidate", "limited", "production"] as const;
 
@@ -23,15 +24,17 @@ export default function AdminDppiReleases() {
   const load = useCallback(async () => {
     setLoading(true);
     const [channelsRes, modelsRes] = await Promise.all([
-      (supabase as any)
-        .from("dppi_release_channels")
-        .select("channel_name,model_name,model_version,notes,updated_at")
-        .order("channel_name", { ascending: true }),
-      (supabase as any)
-        .from("dppi_model_registry")
-        .select("model_name,model_version,task_type,status,updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(60),
+      dataSelect<any[]>({
+        table: "dppi_release_channels",
+        columns: "channel_name,model_name,model_version,notes,updated_at",
+        order: [{ column: "channel_name", ascending: true }],
+      }),
+      dataSelect<any[]>({
+        table: "dppi_model_registry",
+        columns: "model_name,model_version,task_type,status,updated_at",
+        order: [{ column: "updated_at", ascending: false }],
+        limit: 60,
+      }),
     ]);
 
     setChannels(Array.isArray(channelsRes.data) ? channelsRes.data : []);

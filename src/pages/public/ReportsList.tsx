@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, Users, Play, Clock, Loader2, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 interface WeeklyReport {
   id: string;
@@ -30,15 +30,15 @@ export default function ReportsList() {
   const { t, i18n } = useTranslation();
 
   useEffect(() => {
-    supabase
-      .from("weekly_reports")
-      .select("*")
-      .eq("status", "published")
-      .order("date_from", { ascending: false })
-      .then(({ data }) => {
-        if (data) setReports(data as WeeklyReport[]);
-        setLoading(false);
-      });
+    dataSelect<WeeklyReport[]>({
+      table: "weekly_reports",
+      columns: "*",
+      filters: [{ op: "eq", column: "status", value: "published" }],
+      order: [{ column: "date_from", ascending: false }],
+    }).then(({ data }) => {
+      if (data) setReports(data as WeeklyReport[]);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";

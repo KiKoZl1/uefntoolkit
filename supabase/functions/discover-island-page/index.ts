@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +22,11 @@ const CACHE_STALE_MINUTES = 10;
 const ACTIVE_CACHE_RETENTION_DAYS = 3;
 const DEFAULT_REFRESH_BATCH = 50;
 const MAX_REFRESH_BATCH = 200;
+
+function cacheTtlMinutes(): number {
+  const ttlSeconds = getEnvNumber("SERVING_CACHE_TTL_SECONDS", CACHE_TTL_MINUTES * 60);
+  return Math.max(1, Math.ceil(ttlSeconds / 60));
+}
 
 type ChartRangeKey = "1D" | "1W" | "1M" | "ALL";
 type RequestRangeKey = ChartRangeKey | "1Y";
@@ -1061,6 +1074,21 @@ serve(async (req) => {
       body = {};
     }
 
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-island-page",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 4500),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
+
     const mode = String(body?.mode || "").trim().toLowerCase();
     const supabase = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
@@ -1071,6 +1099,7 @@ serve(async (req) => {
 
       const batchSize = clampBatchSize(body?.batchSize);
       const cutoffIso = new Date(nowMs - ACTIVE_CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const prewarmHot = body?.prewarmHot != null ? Boolean(body.prewarmHot) : true;
 
       const { data: activeRows, error: activeError } = await supabase
         .from("discover_island_page_cache")
@@ -1081,20 +1110,69 @@ serve(async (req) => {
 
       if (activeError) throw activeError;
 
-      let processed = 0;
-      let succeeded = 0;
-      let failed = 0;
-
+      const selectedRows = new Map<string, { island_code: string; region: string; surface_name: string }>();
       for (const row of activeRows || []) {
         const islandCode = String((row as any).island_code || "").trim();
         const region = String((row as any).region || "NAE").trim().toUpperCase();
         const surfaceName = String((row as any).surface_name || "CreativeDiscoverySurface_Frontend").trim();
         if (!ISLAND_CODE_RE.test(islandCode)) continue;
+        selectedRows.set(`${islandCode}:${region}:${surfaceName}`, {
+          island_code: islandCode,
+          region,
+          surface_name: surfaceName,
+        });
+      }
+
+      let seededHot = 0;
+      if (prewarmHot && selectedRows.size < batchSize) {
+        const remaining = Math.max(0, batchSize - selectedRows.size);
+        const [premiumRes, emergingRes] = await Promise.all([
+          supabase
+            .from("discovery_public_premium_now")
+            .select("link_code,region,surface_name,rank,link_code_type")
+            .eq("link_code_type", "island")
+            .order("rank", { ascending: true })
+            .limit(Math.max(remaining * 2, 30)),
+          supabase
+            .from("discovery_public_emerging_now")
+            .select("link_code,region,surface_name,score,link_code_type")
+            .eq("link_code_type", "island")
+            .order("score", { ascending: false })
+            .limit(Math.max(remaining * 2, 30)),
+        ]);
+
+        const hotRows = [...(premiumRes.data || []), ...(emergingRes.data || [])] as any[];
+        for (const row of hotRows) {
+          if (selectedRows.size >= batchSize) break;
+          const islandCode = String(row?.link_code || "").trim();
+          const region = String(row?.region || "NAE").trim().toUpperCase();
+          const surfaceName = String(row?.surface_name || "CreativeDiscoverySurface_Frontend").trim();
+          if (!ISLAND_CODE_RE.test(islandCode)) continue;
+
+          const key = `${islandCode}:${region}:${surfaceName}`;
+          if (selectedRows.has(key)) continue;
+          selectedRows.set(key, {
+            island_code: islandCode,
+            region,
+            surface_name: surfaceName,
+          });
+          seededHot += 1;
+        }
+      }
+
+      let processed = 0;
+      let succeeded = 0;
+      let failed = 0;
+
+      for (const row of selectedRows.values()) {
+        const islandCode = row.island_code;
+        const region = row.region;
+        const surfaceName = row.surface_name;
 
         processed += 1;
         try {
           const freshPayload = await buildFreshPayload(supabase, islandCode, region, surfaceName);
-          const expiresAt = new Date(Date.now() + CACHE_TTL_MINUTES * 60 * 1000).toISOString();
+          const expiresAt = new Date(Date.now() + cacheTtlMinutes() * 60 * 1000).toISOString();
           await supabase
             .from("discover_island_page_cache")
             .update({
@@ -1127,6 +1205,8 @@ serve(async (req) => {
         mode: "refresh_cache",
         batchSize,
         cutoffIso,
+        prewarmHot,
+        seededHot,
         processed,
         succeeded,
         failed,
@@ -1178,7 +1258,7 @@ serve(async (req) => {
         try {
           const refreshed = await buildFreshPayload(supabase, islandCode, region, surfaceName);
           normalized = normalizeSeriesByRange(refreshed);
-          const expiresAt = new Date(nowMs + CACHE_TTL_MINUTES * 60 * 1000).toISOString();
+          const expiresAt = new Date(nowMs + cacheTtlMinutes() * 60 * 1000).toISOString();
           await supabase
             .from("discover_island_page_cache")
             .update({
@@ -1236,7 +1316,7 @@ serve(async (req) => {
 
     const freshPayload = await buildFreshPayload(supabase, islandCode, region, surfaceName);
     const normalizedFresh = normalizeSeriesByRange(freshPayload) || legacyFallbackSeriesByRange(freshPayload as unknown as Record<string, unknown>);
-    const expiresAt = new Date(nowMs + CACHE_TTL_MINUTES * 60 * 1000).toISOString();
+    const expiresAt = new Date(nowMs + cacheTtlMinutes() * 60 * 1000).toISOString();
 
     await supabase.from("discover_island_page_cache").upsert(
       {

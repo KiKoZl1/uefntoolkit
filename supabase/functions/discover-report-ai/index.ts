@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,7 +85,29 @@ serve(async (req) => {
       }
     }
 
-    const { reportId } = await req.json();
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
+
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-report-ai",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 12000),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
+
+    const { reportId } = body;
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!reportId || !UUID_REGEX.test(reportId)) {
       return new Response(JSON.stringify({ error: "Invalid reportId format" }), {

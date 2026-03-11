@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { RefreshCcw, Wrench, AlertTriangle, CheckCircle2, Clock, ListChecks, PauseCircle, PlayCircle, KeyRound, Copy, StopCircle, Activity } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 type TargetRow = {
   id: string;
@@ -125,7 +126,6 @@ function computeUptime(ticks: TickRow[], targets: TargetRow[], nowMs: number): n
 
 export default function AdminExposureHealth() {
   const { toast } = useToast();
-  const sb: any = supabase;
 
   const [loading, setLoading] = useState(true);
   const [targets, setTargets] = useState<TargetRow[]>([]);
@@ -144,32 +144,37 @@ export default function AdminExposureHealth() {
   }, []);
 
   const fetchState = useCallback(async () => {
-    const { data: t, error: tErr } = await sb
-      .from("discovery_exposure_targets")
-      .select(
-        "id,region,surface_name,platform,locale,interval_minutes,next_due_at,locked_at,last_ok_tick_at,last_failed_tick_at,last_status,last_error",
-      )
-      .order("region", { ascending: true })
-      .order("surface_name", { ascending: true });
-    if (tErr) {
-      toast({ title: "Falha ao carregar targets", description: tErr.message, variant: "destructive" });
+    let t: any[] = [];
+    try {
+      const res = await dataSelect<any[]>({
+        table: "discovery_exposure_targets",
+        columns: "id,region,surface_name,platform,locale,interval_minutes,next_due_at,locked_at,last_ok_tick_at,last_failed_tick_at,last_status,last_error",
+        order: [{ column: "region", ascending: true }, { column: "surface_name", ascending: true }],
+      });
+      t = Array.isArray(res.data) ? res.data : [];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: "Falha ao carregar targets", description: message, variant: "destructive" });
       return;
     }
 
     const ids = (t || []).map((r: any) => r.id);
     let tickRows: TickRow[] = [];
     if (ids.length) {
-      const { data: tk, error: tkErr } = await sb
-        .from("discovery_exposure_ticks")
-        .select("id,target_id,ts_start,ts_end,status,panels_count,entries_count,duration_ms,branch,error_message")
-        .in("target_id", ids)
-        .order("ts_start", { ascending: false })
-        .limit(250);
-      if (tkErr) {
-        toast({ title: "Falha ao carregar ticks", description: tkErr.message, variant: "destructive" });
+      try {
+        const tkRes = await dataSelect<any[]>({
+          table: "discovery_exposure_ticks",
+          columns: "id,target_id,ts_start,ts_end,status,panels_count,entries_count,duration_ms,branch,error_message",
+          filters: [{ op: "in", column: "target_id", value: ids }],
+          order: [{ column: "ts_start", ascending: false }],
+          limit: 250,
+        });
+        tickRows = (tkRes.data || []) as TickRow[];
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast({ title: "Falha ao carregar ticks", description: message, variant: "destructive" });
         return;
       }
-      tickRows = (tk || []) as TickRow[];
     }
 
     setTargets((t || []) as TargetRow[]);
@@ -178,36 +183,19 @@ export default function AdminExposureHealth() {
 
     const { data: cfg } = await supabase.functions.invoke("discover-exposure-collector", { body: { mode: "config_status" } });
     if (cfg?.success) setConfigStatus({ epicOauthClient: Boolean(cfg.epicOauthClient), epicDeviceAuth: Boolean(cfg.epicDeviceAuth) });
-  }, [sb, toast]);
+  }, [toast]);
 
   // Initial fetch
   useEffect(() => {
     fetchState();
   }, [fetchState]);
 
-  // Realtime subscriptions for auto-refresh
+  // Polling refresh for Data-side ownership (realtime on App tables is no longer valid after split).
   useEffect(() => {
-    const targetsChannel = supabase
-      .channel("admin-exposure-targets")
-      .on("postgres_changes", { event: "*", schema: "public", table: "discovery_exposure_targets" }, () => {
-        fetchState();
-      })
-      .subscribe();
-
-    const ticksChannel = supabase
-      .channel("admin-exposure-ticks")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "discovery_exposure_ticks" }, () => {
-        fetchState();
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "discovery_exposure_ticks" }, () => {
-        fetchState();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(targetsChannel);
-      supabase.removeChannel(ticksChannel);
-    };
+    const timer = setInterval(() => {
+      void fetchState();
+    }, 15000);
+    return () => clearInterval(timer);
   }, [fetchState]);
 
   const ticksByTarget = useMemo(() => {

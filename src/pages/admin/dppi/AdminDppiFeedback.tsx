@@ -1,8 +1,8 @@
 ﻿import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DppiAdminHeader, fmtDate } from "./shared";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 export default function AdminDppiFeedback() {
   const [loading, setLoading] = useState(true);
@@ -10,11 +10,12 @@ export default function AdminDppiFeedback() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await (supabase as any)
-        .from("dppi_feedback_events")
-        .select("created_at,source,user_id,island_code,panel_name,region,surface_name,event_type,event_value")
-        .order("created_at", { ascending: false })
-        .limit(200);
+      const { data } = await dataSelect<any[]>({
+        table: "dppi_feedback_events",
+        columns: "created_at,source,user_id,island_code,panel_name,region,surface_name,event_type,event_value",
+        order: [{ column: "created_at", ascending: false }],
+        limit: 200,
+      });
       setRows(Array.isArray(data) ? data : []);
       setLoading(false);
     })();

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DppiAdminHeader, fmtDate } from "./shared";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 export default function AdminDppiTraining() {
   const [loading, setLoading] = useState(true);
@@ -15,11 +16,12 @@ export default function AdminDppiTraining() {
   const load = useCallback(async () => {
     setLoading(true);
     const [logsRes, healthRes] = await Promise.all([
-      (supabase as any)
-        .from("dppi_training_log")
-        .select("id,requested_at,started_at,ended_at,status,model_name,model_version,task_type,error_text")
-        .order("requested_at", { ascending: false })
-        .limit(100),
+      dataSelect<any[]>({
+        table: "dppi_training_log",
+        columns: "id,requested_at,started_at,ended_at,status,model_name,model_version,task_type,error_text",
+        order: [{ column: "requested_at", ascending: false }],
+        limit: 100,
+      }),
       supabase.functions.invoke("dppi-health", { body: {} }),
     ]);
 

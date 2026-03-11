@@ -1,5 +1,14 @@
-﻿import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  isInternalBridgeRequest,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -269,14 +278,16 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+    const forwardedAuthHeader = req.headers.get("x-forwarded-authorization") || "";
+    const userAuthHeader = isInternalBridgeRequest(req) ? forwardedAuthHeader : authHeader;
+    if (!userAuthHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
 
     const sbUrl = Deno.env.get("SUPABASE_URL")!;
     const sbAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const sbService = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const userClient = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
-    const token = authHeader.replace("Bearer ", "");
+    const userClient = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: userAuthHeader } } });
+    const token = userAuthHeader.replace("Bearer ", "");
     const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
     if (claimsError || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
     const userId = String(claimsData?.claims?.sub || "").trim();
@@ -289,6 +300,21 @@ serve(async (req) => {
       body = {};
     }
     const mode = String(body?.mode || "").trim().toLowerCase();
+
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-island-lookup-ai",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 10000),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
 
     const service = createClient(sbUrl, sbService);
 
@@ -354,7 +380,7 @@ serve(async (req) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: authHeader,
+          Authorization: userAuthHeader,
           apikey: sbAnon,
         },
         body: JSON.stringify({ islandCode, compareCode: compareIslandCode || null }),
@@ -500,3 +526,7 @@ serve(async (req) => {
     return json({ error: message || "Unknown error" }, 500);
   }
 });
+
+
+
+

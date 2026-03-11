@@ -10,19 +10,27 @@ RETURNS TABLE (
   tag_group text,
   quality_score numeric
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-SELECT
-  s.link_code,
-  s.image_url,
-  s.tag_group,
-  s.quality_score
-FROM public.compute_tgis_thumb_score(14) s
-WHERE s.quality_score >= COALESCE(p_min_score, 0.30)
-ORDER BY s.quality_score DESC
-LIMIT LEAST(50000, GREATEST(1, COALESCE(p_limit, 5000)));
+BEGIN
+  -- Fresh databases can run this migration before compute_tgis_thumb_score exists.
+  IF to_regprocedure('public.compute_tgis_thumb_score(integer)') IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    s.link_code,
+    s.image_url,
+    s.tag_group,
+    s.quality_score
+  FROM public.compute_tgis_thumb_score(14) s
+  WHERE s.quality_score >= COALESCE(p_min_score, 0.30)
+  ORDER BY s.quality_score DESC
+  LIMIT LEAST(50000, GREATEST(1, COALESCE(p_limit, 5000)));
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_tgis_training_candidates(
@@ -36,21 +44,29 @@ RETURNS TABLE (
   tag_group text,
   quality_score numeric
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-SELECT
-  s.link_code,
-  s.image_url,
-  s.tag_group,
-  s.quality_score
-FROM public.compute_tgis_thumb_score(
-  LEAST(365, GREATEST(1, COALESCE(p_window_days, 14)))
-) s
-WHERE s.quality_score >= COALESCE(p_min_score, 0.30)
-ORDER BY s.quality_score DESC
-LIMIT LEAST(50000, GREATEST(1, COALESCE(p_limit, 5000)));
+BEGIN
+  -- Fresh databases can run this migration before compute_tgis_thumb_score exists.
+  IF to_regprocedure('public.compute_tgis_thumb_score(integer)') IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    s.link_code,
+    s.image_url,
+    s.tag_group,
+    s.quality_score
+  FROM public.compute_tgis_thumb_score(
+    LEAST(365, GREATEST(1, COALESCE(p_window_days, 14)))
+  ) s
+  WHERE s.quality_score >= COALESCE(p_min_score, 0.30)
+  ORDER BY s.quality_score DESC
+  LIMIT LEAST(50000, GREATEST(1, COALESCE(p_limit, 5000)));
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.tgis_refresh_dataset_daily()

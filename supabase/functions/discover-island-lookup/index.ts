@@ -1,5 +1,16 @@
 ﻿import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataOwnerHeaders,
+  getEnvNumber,
+  invokeDataFunction,
+  isInternalBridgeRequest,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "*",
@@ -258,45 +269,6 @@ serve(async (req) => {
   let userId: string | null = null;
 
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
-    const sbUrl = Deno.env.get("SUPABASE_URL")!;
-    const sbAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const sbService = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const sb = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
-    service = createClient(sbUrl, sbService);
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await sb.auth.getClaims(token);
-    userId = String(claimsData?.claims?.sub || "") || null;
-    if (claimsError || !claimsData?.claims) {
-      await safeLogRun(service, {
-        user_id: userId,
-        island_code: code,
-        status: "error",
-        duration_ms: Date.now() - startedAt,
-        error_type: "auth_error",
-        error_message: "Unauthorized",
-      });
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!userId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     let body: any = {};
     try {
       body = await req.json();
@@ -304,9 +276,50 @@ serve(async (req) => {
       body = {};
     }
 
+    const internalBridge = isInternalBridgeRequest(req);
+    const authHeader = req.headers.get("Authorization") || "";
+    const sbUrl = Deno.env.get("SUPABASE_URL")!;
+    const sbAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const sbService = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    service = createClient(sbUrl, sbService);
+
+    if (!internalBridge) {
+      if (!authHeader.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const sb = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claimsData, error: claimsError } = await sb.auth.getClaims(token);
+      userId = String(claimsData?.claims?.sub || "") || null;
+      if (claimsError || !claimsData?.claims || !userId) {
+        await safeLogRun(service, {
+          user_id: userId,
+          island_code: code,
+          status: "error",
+          duration_ms: Date.now() - startedAt,
+          error_type: "auth_error",
+          error_message: "Unauthorized",
+        });
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      userId = null;
+    }
+
     const mode = String(body?.mode || "").trim().toLowerCase();
     if (mode === "recent") {
-      const recentLookups = await listRecentLookups(service, userId || "");
+      if (!userId) {
+        return new Response(JSON.stringify({ recentLookups: [] }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const recentLookups = await listRecentLookups(service, userId);
       return new Response(JSON.stringify({ recentLookups }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -347,13 +360,19 @@ serve(async (req) => {
       });
     }
 
-    const { data: cachedLookup } = await service
-      .from("discover_lookup_recent")
-      .select("id,payload_json,hit_count,last_accessed_at,created_at")
-      .eq("user_id", userId)
-      .eq("primary_code", code)
-      .eq("compare_code", compareKey)
-      .maybeSingle();
+    const canUseUserCache = !internalBridge && Boolean(userId);
+    const cacheUserId = userId || "";
+    let cachedLookup: any = null;
+    if (canUseUserCache) {
+      const { data } = await service
+        .from("discover_lookup_recent")
+        .select("id,payload_json,hit_count,last_accessed_at,created_at")
+        .eq("user_id", cacheUserId)
+        .eq("primary_code", code)
+        .eq("compare_code", compareKey)
+        .maybeSingle();
+      cachedLookup = data;
+    }
 
     if (cachedLookup?.payload_json) {
       const nowIso = new Date().toISOString();
@@ -365,7 +384,7 @@ serve(async (req) => {
         })
         .eq("id", cachedLookup.id);
 
-      const recentLookups = await listRecentLookups(service, userId || "");
+      const recentLookups = await listRecentLookups(service, cacheUserId);
       await safeLogRun(service, {
         user_id: userId,
         island_code: code,
@@ -384,6 +403,84 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
+    }
+
+    if (!internalBridge && shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-island-lookup",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 5000),
+      });
+
+      if (proxied.ok && proxied.data && typeof proxied.data === "object" && !proxied.data.error) {
+        const proxiedData = proxied.data as Record<string, unknown>;
+        const bridgedPayload = { ...proxiedData } as Record<string, unknown>;
+        delete bridgedPayload.cacheHit;
+        delete bridgedPayload.recentLookups;
+        delete bridgedPayload.bridge;
+
+        const nowIso = new Date().toISOString();
+        if (canUseUserCache) {
+          await service
+            .from("discover_lookup_recent")
+            .upsert(
+              {
+                user_id: cacheUserId,
+                primary_code: code,
+                compare_code: compareKey,
+                primary_title: String((bridgedPayload as any)?.metadata?.title || code),
+                compare_title: compareIslandCode || null,
+                payload_json: bridgedPayload,
+                created_at: nowIso,
+                last_accessed_at: nowIso,
+                hit_count: 0,
+              },
+              { onConflict: "user_id,primary_code,compare_code" },
+            );
+
+          const { data: keepRows } = await service
+            .from("discover_lookup_recent")
+            .select("id")
+            .eq("user_id", cacheUserId)
+            .order("last_accessed_at", { ascending: false })
+            .limit(3);
+          const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
+          if (keepIds.length > 0) {
+            await service
+              .from("discover_lookup_recent")
+              .delete()
+              .eq("user_id", cacheUserId)
+              .not("id", "in", `(${keepIds.join(",")})`);
+          }
+        }
+
+        const recentLookups = canUseUserCache ? await listRecentLookups(service, cacheUserId) : [];
+        await safeLogRun(service, {
+          user_id: userId,
+          island_code: code,
+          status: "ok",
+          duration_ms: Date.now() - startedAt,
+          cache_hit: false,
+          bridge_hit: true,
+        });
+
+        return new Response(
+          JSON.stringify({
+            ...bridgedPayload,
+            cacheHit: false,
+            recentLookups,
+          }),
+          {
+            headers: { ...corsHeaders, ...dataOwnerHeaders(), "Content-Type": "application/json" },
+          },
+        );
+      }
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (!internalBridge && shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
     }
 
     const metaRes = await fetch(`${EPIC_API}/islands/${code}`);
@@ -928,11 +1025,36 @@ serve(async (req) => {
     };
 
     const nowIso = new Date().toISOString();
+    if (!canUseUserCache) {
+      await safeLogRun(service, {
+        user_id: userId,
+        island_code: code,
+        status: "ok",
+        duration_ms: Date.now() - startedAt,
+        has_internal_card: Boolean(internalCard),
+        has_discovery_signals: exposurePanelsTopLegacy.length > 0 || exposureDailyMinutesLegacy.length > 0,
+        has_weekly_performance: weeklyPerformance.length > 0,
+        category_leaders_count: categoryLeaders.length,
+        cache_hit: false,
+      });
+
+      return new Response(
+        JSON.stringify({
+          ...responsePayload,
+          cacheHit: false,
+          recentLookups: [],
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     await service
       .from("discover_lookup_recent")
       .upsert(
         {
-          user_id: userId,
+          user_id: cacheUserId,
           primary_code: code,
           compare_code: compareKey,
           primary_title: metadata?.title || code,
@@ -948,7 +1070,7 @@ serve(async (req) => {
     const { data: keepRows } = await service
       .from("discover_lookup_recent")
       .select("id")
-      .eq("user_id", userId)
+      .eq("user_id", cacheUserId)
       .order("last_accessed_at", { ascending: false })
       .limit(3);
     const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
@@ -956,10 +1078,10 @@ serve(async (req) => {
       await service
         .from("discover_lookup_recent")
         .delete()
-        .eq("user_id", userId)
+        .eq("user_id", cacheUserId)
         .not("id", "in", `(${keepIds.join(",")})`);
     }
-    const recentLookups = await listRecentLookups(service, userId || "");
+    const recentLookups = await listRecentLookups(service, cacheUserId);
 
     await safeLogRun(service, {
       user_id: userId,

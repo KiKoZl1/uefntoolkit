@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Eye, TrendingUp, AlertTriangle, Loader2, Clock3, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 type PremiumRow = {
   as_of: string;
@@ -317,9 +318,21 @@ export default function DiscoverLive() {
     }
     try {
       const [p, e, pol] = await Promise.all([
-        supabase.from("discovery_public_premium_now").select("*").limit(5000),
-        supabase.from("discovery_public_emerging_now").select("*").limit(5000),
-        supabase.from("discovery_public_pollution_creators_now").select("*").limit(2000),
+        dataSelect<PremiumRow[]>({
+          table: "discovery_public_premium_now",
+          columns: "*",
+          limit: 5000,
+        }),
+        dataSelect<EmergingRow[]>({
+          table: "discovery_public_emerging_now",
+          columns: "*",
+          limit: 5000,
+        }),
+        dataSelect<PollutionRow[]>({
+          table: "discovery_public_pollution_creators_now",
+          columns: "*",
+          limit: 2000,
+        }),
       ]);
 
       if (p.data) setPremium(p.data as PremiumRow[]);

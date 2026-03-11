@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, RefreshCw } from "lucide-react";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 export default function AdminIntel() {
   const { t, i18n } = useTranslation();
@@ -33,26 +34,43 @@ export default function AdminIntel() {
   async function loadCounts() {
     setLoading(true);
     const [p, e, pol, latestReport] = await Promise.all([
-      (supabase as any).from("discovery_public_premium_now").select("as_of", { count: "exact", head: false }).limit(1),
-      (supabase as any).from("discovery_public_emerging_now").select("as_of", { count: "exact", head: false }).limit(1),
-      (supabase as any).from("discovery_public_pollution_creators_now").select("as_of", { count: "exact", head: false }).limit(1),
-      (supabase as any)
-        .from("weekly_reports")
-        .select("week_key,rankings_json,published_at")
-        .eq("status", "published")
-        .order("published_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      dataSelect<any[]>({
+        table: "discovery_public_premium_now",
+        columns: "as_of",
+        count: "exact",
+        limit: 1,
+      }),
+      dataSelect<any[]>({
+        table: "discovery_public_emerging_now",
+        columns: "as_of",
+        count: "exact",
+        limit: 1,
+      }),
+      dataSelect<any[]>({
+        table: "discovery_public_pollution_creators_now",
+        columns: "as_of",
+        count: "exact",
+        limit: 1,
+      }),
+      dataSelect<any>({
+        table: "weekly_reports",
+        columns: "week_key,rankings_json,published_at",
+        filters: [{ op: "eq", column: "status", value: "published" }],
+        order: [{ column: "published_at", ascending: false }],
+        limit: 1,
+        single: "maybeSingle",
+      }),
     ]);
     setPremiumCount(p.count || 0);
     setEmergingCount(e.count || 0);
     setPollutionCount(pol.count || 0);
     setAsOf(p.data?.[0]?.as_of || e.data?.[0]?.as_of || pol.data?.[0]?.as_of || null);
-    const partnerRows = Array.isArray((latestReport as any)?.data?.rankings_json?.partnerSignals)
-      ? (latestReport as any).data.rankings_json.partnerSignals
+    const reportRow = latestReport.data as any;
+    const partnerRows = Array.isArray(reportRow?.rankings_json?.partnerSignals)
+      ? reportRow.rankings_json.partnerSignals
       : [];
     setPartnerSignals(partnerRows);
-    setPartnerWeekKey((latestReport as any)?.data?.week_key || null);
+    setPartnerWeekKey(reportRow?.week_key || null);
     setLoading(false);
   }
 

@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Edit, Eye, Globe, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { dataSelect, dataUpdate } from "@/lib/discoverDataApi";
 
 interface WeeklyReport {
   id: string;
@@ -29,10 +30,11 @@ export default function AdminReportsList() {
   const { toast } = useToast();
 
   const fetchReports = async () => {
-    const { data } = await supabase
-      .from("weekly_reports")
-      .select("*")
-      .order("date_from", { ascending: false });
+    const { data } = await dataSelect<WeeklyReport[]>({
+      table: "weekly_reports",
+      columns: "*",
+      order: [{ column: "date_from", ascending: false }],
+    });
     if (data) setReports(data as WeeklyReport[]);
     setLoading(false);
   };
@@ -40,12 +42,12 @@ export default function AdminReportsList() {
   useEffect(() => { fetchReports(); }, []);
 
   const runReportRebuild = async (weeklyReportId: string) => {
-    const { data: before, error: beforeErr } = await supabase
-      .from("weekly_reports")
-      .select("rebuild_count,discover_report_id")
-      .eq("id", weeklyReportId)
-      .single();
-    if (beforeErr) throw new Error(beforeErr.message);
+    const { data: before } = await dataSelect<any>({
+      table: "weekly_reports",
+      columns: "rebuild_count,discover_report_id",
+      filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+      single: "single",
+    });
     const beforeCount = Number((before as any)?.rebuild_count || 0);
     const initialReportId = (before as any)?.discover_report_id ? String((before as any).discover_report_id) : null;
 
@@ -53,12 +55,18 @@ export default function AdminReportsList() {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        const { data: current, error: curErr } = await supabase
-          .from("weekly_reports")
-          .select("rebuild_count")
-          .eq("id", weeklyReportId)
-          .single();
-        if (curErr) continue;
+        let current: any = null;
+        try {
+          const res = await dataSelect<any>({
+            table: "weekly_reports",
+            columns: "rebuild_count",
+            filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+            single: "single",
+          });
+          current = res.data;
+        } catch {
+          continue;
+        }
         const currentCount = Number((current as any)?.rebuild_count || 0);
         if (currentCount > fromCount) return currentCount;
       }
@@ -86,11 +94,12 @@ export default function AdminReportsList() {
     }
 
     if (!reportId) {
-      const { data: wrAfter } = await supabase
-        .from("weekly_reports")
-        .select("discover_report_id")
-        .eq("id", weeklyReportId)
-        .single();
+      const { data: wrAfter } = await dataSelect<any>({
+        table: "weekly_reports",
+        columns: "discover_report_id",
+        filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+        single: "single",
+      });
       reportId = (wrAfter as any)?.discover_report_id ? String((wrAfter as any).discover_report_id) : null;
     }
     if (!reportId) throw new Error("Missing discover_report_id after core rebuild");
@@ -145,8 +154,11 @@ export default function AdminReportsList() {
         status: newStatus,
         published_at: newStatus === "published" ? new Date().toISOString() : null,
       };
-      const { error } = await supabase.from("weekly_reports").update(updates).eq("id", report.id);
-      if (error) throw error;
+      await dataUpdate({
+        table: "weekly_reports",
+        values: updates,
+        filters: [{ op: "eq", column: "id", value: report.id }],
+      });
 
       toast({ title: newStatus === "published" ? t("admin.published") : t("admin.unpublished") });
       await fetchReports();

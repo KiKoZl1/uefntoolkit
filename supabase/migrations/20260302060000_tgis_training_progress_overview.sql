@@ -1,6 +1,7 @@
 -- TGIS: real-time training progress fields for fal polling/overview
 
 ALTER TABLE public.tgis_training_runs
+  ADD COLUMN IF NOT EXISTS training_provider text NOT NULL DEFAULT 'fal',
   ADD COLUMN IF NOT EXISTS provider_status text NULL,
   ADD COLUMN IF NOT EXISTS progress_pct numeric(5,2) NULL,
   ADD COLUMN IF NOT EXISTS eta_seconds int NULL,

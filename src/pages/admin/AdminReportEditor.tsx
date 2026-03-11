@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Save, Globe, EyeOff, Loader2, Upload, Image, ChevronDown, Bold, Italic, Link2, Eye, RefreshCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { ReportPreview } from "@/components/admin/ReportPreview";
+import { dataSelect, dataUpdate } from "@/lib/discoverDataApi";
 
 const SECTION_KEYS = [
   "s1Title", "s2Title", "s3Title", "s4Title", "s5Title", "s6Title", "s7Title",
@@ -42,7 +43,12 @@ export default function AdminReportEditor() {
 
   useEffect(() => {
     if (!id) return;
-    supabase.from("weekly_reports").select("*").eq("id", id).single().then(({ data }) => {
+    dataSelect<any>({
+      table: "weekly_reports",
+      columns: "*",
+      filters: [{ op: "eq", column: "id", value: id }],
+      single: "single",
+    }).then(({ data }) => {
       if (data) {
         setReport(data);
         setTitlePublic(data.title_public || "");
@@ -52,34 +58,40 @@ export default function AdminReportEditor() {
         setCoverUrl((data as any).cover_image_url || "");
       }
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, [id]);
 
   const handleSave = async () => {
     if (!id) return;
     setSaving(true);
-    const { error } = await supabase.from("weekly_reports").update({
-      title_public: titlePublic,
-      subtitle_public: subtitlePublic,
-      editor_note: editorNote,
-      editor_sections_json: editorSections,
-      cover_image_url: coverUrl || null,
-    } as any).eq("id", id);
-    setSaving(false);
-    if (error) {
-      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
-    } else {
+    try {
+      await dataUpdate({
+        table: "weekly_reports",
+        values: {
+          title_public: titlePublic,
+          subtitle_public: subtitlePublic,
+          editor_note: editorNote,
+          editor_sections_json: editorSections,
+          cover_image_url: coverUrl || null,
+        } as any,
+        filters: [{ op: "eq", column: "id", value: id }],
+      });
       toast({ title: t("admin.saved") });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: t("common.error"), description: message, variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
   const runReportRebuild = async (weeklyReportId: string) => {
-    const { data: before, error: beforeErr } = await supabase
-      .from("weekly_reports")
-      .select("rebuild_count,discover_report_id")
-      .eq("id", weeklyReportId)
-      .single();
-    if (beforeErr) throw new Error(beforeErr.message);
+    const { data: before } = await dataSelect<any>({
+      table: "weekly_reports",
+      columns: "rebuild_count,discover_report_id",
+      filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+      single: "single",
+    });
     const beforeCount = Number((before as any)?.rebuild_count || 0);
     const initialReportId = (before as any)?.discover_report_id ? String((before as any).discover_report_id) : null;
 
@@ -87,12 +99,18 @@ export default function AdminReportEditor() {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        const { data: current, error: curErr } = await supabase
-          .from("weekly_reports")
-          .select("rebuild_count,kpis_json")
-          .eq("id", weeklyReportId)
-          .single();
-        if (curErr) continue;
+        let current: any = null;
+        try {
+          const res = await dataSelect<any>({
+            table: "weekly_reports",
+            columns: "rebuild_count,kpis_json",
+            filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+            single: "single",
+          });
+          current = res.data;
+        } catch {
+          continue;
+        }
         const currentCount = Number((current as any)?.rebuild_count || 0);
         if (currentCount > fromCount) {
           return {
@@ -131,11 +149,12 @@ export default function AdminReportEditor() {
     }
 
     if (!reportId) {
-      const { data: wrAfter } = await supabase
-        .from("weekly_reports")
-        .select("discover_report_id")
-        .eq("id", weeklyReportId)
-        .single();
+      const { data: wrAfter } = await dataSelect<any>({
+        table: "weekly_reports",
+        columns: "discover_report_id",
+        filters: [{ op: "eq", column: "id", value: weeklyReportId }],
+        single: "single",
+      });
       reportId = (wrAfter as any)?.discover_report_id ? String((wrAfter as any).discover_report_id) : null;
     }
     if (!reportId) throw new Error("Missing discover_report_id after core rebuild");
@@ -197,13 +216,21 @@ export default function AdminReportEditor() {
         await runReportRebuild(id);
       }
 
-      const { error } = await supabase.from("weekly_reports").update({
-        status: newStatus,
-        published_at: newStatus === "published" ? new Date().toISOString() : null,
-      }).eq("id", id);
-      if (error) throw error;
+      await dataUpdate({
+        table: "weekly_reports",
+        values: {
+          status: newStatus,
+          published_at: newStatus === "published" ? new Date().toISOString() : null,
+        },
+        filters: [{ op: "eq", column: "id", value: id }],
+      });
 
-      const { data: refreshed } = await supabase.from("weekly_reports").select("*").eq("id", id).single();
+      const { data: refreshed } = await dataSelect<any>({
+        table: "weekly_reports",
+        columns: "*",
+        filters: [{ op: "eq", column: "id", value: id }],
+        single: "single",
+      });
       if (refreshed) setReport(refreshed);
       else setReport({ ...report, status: newStatus });
       toast({ title: newStatus === "published" ? t("admin.published") : t("admin.unpublished") });
@@ -252,21 +279,27 @@ export default function AdminReportEditor() {
     }
 
     if (report.status === "published") {
-      const { error: unpublishErr } = await supabase
-        .from("weekly_reports")
-        .update({ status: "draft", published_at: null } as any)
-        .eq("id", id);
-      if (unpublishErr) {
-        toast({ title: t("common.error"), description: unpublishErr.message, variant: "destructive" });
+      try {
+        await dataUpdate({
+          table: "weekly_reports",
+          values: { status: "draft", published_at: null } as any,
+          filters: [{ op: "eq", column: "id", value: id }],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toast({ title: t("common.error"), description: message, variant: "destructive" });
         return;
       }
 
-      const { error: republishErr } = await supabase
-        .from("weekly_reports")
-        .update({ status: "published", published_at: new Date().toISOString() } as any)
-        .eq("id", id);
-      if (republishErr) {
-        toast({ title: t("common.error"), description: republishErr.message, variant: "destructive" });
+      try {
+        await dataUpdate({
+          table: "weekly_reports",
+          values: { status: "published", published_at: new Date().toISOString() } as any,
+          filters: [{ op: "eq", column: "id", value: id }],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toast({ title: t("common.error"), description: message, variant: "destructive" });
         return;
       }
 
@@ -281,7 +314,12 @@ export default function AdminReportEditor() {
       });
     }
 
-    const { data: refreshed } = await supabase.from("weekly_reports").select("*").eq("id", id).single();
+    const { data: refreshed } = await dataSelect<any>({
+      table: "weekly_reports",
+      columns: "*",
+      filters: [{ op: "eq", column: "id", value: id }],
+      single: "single",
+    });
     if (refreshed) setReport(refreshed);
   };
 

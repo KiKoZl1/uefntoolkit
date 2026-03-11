@@ -1,9 +1,9 @@
 ﻿import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DppiAdminHeader, fmtDate } from "./shared";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 export default function AdminDppiModels() {
   const [loading, setLoading] = useState(true);
@@ -11,11 +11,12 @@ export default function AdminDppiModels() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await (supabase as any)
-        .from("dppi_model_registry")
-        .select("model_name,model_version,task_type,status,trained_at,published_at,updated_at,metrics_json")
-        .order("updated_at", { ascending: false })
-        .limit(100);
+      const { data } = await dataSelect<any[]>({
+        table: "dppi_model_registry",
+        columns: "model_name,model_version,task_type,status,trained_at,published_at,updated_at,metrics_json",
+        order: [{ column: "updated_at", ascending: false }],
+        limit: 100,
+      });
       setRows(Array.isArray(data) ? data : []);
       setLoading(false);
     })();

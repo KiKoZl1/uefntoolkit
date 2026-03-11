@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { dataDelete, dataRpc, dataSelect, dataUpdate } from "@/lib/discoverDataApi";
 import {
   Loader2, Sparkles, CheckCircle2, RefreshCcw, Gauge, Users, AlertTriangle,
   ShieldAlert, EyeOff, Activity, Database, Eye, FileText, Clock, ChevronDown,
@@ -506,12 +507,20 @@ export default function AdminOverview() {
 
   const fetchCensus = useCallback(async () => {
     const [censusRpc, reportsRes, weeklyRes] = await Promise.all([
-      supabase.rpc("get_census_stats"),
-      supabase.from("discover_reports").select("id", { count: "exact", head: true }),
-      supabase.from("weekly_reports").select("id, published_at"),
+      dataRpc<any>({ fn: "get_census_stats" }),
+      dataSelect<any[]>({
+        table: "discover_reports",
+        columns: "id",
+        head: true,
+        count: "exact",
+      }),
+      dataSelect<any[]>({
+        table: "weekly_reports",
+        columns: "id, published_at",
+      }),
     ]);
 
-    const cs = censusRpc?.data as any || {};
+    const cs = censusRpc as any || {};
     const total = Number(cs.total_islands || 0);
     const rep = Number(cs.reported || 0);
     const sup = Number(cs.suppressed || 0);
@@ -524,8 +533,8 @@ export default function AdminOverview() {
       withTitle: Number(cs.with_title || 0),
       uniqueCreators: Number(cs.unique_creators || 0),
       engineReports: reportsRes?.count || 0,
-      weeklyReports: weeklyRes?.data?.length || 0,
-      weeklyPublished: weeklyRes?.data?.filter((r: any) => r.published_at)?.length || 0,
+      weeklyReports: Array.isArray(weeklyRes?.data) ? weeklyRes.data.length : 0,
+      weeklyPublished: Array.isArray(weeklyRes?.data) ? weeklyRes.data.filter((r: any) => r.published_at).length : 0,
     });
 
     const h = censusHistory.current;
@@ -605,11 +614,46 @@ export default function AdminOverview() {
   const fetchExposure = useCallback(async () => {
     const twentyFourAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [targetsR, targetsOkR, ticksR, ticksOkR, ticksFailR] = await Promise.all([
-      supabase.from("discovery_exposure_targets").select("id", { count: "exact", head: true }),
-      supabase.from("discovery_exposure_targets").select("id", { count: "exact", head: true }).not("last_ok_tick_at", "is", null),
-      supabase.from("discovery_exposure_ticks").select("id", { count: "exact", head: true }).gte("ts_start", twentyFourAgo),
-      supabase.from("discovery_exposure_ticks").select("id", { count: "exact", head: true }).gte("ts_start", twentyFourAgo).eq("status", "ok"),
-      supabase.from("discovery_exposure_ticks").select("id", { count: "exact", head: true }).gte("ts_start", twentyFourAgo).eq("status", "error"),
+      dataSelect<any[]>({
+        table: "discovery_exposure_targets",
+        columns: "id",
+        head: true,
+        count: "exact",
+      }),
+      dataSelect<any[]>({
+        table: "discovery_exposure_targets",
+        columns: "id",
+        head: true,
+        count: "exact",
+        filters: [{ op: "not", column: "last_ok_tick_at", operator: "is", value: null }],
+      }),
+      dataSelect<any[]>({
+        table: "discovery_exposure_ticks",
+        columns: "id",
+        head: true,
+        count: "exact",
+        filters: [{ op: "gte", column: "ts_start", value: twentyFourAgo }],
+      }),
+      dataSelect<any[]>({
+        table: "discovery_exposure_ticks",
+        columns: "id",
+        head: true,
+        count: "exact",
+        filters: [
+          { op: "gte", column: "ts_start", value: twentyFourAgo },
+          { op: "eq", column: "status", value: "ok" },
+        ],
+      }),
+      dataSelect<any[]>({
+        table: "discovery_exposure_ticks",
+        columns: "id",
+        head: true,
+        count: "exact",
+        filters: [
+          { op: "gte", column: "ts_start", value: twentyFourAgo },
+          { op: "eq", column: "status", value: "error" },
+        ],
+      }),
     ]);
     setExposure({
       targetsTotal: targetsR?.count || 0,
@@ -849,9 +893,11 @@ export default function AdminOverview() {
   }, [toast, addLog, fetchLinkGraph]);
 
   const fetchCrons = useCallback(async () => {
-    const { data, error } = await (supabase as any).rpc("admin_list_discover_crons");
-    if (error) return;
-    const rows = (data || []).map((r: any) => ({
+    const { data, error } = await supabase.functions.invoke("discover-cron-admin", {
+      body: { mode: "list" },
+    });
+    if (error || !data?.success) return;
+    const rows = ((data?.rows || []) as any[]).map((r: any) => ({
       jobid: Number(r.jobid || 0),
       name: String(r.jobname || r.name || ""),
       schedule: String(r.schedule || "-"),
@@ -863,11 +909,10 @@ export default function AdminOverview() {
   const handleSetCronActive = useCallback(async (jobname: string, active: boolean) => {
     setCronRowBusy((p) => ({ ...p, [jobname]: true }));
     try {
-      const { error } = await (supabase as any).rpc("admin_set_discover_cron_active", {
-        p_jobname: jobname,
-        p_active: active,
+      const { data, error } = await supabase.functions.invoke("discover-cron-admin", {
+        body: { mode: "set", jobname, active },
       });
-      if (error) throw error;
+      if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
       toast({
         title: active ? "Cron ativado" : "Cron pausado",
         description: jobname,
@@ -892,9 +937,11 @@ export default function AdminOverview() {
   const handlePauseAllCrons = useCallback(async () => {
     setCronBulkAction("pause");
     try {
-      const { error, data } = await (supabase as any).rpc("admin_pause_discover_crons");
-      if (error) throw error;
-      const updated = Number((data && (data.updated ?? data?.[0]?.updated)) || 0);
+      const { error, data } = await supabase.functions.invoke("discover-cron-admin", {
+        body: { mode: "pause" },
+      });
+      if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
+      const updated = Number((data?.result && (data.result.updated ?? data.result?.[0]?.updated)) || 0);
       toast({ title: "Crons pausados", description: `${updated} job(s) atualizados.` });
       addLog(`Pause all crons: ${updated} atualizados`);
       await fetchCrons();
@@ -908,9 +955,11 @@ export default function AdminOverview() {
   const handleResumeAllCrons = useCallback(async () => {
     setCronBulkAction("resume");
     try {
-      const { error, data } = await (supabase as any).rpc("admin_resume_discover_crons");
-      if (error) throw error;
-      const updated = Number((data && (data.updated ?? data?.[0]?.updated)) || 0);
+      const { error, data } = await supabase.functions.invoke("discover-cron-admin", {
+        body: { mode: "resume" },
+      });
+      if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
+      const updated = Number((data?.result && (data.result.updated ?? data.result?.[0]?.updated)) || 0);
       toast({ title: "Crons reativados", description: `${updated} job(s) atualizados.` });
       addLog(`Resume all crons: ${updated} atualizados`);
       await fetchCrons();
@@ -923,27 +972,28 @@ export default function AdminOverview() {
 
   const fetchAlerts = useCallback(async () => {
     const [alertsRes, exposureBeatRes, metadataBeatRes] = await Promise.all([
-      supabase
-        .from("system_alerts_current" as any)
-        .select("alert_key,severity,message,details,updated_at")
-        .order("alert_key", { ascending: true }),
-      supabase
-        .from("discovery_exposure_ticks")
-        .select("ts_start")
-        .order("ts_start", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("discover_link_metadata_events")
-        .select("created_at")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      dataSelect<any[]>({
+        table: "system_alerts_current",
+        columns: "alert_key,severity,message,details,updated_at",
+        order: [{ column: "alert_key", ascending: true }],
+      }),
+      dataSelect<any>({
+        table: "discovery_exposure_ticks",
+        columns: "ts_start",
+        order: [{ column: "ts_start", ascending: false }],
+        limit: 1,
+        single: "maybeSingle",
+      }),
+      dataSelect<any>({
+        table: "discover_link_metadata_events",
+        columns: "created_at",
+        order: [{ column: "created_at", ascending: false }],
+        limit: 1,
+        single: "maybeSingle",
+      }),
     ]);
 
-    if (!alertsRes.error) {
-      setAlerts((alertsRes.data || []) as any);
-    }
+    setAlerts((alertsRes.data || []) as any);
 
     setMonitorHeartbeat({
       exposureTickAt: (exposureBeatRes.data as any)?.ts_start || null,
@@ -952,7 +1002,12 @@ export default function AdminOverview() {
   }, []);
 
   const fetchReports = useCallback(async () => {
-    const { data } = await supabase.from("discover_reports").select("*").order("created_at", { ascending: false }).limit(5);
+    const { data } = await dataSelect<any[]>({
+      table: "discover_reports",
+      columns: "*",
+      order: [{ column: "created_at", ascending: false }],
+      limit: 5,
+    });
     if (data) setReports(data);
   }, []);
 
@@ -1006,7 +1061,12 @@ export default function AdminOverview() {
   }, [addLog]);
 
   const fetchActiveReportState = useCallback(async (reportId: string, logPhase = true) => {
-    const { data: report } = await supabase.from("discover_reports").select("*").eq("id", reportId).single();
+    const { data: report } = await dataSelect<any>({
+      table: "discover_reports",
+      columns: "*",
+      filters: [{ op: "eq", column: "id", value: reportId }],
+      single: "single",
+    });
     if (report) applyReportState(report, logPhase);
   }, [applyReportState]);
 
@@ -1020,7 +1080,14 @@ export default function AdminOverview() {
 
   useEffect(() => {
     (async () => {
-      const { data: active } = await supabase.from("discover_reports").select("*").in("phase", ["catalog", "metrics", "finalize", "ai"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: active } = await dataSelect<any>({
+        table: "discover_reports",
+        columns: "*",
+        filters: [{ op: "in", column: "phase", value: ["catalog", "metrics", "finalize", "ai"] }],
+        order: [{ column: "created_at", ascending: false }],
+        limit: 1,
+        single: "maybeSingle",
+      });
       if (active) {
         setActiveReportId(active.id);
         setPipelineOpen(true);
@@ -1062,36 +1129,47 @@ export default function AdminOverview() {
   };
 
   const handleCancelReport = async (reportId: string) => {
-    const { error } = await supabase.from("discover_reports").update({
-      status: "cancelled",
-      phase: "done",
-    } as any).eq("id", reportId);
-    if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Report cancelado" });
-      if (activeReportId === reportId) {
-        setActiveReportId(null);
-        setGenerating(false);
-        setGenState(INITIAL_GEN);
-      }
-      await fetchReports();
+    try {
+      await dataUpdate({
+        table: "discover_reports",
+        values: {
+          status: "cancelled",
+          phase: "done",
+        } as any,
+        filters: [{ op: "eq", column: "id", value: reportId }],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: "Erro", description: message, variant: "destructive" });
+      return;
     }
+    toast({ title: "Report cancelado" });
+    if (activeReportId === reportId) {
+      setActiveReportId(null);
+      setGenerating(false);
+      setGenState(INITIAL_GEN);
+    }
+    await fetchReports();
   };
 
   const handleDeleteReport = async (reportId: string) => {
-    const { error } = await supabase.from("discover_reports").delete().eq("id", reportId);
-    if (error) {
-      toast({ title: "Erro ao deletar", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Report deletado" });
-      if (activeReportId === reportId) {
-        setActiveReportId(null);
-        setGenerating(false);
-        setGenState(INITIAL_GEN);
-      }
-      await fetchReports();
+    try {
+      await dataDelete({
+        table: "discover_reports",
+        filters: [{ op: "eq", column: "id", value: reportId }],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: "Erro ao deletar", description: message, variant: "destructive" });
+      return;
     }
+    toast({ title: "Report deletado" });
+    if (activeReportId === reportId) {
+      setActiveReportId(null);
+      setGenerating(false);
+      setGenState(INITIAL_GEN);
+    }
+    await fetchReports();
   };
 
   // ─── Computed health statuses ─────────────────────────────

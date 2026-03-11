@@ -13,6 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { dataDelete, dataSelect } from "@/lib/discoverDataApi";
 
 interface DiscoverReport {
   id: string;
@@ -174,12 +175,13 @@ export default function DiscoverTrendsList() {
   }, [addLog, genState.metricsDone]);
 
   const fetchReports = async () => {
-    const { data, error } = await supabase
-      .from("discover_reports")
-      .select("*")
-      .order("week_start", { ascending: false })
-      .limit(8);
-    if (!error && data) setReports(data as DiscoverReport[]);
+    const { data } = await dataSelect<DiscoverReport[]>({
+      table: "discover_reports",
+      columns: "*",
+      order: [{ column: "week_start", ascending: false }],
+      limit: 8,
+    });
+    if (data) setReports(data as DiscoverReport[]);
     setLoading(false);
     return data;
   };
@@ -368,13 +370,17 @@ export default function DiscoverTrendsList() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const { error } = await supabase.from("discover_reports").delete().eq("id", id);
-    if (error) {
+    try {
+      await dataDelete({
+        table: "discover_reports",
+        filters: [{ op: "eq", column: "id", value: id }],
+      });
+    } catch {
       toast({ title: "Erro", description: "Falha ao deletar relatório", variant: "destructive" });
-    } else {
-      toast({ title: "Deletado", description: "Relatório removido com sucesso." });
-      setReports((prev) => prev.filter((r) => r.id !== id));
+      return;
     }
+    toast({ title: "Deletado", description: "Relatório removido com sucesso." });
+    setReports((prev) => prev.filter((r) => r.id !== id));
   };
 
   const phaseLabel = {

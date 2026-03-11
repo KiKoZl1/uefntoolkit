@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,70 +34,62 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, Math.floor(n)));
 }
 
-function isServiceRoleRequest(req: Request, serviceKey: string): boolean {
+async function isServiceRoleRequest(req: Request, serviceKey: string, supabaseUrl: string): Promise<boolean> {
   const authHeader = (req.headers.get("Authorization") || "").trim();
   const apiKeyHeader = (req.headers.get("apikey") || "").trim();
-  const authToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : authHeader;
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-  const expectedRef = (() => {
-    try {
-      const host = new URL(supabaseUrl).hostname || "";
-      const [ref] = host.split(".");
-      return ref || null;
-    } catch {
-      return null;
-    }
-  })();
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (authHeader || apiKeyHeader);
+  if (!token) return false;
 
-  const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
-    try {
-      const parts = token.split(".");
-      if (parts.length !== 3) return null;
-      let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      const pad = b64.length % 4;
-      if (pad) b64 += "=".repeat(4 - pad);
-      const payload = JSON.parse(atob(b64));
-      return payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
-    } catch {
-      return null;
-    }
-  };
+  if (token === serviceKey || authHeader === `Bearer ${serviceKey}` || apiKeyHeader === serviceKey) return true;
 
-  const isServiceRoleJwt = (token: string): boolean => {
-    const payload = decodeJwtPayload(token);
-    if (!payload) return false;
-    if (String(payload.role || "") !== "service_role") return false;
-    if (!expectedRef) return true;
-    return String(payload.ref || "") === expectedRef;
-  };
-
-  if (
-    serviceKey &&
-    (authHeader === `Bearer ${serviceKey}` || authHeader === serviceKey || apiKeyHeader === serviceKey)
-  ) {
-    return true;
+  // Supports rotated service keys: validate token against Auth Admin endpoint.
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/admin/users?per_page=1&page=1`, {
+      method: "GET",
+      headers: {
+        apikey: token,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return resp.ok;
+  } catch {
+    return false;
   }
-
-  return isServiceRoleJwt(authToken) || isServiceRoleJwt(apiKeyHeader);
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    if (!isServiceRoleRequest(req, serviceKey)) {
-      return json({ success: false, error: "forbidden" }, 403);
-    }
-
-    const supabase = createClient(mustEnv("SUPABASE_URL"), serviceKey);
-
     let body: any = {};
     try {
       body = await req.json();
     } catch {
       body = {};
     }
+
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-panel-intel-refresh",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 7000),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
+
+    const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = mustEnv("SUPABASE_URL");
+    if (!(await isServiceRoleRequest(req, serviceKey, supabaseUrl))) {
+      return json({ success: false, error: "forbidden" }, 403);
+    }
+
+    const supabase = createClient(supabaseUrl, serviceKey);
 
     const defaultRegions = ["NAE", "EU", "BR", "ASIA"];
     const regions = Array.isArray(body?.regions)

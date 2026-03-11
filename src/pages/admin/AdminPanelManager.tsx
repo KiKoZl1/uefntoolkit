@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Layers, Save, Plus, Trash2, Search, RefreshCw } from "lucide-react";
+import { dataDelete, dataSelect, dataUpsert } from "@/lib/discoverDataApi";
 
 interface PanelTier {
   panel_name: string;
@@ -28,8 +28,16 @@ export default function AdminPanelManager() {
   const fetchPanels = async () => {
     setLoading(true);
     const [{ data: tiers }, { data: rollup }] = await Promise.all([
-      supabase.from("discovery_panel_tiers").select("*").order("panel_name"),
-      supabase.from("discovery_exposure_rollup_daily").select("panel_name").limit(1000),
+      dataSelect<any[]>({
+        table: "discovery_panel_tiers",
+        columns: "*",
+        order: [{ column: "panel_name", ascending: true }],
+      }),
+      dataSelect<any[]>({
+        table: "discovery_exposure_rollup_daily",
+        columns: "panel_name",
+        limit: 1000,
+      }),
     ]);
 
     const tierMap = new Map<string, PanelTier>();
@@ -53,43 +61,56 @@ export default function AdminPanelManager() {
     const edit = edits[panelName];
     if (!edit) return;
     setSaving(panelName);
-    const { error } = await supabase
-      .from("discovery_panel_tiers")
-      .upsert({ panel_name: panelName, label: edit.label || null, tier: edit.tier, updated_at: new Date().toISOString() }, { onConflict: "panel_name" });
-    setSaving(null);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
+    try {
+      await dataUpsert({
+        table: "discovery_panel_tiers",
+        values: { panel_name: panelName, label: edit.label || null, tier: edit.tier, updated_at: new Date().toISOString() },
+        onConflict: "panel_name",
+      });
       toast({ title: "Saved!" });
       setEdits((prev) => { const n = { ...prev }; delete n[panelName]; return n; });
       fetchPanels();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: "Error", description: message, variant: "destructive" });
+    } finally {
+      setSaving(null);
     }
   };
 
   const handleAdd = async () => {
     if (!newPanel.panel_name) return;
     setSaving("__new__");
-    const { error } = await supabase
-      .from("discovery_panel_tiers")
-      .upsert({ panel_name: newPanel.panel_name, label: newPanel.label || null, tier: newPanel.tier, updated_at: new Date().toISOString() }, { onConflict: "panel_name" });
-    setSaving(null);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
+    try {
+      await dataUpsert({
+        table: "discovery_panel_tiers",
+        values: { panel_name: newPanel.panel_name, label: newPanel.label || null, tier: newPanel.tier, updated_at: new Date().toISOString() },
+        onConflict: "panel_name",
+      });
       toast({ title: "Panel added!" });
       setNewPanel({ panel_name: "", label: "", tier: 2 });
       fetchPanels();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: "Error", description: message, variant: "destructive" });
+    } finally {
+      setSaving(null);
     }
   };
 
   const handleDelete = async (panelName: string) => {
-    const { error } = await supabase.from("discovery_panel_tiers").delete().eq("panel_name", panelName);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Deleted" });
-      fetchPanels();
+    try {
+      await dataDelete({
+        table: "discovery_panel_tiers",
+        filters: [{ op: "eq", column: "panel_name", value: panelName }],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: "Error", description: message, variant: "destructive" });
+      return;
     }
+    toast({ title: "Deleted" });
+    fetchPanels();
   };
 
   const getEdit = (p: PanelTier) => edits[p.panel_name] || { label: p.label || "", tier: p.tier };

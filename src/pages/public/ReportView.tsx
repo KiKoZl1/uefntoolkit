@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { dataPublicReportBundle } from "@/lib/discoverDataApi";
 
 const PIE_COLORS = [
   "hsl(24, 100%, 50%)", "hsl(210, 100%, 56%)", "hsl(142, 71%, 45%)",
@@ -223,44 +224,7 @@ export default function ReportView() {
 
     const load = async () => {
       try {
-        const { data, error } = await supabase
-          .from("weekly_reports")
-          .select("id,discover_report_id,week_key,public_slug,title_public,subtitle_public,editor_note,date_from,date_to,kpis_json,rankings_json,ai_sections_json,editor_sections_json,cover_image_url")
-          .eq("public_slug", slug)
-          .eq("status", "published")
-          .single();
-
-        if (error || !data) {
-          if (!cancelled) setLoading(false);
-          return;
-        }
-
-        let hydrated: WeeklyReport = data as WeeklyReport;
-        const needsKpiFallback = !hasCoreKpis(hydrated.kpis_json);
-        const needsRankingFallback = !hasCoreRankings(hydrated.rankings_json);
-        const discoverReportId = (data as any).discover_report_id as string | null | undefined;
-
-        if ((needsKpiFallback || needsRankingFallback) && discoverReportId) {
-          const { data: reportBase } = await supabase
-            .from("discover_reports")
-            .select("platform_kpis,computed_rankings")
-            .eq("id", discoverReportId)
-            .single();
-
-          if (reportBase) {
-            hydrated = {
-              ...hydrated,
-              kpis_json: {
-                ...(reportBase as any).platform_kpis,
-                ...(hydrated.kpis_json || {}),
-              },
-              rankings_json: {
-                ...(reportBase as any).computed_rankings,
-                ...(hydrated.rankings_json || {}),
-              },
-            };
-          }
-        }
+        const hydrated = await dataPublicReportBundle(slug) as WeeklyReport;
 
         if (!cancelled) {
           setReport(hydrated);

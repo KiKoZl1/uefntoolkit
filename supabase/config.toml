@@ -4,30 +4,36 @@ project_id = "oixhmbhhkgtpuekvtrzz"
 verify_jwt = false
 
 [functions.discover-collector]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-island-lookup]
 verify_jwt = false
 
 [functions.discover-report-ai]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-exposure-collector]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-exposure-report]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-links-metadata-collector]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-report-rebuild]
-verify_jwt = false
+verify_jwt = true
 
 [functions.discover-exposure-timeline]
 verify_jwt = false
 
 [functions.discover-enqueue-gap]
+verify_jwt = true
+
+[functions.discover-cron-admin]
+verify_jwt = true
+
+[functions.discover-data-api]
 verify_jwt = false
 
 [functions.discover-rails-resolver]
@@ -39,6 +45,9 @@ verify_jwt = false
 [functions.discover-panel-timeline]
 verify_jwt = false
 
+[functions.discover-panel-intel-refresh]
+verify_jwt = true
+
 [functions.discover-dppi-panel]
 verify_jwt = false
 
@@ -46,19 +55,19 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.dppi-refresh-batch]
-verify_jwt = false
+verify_jwt = true
 
 [functions.dppi-train-dispatch]
-verify_jwt = false
+verify_jwt = true
 
 [functions.dppi-health]
-verify_jwt = false
+verify_jwt = true
 
 [functions.dppi-release-set]
-verify_jwt = false
+verify_jwt = true
 
 [functions.dppi-worker-heartbeat]
-verify_jwt = false
+verify_jwt = true
 
 [functions.tgis-generate]
 verify_jwt = false

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DppiAdminHeader, fmtCompact, fmtDate } from "./shared";
+import { dataSelect } from "@/lib/discoverDataApi";
 
 export default function AdminDppiInference() {
   const [loading, setLoading] = useState(true);
@@ -15,14 +16,18 @@ export default function AdminDppiInference() {
   const load = useCallback(async () => {
     setLoading(true);
     const [logsRes, oppsRes] = await Promise.all([
-      (supabase as any)
-        .from("dppi_inference_log")
-        .select("ts,mode,processed_rows,failed_rows,latency_ms,model_name,model_version,error_text")
-        .order("ts", { ascending: false })
-        .limit(100),
-      (supabase as any)
-        .from("dppi_opportunities")
-        .select("id", { head: true, count: "exact" }),
+      dataSelect<any[]>({
+        table: "dppi_inference_log",
+        columns: "ts,mode,processed_rows,failed_rows,latency_ms,model_name,model_version,error_text",
+        order: [{ column: "ts", ascending: false }],
+        limit: 100,
+      }),
+      dataSelect<any[]>({
+        table: "dppi_opportunities",
+        columns: "id",
+        head: true,
+        count: "exact",
+      }),
     ]);
 
     setLogs(Array.isArray(logsRes.data) ? logsRes.data : []);

@@ -1,4 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  dataBridgeUnavailableResponse,
+  dataProxyResponse,
+  getEnvNumber,
+  invokeDataFunction,
+  shouldBlockLocalExecution,
+  shouldProxyToData,
+} from "../_shared/dataBridge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,6 +47,28 @@ Deno.serve(async (req) => {
   }
 
   try {
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
+
+    if (shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-enqueue-gap",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 6000),
+      });
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
+      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+    }
+
+    if (shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+    }
+
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
 
@@ -71,10 +101,7 @@ Deno.serve(async (req) => {
 
     // Parse optional maxIslands from body (default: 50000 per invocation)
     let maxIslands = 50_000;
-    try {
-      const body = await req.json();
-      if (body?.maxIslands) maxIslands = Math.max(1000, Number(body.maxIslands));
-    } catch { /* no body is fine */ }
+    if (body?.maxIslands) maxIslands = Math.max(1000, Number(body.maxIslands));
 
     // Collect islands from cache in pages of 1000 up to maxIslands
     const codes: string[] = [];
