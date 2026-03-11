@@ -17,6 +17,31 @@ const corsHeaders = {
 };
 
 const CODE_RE = /^\d{4}-\d{4}-\d{4}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PREWARM_CACHE_USER_ID =
+  String(Deno.env.get("DISCOVERY_PREWARM_CACHE_USER_ID") || "00000000-0000-0000-0000-000000000000").trim();
+const TOKEN_SUB_CACHE = new Map<string, { sub: string; expiresAt: number }>();
+
+function getCachedSub(token: string): string | null {
+  const row = TOKEN_SUB_CACHE.get(token);
+  if (!row) return null;
+  if (row.expiresAt <= Date.now()) {
+    TOKEN_SUB_CACHE.delete(token);
+    return null;
+  }
+  return row.sub;
+}
+
+function cacheSub(token: string, sub: string, ttlMs = 60_000) {
+  TOKEN_SUB_CACHE.set(token, { sub, expiresAt: Date.now() + Math.max(5_000, ttlMs) });
+  if (TOKEN_SUB_CACHE.size > 512) {
+    const now = Date.now();
+    for (const [k, v] of TOKEN_SUB_CACHE.entries()) {
+      if (v.expiresAt <= now) TOKEN_SUB_CACHE.delete(k);
+      if (TOKEN_SUB_CACHE.size <= 384) break;
+    }
+  }
+}
 
 function json(res: unknown, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -28,6 +53,59 @@ function json(res: unknown, status = 200) {
 function asNum(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function toEpochMs(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function extractBearerToken(req: Request): string {
+  const auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4;
+    if (pad) b64 += "=".repeat(4 - pad);
+    const payload = JSON.parse(atob(b64));
+    return payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+async function isServiceRoleRequest(req: Request, serviceKey: string, supabaseUrl: string): Promise<boolean> {
+  const bearer = extractBearerToken(req);
+  const apikey = String(req.headers.get("apikey") || "").trim();
+  const token = bearer || apikey;
+  if (!token) return false;
+  if (token === serviceKey) return true;
+
+  const bearerRole = bearer ? String(decodeJwtPayload(bearer)?.role || "").trim() : "";
+  if (bearerRole && bearerRole !== "service_role") return false;
+  if (!bearer) {
+    const apiRole = apikey ? String(decodeJwtPayload(apikey)?.role || "").trim() : "";
+    if (apiRole && apiRole !== "service_role") return false;
+  }
+
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/admin/users?per_page=1&page=1`, {
+      method: "GET",
+      headers: {
+        apikey: token,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
 }
 
 function compactNum(v: number, locale: string): string {
@@ -273,25 +351,129 @@ async function getRecentLookups(service: any, userId: string) {
   }));
 }
 
+function runInBackground(task: Promise<unknown> | unknown) {
+  const promise = Promise.resolve(task as any);
+  const edgeRuntime = (globalThis as any)?.EdgeRuntime;
+  if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+    edgeRuntime.waitUntil(promise.catch(() => void 0));
+    return;
+  }
+  promise.catch(() => void 0);
+}
+
+function normalizeSummaryInput(input: any, expectedCode: string): any | null {
+  if (!input || typeof input !== "object") return null;
+  const code = String((input as any)?.code || "").trim();
+  if (!code || code !== expectedCode) return null;
+  return {
+    code,
+    title: (input as any)?.title || null,
+    creator: (input as any)?.creator || null,
+    category: (input as any)?.category || null,
+    tags: Array.isArray((input as any)?.tags) ? (input as any).tags : [],
+    unique7d: asNum((input as any)?.unique7d),
+    plays7d: asNum((input as any)?.plays7d),
+    minutes7d: asNum((input as any)?.minutes7d),
+    peakCcu7d: asNum((input as any)?.peakCcu7d),
+    favorites7d: asNum((input as any)?.favorites7d),
+    recommends7d: asNum((input as any)?.recommends7d),
+    discovery: (input as any)?.discovery || null,
+    weeklyTail: Array.isArray((input as any)?.weeklyTail) ? (input as any).weeklyTail : [],
+    competitorsRank: (input as any)?.competitorsRank ?? null,
+    latestEventTs: (input as any)?.latestEventTs || null,
+  };
+}
+
+function isEnrichedPayload(payload: any): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const phase = String(payload?.phase || "").trim();
+  if (phase === "enriched") return true;
+  // Backward compatibility: old cached rows without explicit phase are enriched final payloads.
+  return Boolean(payload?.sections && payload?.actionsTop3);
+}
+
+function isBaselinePayload(payload: any): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  return String(payload?.phase || "").trim() === "baseline";
+}
+
+function normalizeEnrichedPayload(parsed: any, fallback: any) {
+  const modelActions = validActionsFromModel(parsed?.actionsTop3);
+  return {
+    summaryGlobal: looksGeneric(parsed?.summaryGlobal) ? fallback.summaryGlobal : String(parsed.summaryGlobal),
+    sections: {
+      overview: looksGeneric(parsed?.sections?.overview)
+        ? fallback.sections.overview
+        : String(parsed.sections.overview),
+      discovery: looksGeneric(parsed?.sections?.discovery)
+        ? fallback.sections.discovery
+        : String(parsed.sections.discovery),
+      history: looksGeneric(parsed?.sections?.history)
+        ? fallback.sections.history
+        : String(parsed.sections.history),
+      competitors: looksGeneric(parsed?.sections?.competitors)
+        ? fallback.sections.competitors
+        : String(parsed.sections.competitors),
+      events: looksGeneric(parsed?.sections?.events)
+        ? fallback.sections.events
+        : String(parsed.sections.events),
+    },
+    actionsTop3: modelActions ?? fallback.actionsTop3,
+    phase: "enriched",
+    enriching: false,
+  };
+}
+
+function withPhaseDefaults(payload: any) {
+  if (!payload || typeof payload !== "object") return payload;
+  const phase = isEnrichedPayload(payload) ? "enriched" : "baseline";
+  return {
+    ...payload,
+    phase,
+    enriching: phase === "baseline" ? Boolean((payload as any)?.enriching ?? true) : false,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const startedAt = Date.now();
 
   try {
+    const internalBridge = isInternalBridgeRequest(req);
     const authHeader = req.headers.get("Authorization") || "";
     const forwardedAuthHeader = req.headers.get("x-forwarded-authorization") || "";
-    const userAuthHeader = isInternalBridgeRequest(req) ? forwardedAuthHeader : authHeader;
-    if (!userAuthHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+    const userAuthHeader = internalBridge ? forwardedAuthHeader : authHeader;
 
     const sbUrl = Deno.env.get("SUPABASE_URL")!;
     const sbAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const sbService = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const userClient = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: userAuthHeader } } });
-    const token = userAuthHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
-    const userId = String(claimsData?.claims?.sub || "").trim();
-    if (!userId) return json({ error: "Unauthorized" }, 401);
+    let userId = "";
+    let serviceRoleMode = false;
+    if (internalBridge) {
+      const forwardedUserId = String(req.headers.get("x-forwarded-user-id") || "").trim();
+      if (!UUID_RE.test(forwardedUserId)) return json({ error: "Unauthorized" }, 401);
+      userId = forwardedUserId;
+    } else {
+      if (!userAuthHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+      serviceRoleMode = await isServiceRoleRequest(req, sbService, sbUrl);
+      if (serviceRoleMode) {
+        userId = PREWARM_CACHE_USER_ID;
+      } else {
+        const token = userAuthHeader.replace("Bearer ", "");
+        const cachedSub = getCachedSub(token);
+        if (cachedSub) {
+          userId = cachedSub;
+        } else {
+          const userClient = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: userAuthHeader } } });
+          const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
+          if (claimsError || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
+          userId = String(claimsData?.claims?.sub || "").trim();
+          if (userId) cacheSub(token, userId);
+        }
+        if (!userId) return json({ error: "Unauthorized" }, 401);
+      }
+    }
 
     let body: any = {};
     try {
@@ -300,6 +482,7 @@ serve(async (req) => {
       body = {};
     }
     const mode = String(body?.mode || "").trim().toLowerCase();
+    const includeRecent = !serviceRoleMode && body?.includeRecent !== false;
 
     if (shouldProxyToData(req)) {
       const proxied = await invokeDataFunction({
@@ -307,18 +490,31 @@ serve(async (req) => {
         functionName: "discover-island-lookup-ai",
         body,
         timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 10000),
+        extraHeaders: userId ? { "x-forwarded-user-id": userId } : undefined,
       });
-      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
-      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+      const timing = [
+        `total;dur=${(Date.now() - startedAt).toFixed(1)}`,
+        `bridge;dur=${Number(proxied.bridgeMs || 0).toFixed(1)}`,
+        String(proxied.upstreamServerTiming || "").trim(),
+      ].filter(Boolean).join(", ");
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": timing });
+      if (proxied.status >= 400 && proxied.status < 500 && proxied.data) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": timing });
+      }
+      return dataBridgeUnavailableResponse({ ...corsHeaders, "Server-Timing": timing }, proxied.error);
     }
 
     if (shouldBlockLocalExecution(req)) {
-      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+      return dataBridgeUnavailableResponse(
+        { ...corsHeaders, "Server-Timing": `total;dur=${(Date.now() - startedAt).toFixed(1)}` },
+        "strict proxy mode",
+      );
     }
 
     const service = createClient(sbUrl, sbService);
 
     if (mode === "recent") {
+      if (serviceRoleMode) return json({ recentLookups: [] });
       const recentLookups = await getRecentLookups(service, userId);
       return json({ recentLookups });
     }
@@ -327,7 +523,14 @@ serve(async (req) => {
     const compareCode = String(body?.compareCode || "").trim();
     const locale = String(body?.locale || "pt-BR").trim() || "pt-BR";
     const windowDays = Math.max(1, Math.min(90, Number(body?.windowDays) || 7));
-    const payloadFingerprint = String(body?.payloadFingerprint || "").trim();
+    let payloadFingerprint = String(body?.payloadFingerprint || "").trim();
+    if (!payloadFingerprint && serviceRoleMode) {
+      const now = new Date();
+      const minuteBucket = Math.floor(now.getUTCMinutes() / 5) * 5;
+      now.setUTCMinutes(minuteBucket, 0, 0);
+      const bucket = now.toISOString().slice(0, 16); // 5-minute bucket
+      payloadFingerprint = `prewarm:${primaryCode}:${compareCode || "-"}:${bucket}`;
+    }
 
     if (!primaryCode || !payloadFingerprint || !CODE_RE.test(primaryCode)) {
       return json({ error: "Invalid payload" }, 400);
@@ -351,27 +554,170 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    if (cachedRow?.response_json) {
-      await service
-        .from("discover_lookup_ai_recent")
-        .update({
-          hit_count: asNum(cachedRow.hit_count) + 1,
-          last_accessed_at: new Date().toISOString(),
-        })
-        .eq("id", cachedRow.id);
+    const nvidiaKey = Deno.env.get("NVIDIA_API_KEY");
+    const { data: sharedRows } = await service
+      .from("discover_lookup_ai_recent")
+      .select("id,user_id,response_json,created_at")
+      .eq("primary_code", primaryCode)
+      .eq("compare_code", compareKey)
+      .eq("locale", locale)
+      .eq("window_days", windowDays)
+      .eq("payload_fingerprint", payloadFingerprint)
+      .order("created_at", { ascending: false })
+      .limit(5);
 
-      const recentLookups = await getRecentLookups(service, userId);
+    const sharedList = Array.isArray(sharedRows) ? sharedRows : [];
+    const enrichedShared = sharedList.find((r: any) => isEnrichedPayload(r?.response_json));
+    const activeBaseline = sharedList.find((r: any) => isBaselinePayload(r?.response_json) && Boolean((r?.response_json as any)?.enriching));
+    const normalizedCached = cachedRow?.response_json ? withPhaseDefaults(cachedRow.response_json) : null;
+
+    const hotWindowSeconds = Math.max(60, getEnvNumber("LOOKUP_AI_SHARED_HOT_WINDOW_SECONDS", 15 * 60));
+    let sharedHotRows: any[] = [];
+    if (!enrichedShared && !activeBaseline) {
+      const { data: hotRows } = await service
+        .from("discover_lookup_ai_recent")
+        .select("id,user_id,response_json,created_at,payload_fingerprint")
+        .eq("primary_code", primaryCode)
+        .eq("compare_code", compareKey)
+        .eq("locale", locale)
+        .eq("window_days", windowDays)
+        .order("created_at", { ascending: false })
+        .limit(8);
+      sharedHotRows = Array.isArray(hotRows) ? hotRows : [];
+    }
+    const hotThresholdMs = Date.now() - hotWindowSeconds * 1000;
+    const enrichedSharedHot = sharedHotRows.find((r: any) => {
+      const createdMs = toEpochMs(r?.created_at);
+      return createdMs != null && createdMs >= hotThresholdMs && isEnrichedPayload(r?.response_json);
+    });
+    const baselineSharedHot = sharedHotRows.find((r: any) => {
+      const createdMs = toEpochMs(r?.created_at);
+      return createdMs != null && createdMs >= hotThresholdMs && isBaselinePayload(r?.response_json);
+    });
+
+    if (normalizedCached && isEnrichedPayload(normalizedCached)) {
+      const recentLookups = includeRecent ? await getRecentLookups(service, userId) : [];
+      runInBackground(
+        service
+          .from("discover_lookup_ai_recent")
+          .update({
+            hit_count: asNum(cachedRow.hit_count) + 1,
+            last_accessed_at: new Date().toISOString(),
+          })
+          .eq("id", cachedRow.id),
+      );
       return json({
         cacheHit: true,
         generatedAt: cachedRow.created_at,
         recentLookups,
-        ...(cachedRow.response_json as Record<string, unknown>),
+        ...normalizedCached,
       });
     }
 
-    const nvidiaKey = Deno.env.get("NVIDIA_API_KEY");
-    if (!nvidiaKey) {
-      return json({ error: "Lookup AI unavailable: NVIDIA_API_KEY missing" }, 503);
+    if (enrichedShared?.response_json) {
+      const normalizedShared = withPhaseDefaults(enrichedShared.response_json);
+      const nowIso = new Date().toISOString();
+      runInBackground(
+        service
+          .from("discover_lookup_ai_recent")
+          .upsert(
+            {
+              user_id: userId,
+              primary_code: primaryCode,
+              compare_code: compareKey,
+              primary_title: String((normalizedShared as any)?.summaryGlobal || primaryCode).slice(0, 160),
+              compare_title: compareKey || null,
+              locale,
+              window_days: windowDays,
+              payload_fingerprint: payloadFingerprint,
+              response_json: normalizedShared,
+              created_at: nowIso,
+              last_accessed_at: nowIso,
+              hit_count: asNum(cachedRow?.hit_count) + 1,
+            },
+            { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+          ),
+      );
+      const recentLookups = includeRecent ? await getRecentLookups(service, userId) : [];
+      return json({
+        cacheHit: true,
+        generatedAt: enrichedShared.created_at,
+        recentLookups,
+        ...normalizedShared,
+      });
+    }
+
+    if (enrichedSharedHot?.response_json) {
+      const normalizedHot = withPhaseDefaults(enrichedSharedHot.response_json);
+      const nowIso = new Date().toISOString();
+      runInBackground(
+        service
+          .from("discover_lookup_ai_recent")
+          .upsert(
+            {
+              user_id: userId,
+              primary_code: primaryCode,
+              compare_code: compareKey,
+              primary_title: String((normalizedHot as any)?.summaryGlobal || primaryCode).slice(0, 160),
+              compare_title: compareKey || null,
+              locale,
+              window_days: windowDays,
+              payload_fingerprint: payloadFingerprint,
+              response_json: normalizedHot,
+              created_at: nowIso,
+              last_accessed_at: nowIso,
+              hit_count: asNum(cachedRow?.hit_count) + 1,
+            },
+            { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+          ),
+      );
+      const recentLookups = includeRecent ? await getRecentLookups(service, userId) : [];
+      return json({
+        cacheHit: true,
+        generatedAt: enrichedSharedHot.created_at,
+        sharedHot: true,
+        recentLookups,
+        ...normalizedHot,
+      });
+    }
+
+    if (baselineSharedHot?.response_json) {
+      const baselineHot = withPhaseDefaults(baselineSharedHot.response_json);
+      const safeBaseline = {
+        ...baselineHot,
+        phase: "baseline",
+        enriching: false,
+      };
+      const nowIso = new Date().toISOString();
+      runInBackground(
+        service
+          .from("discover_lookup_ai_recent")
+          .upsert(
+            {
+              user_id: userId,
+              primary_code: primaryCode,
+              compare_code: compareKey,
+              primary_title: String((safeBaseline as any)?.summaryGlobal || primaryCode).slice(0, 160),
+              compare_title: compareKey || null,
+              locale,
+              window_days: windowDays,
+              payload_fingerprint: payloadFingerprint,
+              response_json: safeBaseline,
+              created_at: nowIso,
+              last_accessed_at: nowIso,
+              hit_count: asNum(cachedRow?.hit_count) + 1,
+            },
+            { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+          ),
+      );
+      const recentLookups = includeRecent ? await getRecentLookups(service, userId) : [];
+      return json({
+        cacheHit: true,
+        generatedAt: baselineSharedHot.created_at,
+        sharedHot: true,
+        recentLookups,
+        ...safeBaseline,
+      });
     }
 
     const lookupEndpoint = `${sbUrl}/functions/v1/discover-island-lookup`;
@@ -380,8 +726,8 @@ serve(async (req) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: userAuthHeader,
-          apikey: sbAnon,
+          Authorization: serviceRoleMode ? `Bearer ${sbService}` : userAuthHeader,
+          apikey: serviceRoleMode ? sbService : sbAnon,
         },
         body: JSON.stringify({ islandCode, compareCode: compareIslandCode || null }),
       });
@@ -393,133 +739,184 @@ serve(async (req) => {
       return parsed;
     };
 
-    const [primaryPayload, comparePayload] = await Promise.all([
-      callLookup(primaryCode, compareCode),
-      compareCode ? callLookup(compareCode, primaryCode) : Promise.resolve(null),
-    ]);
+    let primarySummary = normalizeSummaryInput(body?.primarySummary, primaryCode);
+    let compareSummary = compareCode ? normalizeSummaryInput(body?.compareSummary, compareCode) : null;
 
-    const primarySummary = summarizeLookupPayload(primaryPayload);
-    const compareSummary = comparePayload ? summarizeLookupPayload(comparePayload) : null;
-
-    const systemPrompt =
-      "You are a Fortnite island analytics strategist. Return only valid JSON with keys: summaryGlobal, sections{overview,discovery,history,competitors,events}, actionsTop3 (3 concise actions). Use concrete metrics from payload and avoid placeholders such as 'No ... insight'.";
-
-    const userPrompt = JSON.stringify(
-      {
-        locale,
-        windowDays,
-        primary: primarySummary,
-        compare: compareSummary,
-      },
-      null,
-      2,
-    );
-
-    const model = Deno.env.get("NVIDIA_LOOKUP_MODEL") || "moonshotai/kimi-k2.5";
-    const nvidiaEndpoint = Deno.env.get("NVIDIA_CHAT_COMPLETIONS_URL") || "https://integrate.api.nvidia.com/v1/chat/completions";
-
-    const aiRes = await fetch(nvidiaEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${nvidiaKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        temperature: 0.2,
-        top_p: 0.9,
-        max_tokens: 1600,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
-
-    const aiRaw = await aiRes.text();
-    if (!aiRes.ok) {
-      return json({ error: `NVIDIA error ${aiRes.status}: ${aiRaw.slice(0, 300)}` }, 502);
+    if (!primarySummary || (compareCode && !compareSummary)) {
+      const [primaryPayload, comparePayload] = await Promise.all([
+        !primarySummary ? callLookup(primaryCode, compareCode) : Promise.resolve(null),
+        compareCode && !compareSummary ? callLookup(compareCode, primaryCode) : Promise.resolve(null),
+      ]);
+      if (!primarySummary && primaryPayload) primarySummary = summarizeLookupPayload(primaryPayload);
+      if (compareCode && !compareSummary && comparePayload) compareSummary = summarizeLookupPayload(comparePayload);
     }
 
-    const aiJson = aiRaw ? JSON.parse(aiRaw) : {};
-    const content = stripCodeFences(String(aiJson?.choices?.[0]?.message?.content || ""));
-
-    let parsed: any = null;
-    try {
-      parsed = content ? JSON.parse(content) : null;
-    } catch {
-      parsed = null;
+    if (!primarySummary) {
+      return json({ error: "Unable to build primary summary" }, 502);
     }
 
     const fallback = buildDataDrivenInsights(primarySummary, compareSummary, locale);
-    const modelActions = validActionsFromModel(parsed?.actionsTop3);
-    const normalized = {
-      summaryGlobal: looksGeneric(parsed?.summaryGlobal) ? fallback.summaryGlobal : String(parsed.summaryGlobal),
-      sections: {
-        overview: looksGeneric(parsed?.sections?.overview)
-          ? fallback.sections.overview
-          : String(parsed.sections.overview),
-        discovery: looksGeneric(parsed?.sections?.discovery)
-          ? fallback.sections.discovery
-          : String(parsed.sections.discovery),
-        history: looksGeneric(parsed?.sections?.history)
-          ? fallback.sections.history
-          : String(parsed.sections.history),
-        competitors: looksGeneric(parsed?.sections?.competitors)
-          ? fallback.sections.competitors
-          : String(parsed.sections.competitors),
-        events: looksGeneric(parsed?.sections?.events)
-          ? fallback.sections.events
-          : String(parsed.sections.events),
-      },
-      actionsTop3: modelActions ?? fallback.actionsTop3,
+    const baselinePayload = {
+      ...fallback,
+      phase: "baseline",
+      enriching: Boolean(nvidiaKey),
     };
 
-    const createdAt = new Date();
-
-    await service
-      .from("discover_lookup_ai_recent")
-      .upsert(
-        {
-          user_id: userId,
-          primary_code: primaryCode,
-          compare_code: compareKey,
-          primary_title: primarySummary?.title || primaryCode,
-          compare_title: compareSummary?.title || (compareKey ? compareKey : null),
-          locale,
-          window_days: windowDays,
-          payload_fingerprint: payloadFingerprint,
-          response_json: normalized,
-          created_at: createdAt.toISOString(),
-          last_accessed_at: createdAt.toISOString(),
-          hit_count: 0,
-        },
-        { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
-      );
-
-    const { data: keepRows } = await service
-      .from("discover_lookup_ai_recent")
-      .select("id")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(3);
-
-    const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
-    if (keepIds.length > 0) {
-      await service
+    const nowIso = new Date().toISOString();
+    runInBackground(
+      service
         .from("discover_lookup_ai_recent")
-        .delete()
+        .upsert(
+          {
+            user_id: userId,
+            primary_code: primaryCode,
+            compare_code: compareKey,
+            primary_title: primarySummary?.title || primaryCode,
+            compare_title: compareSummary?.title || (compareKey ? compareKey : null),
+            locale,
+            window_days: windowDays,
+            payload_fingerprint: payloadFingerprint,
+            response_json: baselinePayload,
+            created_at: nowIso,
+            last_accessed_at: nowIso,
+            hit_count: asNum(cachedRow?.hit_count),
+          },
+          { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+        ),
+    );
+
+    const aiCacheKeepLimit = serviceRoleMode
+      ? Math.max(50, getEnvNumber("LOOKUP_AI_SHARED_CACHE_KEEP", 200))
+      : 3;
+
+    runInBackground((async () => {
+      const { data: keepRows } = await service
+        .from("discover_lookup_ai_recent")
+        .select("id")
         .eq("user_id", userId)
-        .not("id", "in", `(${keepIds.join(",")})`);
+        .order("created_at", { ascending: false })
+        .limit(aiCacheKeepLimit);
+
+      const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
+      if (keepIds.length > 0) {
+        await service
+          .from("discover_lookup_ai_recent")
+          .delete()
+          .eq("user_id", userId)
+          .not("id", "in", `(${keepIds.join(",")})`);
+      }
+    })());
+
+    const hasInFlight = Boolean(activeBaseline);
+    const shouldKickEnrichment = Boolean(nvidiaKey) && !hasInFlight;
+
+    if (shouldKickEnrichment && nvidiaKey) {
+      runInBackground((async () => {
+        try {
+          const systemPrompt =
+            "You are a Fortnite island analytics strategist. Return only valid JSON with keys: summaryGlobal, sections{overview,discovery,history,competitors,events}, actionsTop3 (3 concise actions). Use concrete metrics from payload and avoid placeholders such as 'No ... insight'.";
+
+          const userPrompt = JSON.stringify(
+            {
+              locale,
+              windowDays,
+              primary: primarySummary,
+              compare: compareSummary,
+            },
+            null,
+            2,
+          );
+
+          const model = Deno.env.get("NVIDIA_LOOKUP_MODEL") || "moonshotai/kimi-k2.5";
+          const nvidiaEndpoint = Deno.env.get("NVIDIA_CHAT_COMPLETIONS_URL") || "https://integrate.api.nvidia.com/v1/chat/completions";
+
+          const aiRes = await fetch(nvidiaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${nvidiaKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              stream: false,
+              temperature: 0.2,
+              top_p: 0.9,
+              max_tokens: 1600,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+            }),
+          });
+
+          const aiRaw = await aiRes.text();
+          if (!aiRes.ok) throw new Error(`NVIDIA error ${aiRes.status}: ${aiRaw.slice(0, 300)}`);
+
+          const aiJson = aiRaw ? JSON.parse(aiRaw) : {};
+          const content = stripCodeFences(String(aiJson?.choices?.[0]?.message?.content || ""));
+
+          let parsed: any = null;
+          try {
+            parsed = content ? JSON.parse(content) : null;
+          } catch {
+            parsed = null;
+          }
+
+          const enrichedPayload = normalizeEnrichedPayload(parsed, fallback);
+          const enrichedNow = new Date().toISOString();
+          await service
+            .from("discover_lookup_ai_recent")
+            .upsert(
+              {
+                user_id: userId,
+                primary_code: primaryCode,
+                compare_code: compareKey,
+                primary_title: primarySummary?.title || primaryCode,
+                compare_title: compareSummary?.title || (compareKey ? compareKey : null),
+                locale,
+                window_days: windowDays,
+                payload_fingerprint: payloadFingerprint,
+                response_json: enrichedPayload,
+                created_at: enrichedNow,
+                last_accessed_at: enrichedNow,
+                hit_count: asNum(cachedRow?.hit_count),
+              },
+              { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+            );
+        } catch {
+          // Keep baseline available; mark enrichment as not running.
+          await service
+            .from("discover_lookup_ai_recent")
+            .upsert(
+              {
+                user_id: userId,
+                primary_code: primaryCode,
+                compare_code: compareKey,
+                primary_title: primarySummary?.title || primaryCode,
+                compare_title: compareSummary?.title || (compareKey ? compareKey : null),
+                locale,
+                window_days: windowDays,
+                payload_fingerprint: payloadFingerprint,
+                response_json: {
+                  ...baselinePayload,
+                  enriching: false,
+                },
+                created_at: new Date().toISOString(),
+                last_accessed_at: new Date().toISOString(),
+                hit_count: asNum(cachedRow?.hit_count),
+              },
+              { onConflict: "user_id,primary_code,compare_code,locale,window_days,payload_fingerprint" },
+            );
+        }
+      })());
     }
 
-    const recentLookups = await getRecentLookups(service, userId);
+    const recentLookups = includeRecent ? await getRecentLookups(service, userId) : [];
     return json({
-      cacheHit: false,
-      generatedAt: createdAt.toISOString(),
+      cacheHit: Boolean(cachedRow),
+      generatedAt: nowIso,
       recentLookups,
-      ...normalized,
+      ...baselinePayload,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

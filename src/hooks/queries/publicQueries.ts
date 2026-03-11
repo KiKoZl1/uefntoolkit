@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { dataSelect } from "@/lib/discoverDataApi";
-import type { IslandPageResponse } from "@/types/discover-island-page";
+import type { IslandPageResponse, IslandPageSummaryResponse } from "@/types/discover-island-page";
 
 const DISCOVERY_SURFACE = "CreativeDiscoverySurface_Frontend";
 
@@ -83,8 +83,9 @@ export function useDiscoverLiveQuery(region: string) {
         rails: Array.isArray(railsPayload?.rails) ? railsPayload.rails : [],
       } as DiscoveryLivePayload;
     },
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });
 }
@@ -101,8 +102,28 @@ export function useIslandPageQuery(islandCode: string, enabled: boolean) {
       return payload as IslandPageResponse;
     },
     enabled,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useIslandPageSummaryQuery(islandCode: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["island-page-summary", islandCode],
+    queryFn: async () => {
+      const { data: payload, error } = await supabase.functions.invoke("discover-island-page", {
+        body: { mode: "summary", islandCode, region: "NAE", surfaceName: DISCOVERY_SURFACE },
+      });
+      if (error) throw error;
+      if (payload?.error) throw new Error(String(payload.error));
+      return payload as IslandPageSummaryResponse;
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });
 }

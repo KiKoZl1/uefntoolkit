@@ -66,11 +66,49 @@ const ALLOWED_RPC_ACCESS: Record<string, AccessLevel> = {
   admin_set_pipeline_cron_job_active: "admin",
 };
 
-function json(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, ...extraHeaders, "Content-Type": "application/json" },
   });
+}
+
+type CacheEntry<T> = {
+  expiresAt: number;
+  value: T;
+};
+
+const TOKEN_CTX_CACHE = new Map<string, CacheEntry<RequestContext>>();
+const ROLE_DECISION_CACHE = new Map<string, CacheEntry<boolean>>();
+const DEFAULT_TOKEN_CTX_TTL_MS = 60_000;
+const DEFAULT_ROLE_CACHE_TTL_MS = 120_000;
+let adminOverviewMemCache: CacheEntry<{
+  data: any;
+  asOf: string | null;
+  cache: { hit: boolean; source: string };
+}> | null = null;
+const PUBLIC_REPORT_BUNDLE_MEM = new Map<string, CacheEntry<Record<string, unknown>>>();
+const PUBLIC_REPORT_BUNDLE_INFLIGHT = new Map<string, Promise<{ data: Record<string, unknown> }>>();
+
+function readCache<T>(store: Map<string, CacheEntry<T>>, key: string): T | null {
+  const row = store.get(key);
+  if (!row) return null;
+  if (row.expiresAt <= Date.now()) {
+    store.delete(key);
+    return null;
+  }
+  return row.value;
+}
+
+function writeCache<T>(store: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number) {
+  store.set(key, { value, expiresAt: Date.now() + Math.max(1, ttlMs) });
+  if (store.size > 512) {
+    const now = Date.now();
+    for (const [k, v] of store.entries()) {
+      if (v.expiresAt <= now) store.delete(k);
+      if (store.size <= 384) break;
+    }
+  }
 }
 
 function mustEnv(name: string): string {
@@ -84,6 +122,20 @@ function extractBearer(req: Request): string {
   return authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4;
+    if (pad) b64 += "=".repeat(4 - pad);
+    const payload = JSON.parse(atob(b64));
+    return payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 async function isServiceRoleRequest(req: Request, serviceKey: string, supabaseUrl: string): Promise<boolean> {
   const bearer = extractBearer(req);
   const apiKey = (req.headers.get("apikey") || "").trim();
@@ -91,6 +143,14 @@ async function isServiceRoleRequest(req: Request, serviceKey: string, supabaseUr
   if (!token) return false;
   if (bearer && bearer === serviceKey) return true;
   if (apiKey && apiKey === serviceKey) return true;
+
+  // Fast negative path for regular user JWTs to avoid an extra network hop.
+  const bearerRole = bearer ? String(decodeJwtPayload(bearer)?.role || "").trim() : "";
+  if (bearerRole && bearerRole !== "service_role") return false;
+  if (!bearer) {
+    const apiRole = apiKey ? String(decodeJwtPayload(apiKey)?.role || "").trim() : "";
+    if (apiRole && apiRole !== "service_role") return false;
+  }
 
   // Supports rotated service keys: validate token against Auth Admin endpoint.
   try {
@@ -119,6 +179,13 @@ async function buildRequestContext(
   const bearer = extractBearer(req);
   if (!bearer) return { isServiceRole: false, isAuthenticated: false, isAdmin: false, userId: null };
 
+  const cachedCtx = readCache(TOKEN_CTX_CACHE, bearer);
+  if (cachedCtx) return cachedCtx;
+
+  const decoded = decodeJwtPayload(bearer);
+  const sub = typeof decoded?.sub === "string" ? decoded.sub : null;
+  const tokenExpMs = typeof decoded?.exp === "number" ? decoded.exp * 1000 : null;
+
   const authClient = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_ANON_KEY"), {
     global: {
       headers: {
@@ -129,19 +196,32 @@ async function buildRequestContext(
 
   const { data: userRes, error: userErr } = await authClient.auth.getUser();
   if (userErr || !userRes.user?.id) {
-    return { isServiceRole: false, isAuthenticated: false, isAdmin: false, userId: null };
+    const denied = { isServiceRole: false, isAuthenticated: false, isAdmin: false, userId: null } as RequestContext;
+    writeCache(TOKEN_CTX_CACHE, bearer, denied, Math.min(DEFAULT_TOKEN_CTX_TTL_MS, 20_000));
+    return denied;
   }
 
-  const userId = userRes.user.id;
-  const { data: roleRows, error: roleErr } = await service
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .in("role", ["admin", "editor"])
-    .limit(1);
+  const userId = userRes.user.id || sub;
+  const roleCached = userId ? readCache(ROLE_DECISION_CACHE, userId) : null;
+  let isAdmin = false;
 
-  const isAdmin = !roleErr && Array.isArray(roleRows) && roleRows.length > 0;
-  return { isServiceRole: false, isAuthenticated: true, isAdmin, userId };
+  if (roleCached != null) {
+    isAdmin = roleCached;
+  } else {
+    const { data: roleRows, error: roleErr } = await service
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .in("role", ["admin", "editor"])
+      .limit(1);
+    isAdmin = !roleErr && Array.isArray(roleRows) && roleRows.length > 0;
+    if (userId) writeCache(ROLE_DECISION_CACHE, userId, isAdmin, DEFAULT_ROLE_CACHE_TTL_MS);
+  }
+
+  const ctx = { isServiceRole: false, isAuthenticated: true, isAdmin, userId } as RequestContext;
+  const tokenTtl = tokenExpMs ? Math.max(5_000, Math.min(DEFAULT_TOKEN_CTX_TTL_MS, tokenExpMs - Date.now())) : DEFAULT_TOKEN_CTX_TTL_MS;
+  writeCache(TOKEN_CTX_CACHE, bearer, ctx, tokenTtl);
+  return ctx;
 }
 
 function requireAccess(ctx: RequestContext, level: AccessLevel): void {
@@ -180,6 +260,19 @@ function hasPublishedStatusFilter(filters: any[]): boolean {
     String(f?.column || "") === "status" &&
     String(f?.value || "") === "published"
   );
+}
+
+function requiresPublishedWeeklyReportsFilter(
+  ctx: RequestContext,
+  access: AccessLevel,
+  table: string,
+  filters: any[],
+): boolean {
+  return access === "public" &&
+    table === "weekly_reports" &&
+    !ctx.isAdmin &&
+    !ctx.isServiceRole &&
+    !hasPublishedStatusFilter(filters);
 }
 
 function applyFilters(query: any, filters: any[]): any {
@@ -229,6 +322,53 @@ function applyFilters(query: any, filters: any[]): any {
   return query;
 }
 
+async function runAdminOverviewBundle(service: ReturnType<typeof createClient>, ctx: RequestContext, payload: any) {
+  requireAccess(ctx, "admin");
+
+  const memTtlMs = getEnvNumber("ADMIN_OVERVIEW_BUNDLE_MEM_TTL_MS", 20_000);
+  const forceRefresh = Boolean(payload?.forceRefresh);
+  if (!forceRefresh && adminOverviewMemCache && adminOverviewMemCache.expiresAt > Date.now()) {
+    return {
+      ...adminOverviewMemCache.value,
+      cache: { ...(adminOverviewMemCache.value.cache || {}), hit: true, source: "memory" },
+    };
+  }
+
+  if (forceRefresh) {
+    const refreshRes = await (service as any).rpc("refresh_discover_admin_overview_snapshot");
+    if (refreshRes.error) throw new Error(refreshRes.error.message);
+  }
+
+  let { data: snapshot, error: snapErr } = await service
+    .from("discover_admin_overview_snapshot")
+    .select("as_of,payload_json")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (snapErr) throw new Error(snapErr.message);
+
+  if (!snapshot?.payload_json) {
+    const refreshRes = await (service as any).rpc("refresh_discover_admin_overview_snapshot");
+    if (refreshRes.error) throw new Error(refreshRes.error.message);
+    const fallbackPayload = refreshRes.data || {};
+    const result = {
+      data: fallbackPayload,
+      asOf: (fallbackPayload as any)?.as_of || new Date().toISOString(),
+      cache: { hit: false, source: "rpc" },
+    };
+    adminOverviewMemCache = { value: result, expiresAt: Date.now() + memTtlMs };
+    return result;
+  }
+
+  const result = {
+    data: snapshot.payload_json,
+    asOf: snapshot.as_of,
+    cache: { hit: true, source: "snapshot" },
+  };
+  adminOverviewMemCache = { value: result, expiresAt: Date.now() + memTtlMs };
+  return result;
+}
+
 async function runSelect(service: ReturnType<typeof createClient>, ctx: RequestContext, payload: any) {
   const table = normalizeTable(payload?.table);
   const access = getTableAccessLevel(table, "read");
@@ -236,7 +376,7 @@ async function runSelect(service: ReturnType<typeof createClient>, ctx: RequestC
   requireAccess(ctx, access);
 
   const filters = Array.isArray(payload?.filters) ? payload.filters : [];
-  if (access === "public" && table === "weekly_reports" && !hasPublishedStatusFilter(filters)) {
+  if (requiresPublishedWeeklyReportsFilter(ctx, access, table, filters)) {
     throw new Error("public weekly_reports access requires status=published");
   }
 
@@ -358,50 +498,71 @@ async function runPublicReportBundle(service: ReturnType<typeof createClient>, p
   const slug = String(payload?.slug || "").trim();
   if (!slug) throw new Error("missing slug");
 
-  const { data: weekly, error: weeklyErr } = await service
-    .from("weekly_reports")
-    .select("id,discover_report_id,week_key,public_slug,title_public,subtitle_public,editor_note,date_from,date_to,kpis_json,rankings_json,ai_sections_json,editor_sections_json,cover_image_url,status")
-    .eq("public_slug", slug)
-    .eq("status", "published")
-    .single();
-  if (weeklyErr || !weekly) throw new Error(weeklyErr?.message || "report_not_found");
+  const memKey = `public_report_bundle:${slug.toLowerCase()}`;
+  const memCached = readCache(PUBLIC_REPORT_BUNDLE_MEM, memKey);
+  if (memCached) return { data: memCached };
 
-  let merged = weekly as Record<string, unknown>;
-  const discoverReportId = String((weekly as any)?.discover_report_id || "");
-  const needsFallback = !merged?.kpis_json || !merged?.rankings_json;
-  if (discoverReportId && needsFallback) {
-    const { data: base, error: baseErr } = await service
-      .from("discover_reports")
-      .select("platform_kpis,computed_rankings")
-      .eq("id", discoverReportId)
+  const inflight = PUBLIC_REPORT_BUNDLE_INFLIGHT.get(memKey);
+  if (inflight) return await inflight;
+
+  const queryPromise = (async (): Promise<{ data: Record<string, unknown> }> => {
+    const { data: weekly, error: weeklyErr } = await service
+      .from("weekly_reports")
+      .select("id,discover_report_id,week_key,public_slug,title_public,subtitle_public,editor_note,date_from,date_to,kpis_json,rankings_json,ai_sections_json,editor_sections_json,cover_image_url,status")
+      .eq("public_slug", slug)
+      .eq("status", "published")
       .single();
-    if (!baseErr && base) {
-      merged = {
-        ...merged,
-        kpis_json: {
-          ...(base as any).platform_kpis,
-          ...((weekly as any).kpis_json || {}),
-        },
-        rankings_json: {
-          ...(base as any).computed_rankings,
-          ...((weekly as any).rankings_json || {}),
-        },
-      };
-    }
-  }
+    if (weeklyErr || !weekly) throw new Error(weeklyErr?.message || "report_not_found");
 
-  return { data: merged };
+    let merged = weekly as Record<string, unknown>;
+    const discoverReportId = String((weekly as any)?.discover_report_id || "");
+    const needsFallback = !merged?.kpis_json || !merged?.rankings_json;
+    if (discoverReportId && needsFallback) {
+      const { data: base, error: baseErr } = await service
+        .from("discover_reports")
+        .select("platform_kpis,computed_rankings")
+        .eq("id", discoverReportId)
+        .single();
+      if (!baseErr && base) {
+        merged = {
+          ...merged,
+          kpis_json: {
+            ...(base as any).platform_kpis,
+            ...((weekly as any).kpis_json || {}),
+          },
+          rankings_json: {
+            ...(base as any).computed_rankings,
+            ...((weekly as any).rankings_json || {}),
+          },
+        };
+      }
+    }
+
+    const ttlMs = Math.max(5_000, getEnvNumber("PUBLIC_REPORT_BUNDLE_MEM_TTL_MS", 90_000));
+    writeCache(PUBLIC_REPORT_BUNDLE_MEM, memKey, merged, ttlMs);
+    return { data: merged };
+  })();
+
+  PUBLIC_REPORT_BUNDLE_INFLIGHT.set(memKey, queryPromise);
+  try {
+    return await queryPromise;
+  } finally {
+    PUBLIC_REPORT_BUNDLE_INFLIGHT.delete(memKey);
+  }
 }
 
 function authorizeOperation(ctx: RequestContext, op: string, payload: any): void {
   switch (op) {
+    case "admin_overview_bundle":
+      requireAccess(ctx, "admin");
+      return;
     case "select": {
       const table = normalizeTable(payload?.table);
       const access = getTableAccessLevel(table, "read");
       if (!access) throw new Error("table read not allowed");
       requireAccess(ctx, access);
       const filters = Array.isArray(payload?.filters) ? payload.filters : [];
-      if (access === "public" && table === "weekly_reports" && !hasPublishedStatusFilter(filters)) {
+      if (requiresPublishedWeeklyReportsFilter(ctx, access, table, filters)) {
         throw new Error("public weekly_reports access requires status=published");
       }
       return;
@@ -433,6 +594,20 @@ function authorizeOperation(ctx: RequestContext, op: string, payload: any): void
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
+  let authMs = 0;
+  let handlerMs = 0;
+
+  const timingHeader = (extra: string[] = []) => {
+    const base = [
+      `total;dur=${(Date.now() - startedAt).toFixed(1)}`,
+      `auth;dur=${authMs.toFixed(1)}`,
+      `handler;dur=${handlerMs.toFixed(1)}`,
+      ...extra.filter(Boolean),
+    ];
+    return base.join(", ");
+  };
+
   try {
     let body: any = {};
     try {
@@ -442,28 +617,43 @@ serve(async (req) => {
     }
 
     const service = createClient(mustEnv("SUPABASE_URL"), mustEnv("SUPABASE_SERVICE_ROLE_KEY"));
+    const authStartedAt = Date.now();
     const ctx = await buildRequestContext(req, service);
+    authMs = Date.now() - authStartedAt;
 
     const op = String(body?.op || "").trim();
     const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
     authorizeOperation(ctx, op, payload);
 
     if (shouldProxyToData(req)) {
+      const bridgeStartedAt = Date.now();
       const proxied = await invokeDataFunction({
         req,
         functionName: "discover-data-api",
         body,
         timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 7000),
       });
-      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
-      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+      handlerMs = Date.now() - bridgeStartedAt;
+      const proxyTiming = timingHeader([
+        `bridge;dur=${Number(proxied.bridgeMs || 0).toFixed(1)}`,
+        String(proxied.upstreamServerTiming || "").trim(),
+      ]);
+      if (proxied.ok) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": proxyTiming });
+      }
+      if (proxied.status >= 400 && proxied.status < 500 && proxied.data) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": proxyTiming });
+      }
+      return dataBridgeUnavailableResponse({ ...corsHeaders, "Server-Timing": proxyTiming }, proxied.error);
     }
 
     if (shouldBlockLocalExecution(req)) {
-      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+      handlerMs = 0;
+      return dataBridgeUnavailableResponse({ ...corsHeaders, "Server-Timing": timingHeader() }, "strict proxy mode");
     }
 
     let result: { data: unknown; count?: number | null };
+    const opStartedAt = Date.now();
 
     switch (op) {
       case "select":
@@ -484,14 +674,18 @@ serve(async (req) => {
       case "public_report_bundle":
         result = await runPublicReportBundle(service, payload);
         break;
+      case "admin_overview_bundle":
+        result = await runAdminOverviewBundle(service, ctx, payload);
+        break;
       default:
         throw new Error("unsupported operation");
     }
+    handlerMs = Date.now() - opStartedAt;
 
-    return json({ success: true, ...result });
+    return json({ success: true, ...result }, 200, { "Server-Timing": timingHeader() });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = message === "forbidden" ? 403 : 400;
-    return json({ success: false, error: message }, status);
+    return json({ success: false, error: message }, status, { "Server-Timing": timingHeader() });
   }
 });

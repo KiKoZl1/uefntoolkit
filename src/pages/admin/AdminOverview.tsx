@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
-import { dataDelete, dataRpc, dataSelect, dataUpdate } from "@/lib/discoverDataApi";
+import { dataAdminOverviewBundle, dataDelete, dataRpc, dataSelect, dataUpdate } from "@/lib/discoverDataApi";
 import {
   Loader2, Sparkles, CheckCircle2, RefreshCcw, Gauge, Users, AlertTriangle,
   ShieldAlert, EyeOff, Activity, Database, Eye, FileText, Clock, ChevronDown,
@@ -485,6 +485,9 @@ export default function AdminOverview() {
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const lastPhaseRef = useRef("idle");
+  const fastPollInFlightRef = useRef(false);
+  const slowPollInFlightRef = useRef(false);
+  const overviewBundleInFlightRef = useRef(false);
   const { toast } = useToast();
 
   // History tracking for sparklines
@@ -501,6 +504,144 @@ export default function AdminOverview() {
 
   const addLog = useCallback((msg: string) => {
     setLogs(p => [...p.slice(-80), { time: timeNow(), message: msg }]);
+  }, []);
+
+  const applyOverviewBundle = useCallback((bundle: any) => {
+    if (!bundle || typeof bundle !== "object") return;
+
+    const censusRow = (bundle?.census && typeof bundle.census === "object") ? bundle.census : {};
+    const censusTotal = Number((censusRow as any).totalIslands || 0);
+    const censusReported = Number((censusRow as any).reported || 0);
+    const censusSuppressed = Number((censusRow as any).suppressed || 0);
+    setCensus({
+      totalIslands: censusTotal,
+      reported: censusReported,
+      suppressed: censusSuppressed,
+      otherStatus: Number((censusRow as any).otherStatus || Math.max(0, censusTotal - censusReported - censusSuppressed)),
+      withTitle: Number((censusRow as any).withTitle || 0),
+      uniqueCreators: Number((censusRow as any).uniqueCreators || 0),
+      engineReports: Number((censusRow as any).engineReports || 0),
+      weeklyReports: Number((censusRow as any).weeklyReports || 0),
+      weeklyPublished: Number((censusRow as any).weeklyPublished || 0),
+    });
+    const ch = censusHistory.current;
+    const pushCH = (key: string, val: number) => { ch[key] = [...(ch[key] || []).slice(-30), val]; };
+    pushCH("total", censusTotal);
+    pushCH("reported", censusReported);
+    pushCH("suppressed", censusSuppressed);
+
+    const metaRow = (bundle?.meta && typeof bundle.meta === "object") ? bundle.meta : {};
+    const now = Date.now();
+    const withTitle = Number((metaRow as any).withTitle || 0);
+    metaSamples.current.push({ ts: now, val: withTitle });
+    metaSamples.current = metaSamples.current.filter((s) => now - s.ts < 120_000);
+    if (metaSamples.current.length >= 2) {
+      const oldest = metaSamples.current[0];
+      const newest = metaSamples.current[metaSamples.current.length - 1];
+      const deltaVal = newest.val - oldest.val;
+      const deltaMin = (newest.ts - oldest.ts) / 60_000;
+      if (deltaMin > 0.1 && deltaVal >= 0) {
+        setMetaThroughput(Math.round(deltaVal / deltaMin));
+      }
+    }
+    setMeta({
+      total: Number((metaRow as any).total || 0),
+      withTitle,
+      withError: Number((metaRow as any).withError || 0),
+      pendingNoData: Number((metaRow as any).pendingNoData || 0),
+      locked: Number((metaRow as any).locked || 0),
+      dueNow: Number((metaRow as any).dueNow || 0),
+      islands: Number((metaRow as any).islands || 0),
+      collections: Number((metaRow as any).collections || 0),
+    });
+    const mh = metaHistory.current;
+    const pushMH = (key: string, val: number) => { mh[key] = [...(mh[key] || []).slice(-30), val]; };
+    pushMH("total", Number((metaRow as any).total || 0));
+    pushMH("withTitle", withTitle);
+
+    const exposureRow = (bundle?.exposure && typeof bundle.exposure === "object") ? bundle.exposure : {};
+    setExposure({
+      targetsTotal: Number((exposureRow as any).targetsTotal || 0),
+      targetsOk: Number((exposureRow as any).targetsOk || 0),
+      ticks24h: Number((exposureRow as any).ticks24h || 0),
+      ticksOk: Number((exposureRow as any).ticksOk || 0),
+      ticksFailed: Number((exposureRow as any).ticksFailed || 0),
+    });
+
+    const linkRow = (bundle?.linkGraph && typeof bundle.linkGraph === "object") ? bundle.linkGraph : {};
+    setLinkGraph({
+      edgesTotal: Number((linkRow as any).edgesTotal || 0),
+      parentsTotal: Number((linkRow as any).parentsTotal || 0),
+      childrenTotal: Number((linkRow as any).childrenTotal || 0),
+      collectionsSeen24h: Number((linkRow as any).collectionsSeen24h || 0),
+      collectionsResolved24h: Number((linkRow as any).collectionsResolved24h || 0),
+      resolution24hPct: (linkRow as any).resolution24hPct != null ? Number((linkRow as any).resolution24hPct) : null,
+      edgeAgeSeconds: (linkRow as any).edgeAgeSeconds != null ? Number((linkRow as any).edgeAgeSeconds) : null,
+      staleEdges60d: Number((linkRow as any).staleEdges60d || 0),
+      collectionsDueNow: Number((linkRow as any).collectionsDueNow || 0),
+      referenceCollections: Number((linkRow as any).referenceCollections || 0),
+    });
+
+    const lookupRow = (bundle?.lookup && typeof bundle.lookup === "object") ? bundle.lookup : {};
+    const lookupErrors = Array.isArray((lookupRow as any).errorBreakdown) ? (lookupRow as any).errorBreakdown : [];
+    setLookup({
+      calls24h: Number((lookupRow as any).calls24h || 0),
+      ok24h: Number((lookupRow as any).ok24h || 0),
+      fail24h: Number((lookupRow as any).fail24h || 0),
+      calls1h: Number((lookupRow as any).calls1h || 0),
+      ok1h: Number((lookupRow as any).ok1h || 0),
+      fail1h: Number((lookupRow as any).fail1h || 0),
+      p95ms24h: (lookupRow as any).p95ms24h != null ? Number((lookupRow as any).p95ms24h) : null,
+      avgMs24h: (lookupRow as any).avgMs24h != null ? Number((lookupRow as any).avgMs24h) : null,
+      lastOkAt: (lookupRow as any).lastOkAt || null,
+      lastErrorAt: (lookupRow as any).lastErrorAt || null,
+      failRate24hPct: Number((lookupRow as any).failRate24hPct || 0),
+      coverageInternalCardPct: Number((lookupRow as any).coverageInternalCardPct || 0),
+      coverageDiscoverySignalsPct: Number((lookupRow as any).coverageDiscoverySignalsPct || 0),
+      coverageWeeklyPerfPct: Number((lookupRow as any).coverageWeeklyPerfPct || 0),
+      errorBreakdown: lookupErrors.map((e: any) => ({
+        error_type: String(e?.error_type || "unknown"),
+        count: Number(e?.count || 0),
+      })),
+    });
+    const lh = lookupHistory.current;
+    const pushLH = (key: string, val: number) => { lh[key] = [...(lh[key] || []).slice(-30), val]; };
+    pushLH("calls24h", Number((lookupRow as any).calls24h || 0));
+    pushLH("p95", Number((lookupRow as any).p95ms24h || 0));
+    pushLH("failRate", Number((lookupRow as any).failRate24hPct || 0));
+
+    setAlerts(Array.isArray(bundle?.alerts) ? (bundle.alerts as SystemAlert[]) : []);
+    setMonitorHeartbeat({
+      exposureTickAt: bundle?.monitorHeartbeat?.exposureTickAt || null,
+      metadataEventAt: bundle?.monitorHeartbeat?.metadataEventAt || null,
+    });
+  }, []);
+
+  const fetchOverviewBundle = useCallback(async (forceRefresh = false) => {
+    if (overviewBundleInFlightRef.current && !forceRefresh) return;
+    overviewBundleInFlightRef.current = true;
+    try {
+      const bundle = await dataAdminOverviewBundle(forceRefresh);
+      applyOverviewBundle(bundle?.data || {});
+    } finally {
+      overviewBundleInFlightRef.current = false;
+    }
+  }, [applyOverviewBundle]);
+
+  const invokeProtectedFunction = useCallback(async (functionName: string, body: Record<string, unknown> = {}) => {
+    const { data: authData, error: authError } = await supabase.auth.getSession();
+    if (authError || !authData?.session?.access_token) {
+      return {
+        data: null,
+        error: new Error(authError?.message || "auth_session_not_ready"),
+      };
+    }
+    return supabase.functions.invoke(functionName, {
+      body,
+      headers: {
+        Authorization: `Bearer ${authData.session.access_token}`,
+      },
+    });
   }, []);
 
   // ─── Fetch functions ─────────────────────────────────────
@@ -590,7 +731,7 @@ export default function AdminOverview() {
     setEnqueueLoading(true);
     addLog("Enfileirar GAP: disparando...");
     try {
-      const res = await supabase.functions.invoke("discover-enqueue-gap", { body: {} });
+      const res = await invokeProtectedFunction("discover-enqueue-gap", {});
       if (res.error) throw new Error(res.error.message);
       const d = res.data || {};
       if (d.error) throw new Error(d.error);
@@ -600,7 +741,7 @@ export default function AdminOverview() {
       const submitted = Number(d.submitted || 0);
       toast({ title: "Enfileiramento concluído", description: `${fmt(inserted)} novas + ${fmt(updated)} atualizadas de ${fmt(submitted)} submetidas (${((d.elapsed_ms || 0) / 1000).toFixed(1)}s).` });
       addLog(`Enfileirar: ${fmt(inserted)} novas (${fmt(updated)} bump) de ${fmt(submitted)}`);
-      await Promise.all([fetchMeta(), fetchCensus()]);
+      await fetchOverviewBundle(true);
       setMetaFlash(true);
       setTimeout(() => setMetaFlash(false), 2000);
     } catch (e: any) {
@@ -609,7 +750,7 @@ export default function AdminOverview() {
     } finally {
       setEnqueueLoading(false);
     }
-  }, [toast, addLog, fetchMeta, fetchCensus]);
+  }, [toast, addLog, fetchOverviewBundle, invokeProtectedFunction]);
 
   const fetchExposure = useCallback(async () => {
     const twentyFourAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -871,8 +1012,11 @@ export default function AdminOverview() {
   const handleBackfillCollections = useCallback(async () => {
     setBackfillLoading(true);
     try {
-      const res = await supabase.functions.invoke("discover-links-metadata-collector", {
-        body: { mode: "backfill_recent_collections", lookbackHours: 72, maxCodes: 5000, dueWithinMinutes: 0 },
+      const res = await invokeProtectedFunction("discover-links-metadata-collector", {
+        mode: "backfill_recent_collections",
+        lookbackHours: 72,
+        maxCodes: 5000,
+        dueWithinMinutes: 0,
       });
       if (res.error) throw new Error(res.error.message);
       const d = res.data || {};
@@ -883,19 +1027,17 @@ export default function AdminOverview() {
         description: `${fmt(total)} collections enfileiradas (${eq.inserted || 0} novas, ${eq.updated || 0} atualizadas).`,
       });
       addLog(`Backfill collections: ${JSON.stringify(d)}`);
-      await fetchLinkGraph();
+      await fetchOverviewBundle(true);
     } catch (e: any) {
       toast({ title: "Erro no backfill", description: e.message, variant: "destructive" });
       addLog(`Backfill erro: ${e.message}`);
     } finally {
       setBackfillLoading(false);
     }
-  }, [toast, addLog, fetchLinkGraph]);
+  }, [toast, addLog, fetchOverviewBundle, invokeProtectedFunction]);
 
   const fetchCrons = useCallback(async () => {
-    const { data, error } = await supabase.functions.invoke("discover-cron-admin", {
-      body: { mode: "list" },
-    });
+    const { data, error } = await invokeProtectedFunction("discover-cron-admin", { mode: "list" });
     if (error || !data?.success) return;
     const rows = ((data?.rows || []) as any[]).map((r: any) => ({
       jobid: Number(r.jobid || 0),
@@ -904,13 +1046,15 @@ export default function AdminOverview() {
       active: Boolean(r.active),
     })) as CronJob[];
     setCrons(rows);
-  }, []);
+  }, [invokeProtectedFunction]);
 
   const handleSetCronActive = useCallback(async (jobname: string, active: boolean) => {
     setCronRowBusy((p) => ({ ...p, [jobname]: true }));
     try {
-      const { data, error } = await supabase.functions.invoke("discover-cron-admin", {
-        body: { mode: "set", jobname, active },
+      const { data, error } = await invokeProtectedFunction("discover-cron-admin", {
+        mode: "set",
+        jobname,
+        active,
       });
       if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
       toast({
@@ -932,14 +1076,12 @@ export default function AdminOverview() {
         return n;
       });
     }
-  }, [toast, addLog, fetchCrons]);
+  }, [toast, addLog, fetchCrons, invokeProtectedFunction]);
 
   const handlePauseAllCrons = useCallback(async () => {
     setCronBulkAction("pause");
     try {
-      const { error, data } = await supabase.functions.invoke("discover-cron-admin", {
-        body: { mode: "pause" },
-      });
+      const { error, data } = await invokeProtectedFunction("discover-cron-admin", { mode: "pause" });
       if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
       const updated = Number((data?.result && (data.result.updated ?? data.result?.[0]?.updated)) || 0);
       toast({ title: "Crons pausados", description: `${updated} job(s) atualizados.` });
@@ -950,14 +1092,12 @@ export default function AdminOverview() {
     } finally {
       setCronBulkAction(null);
     }
-  }, [toast, addLog, fetchCrons]);
+  }, [toast, addLog, fetchCrons, invokeProtectedFunction]);
 
   const handleResumeAllCrons = useCallback(async () => {
     setCronBulkAction("resume");
     try {
-      const { error, data } = await supabase.functions.invoke("discover-cron-admin", {
-        body: { mode: "resume" },
-      });
+      const { error, data } = await invokeProtectedFunction("discover-cron-admin", { mode: "resume" });
       if (error || !data?.success) throw new Error(data?.error || error?.message || "erro");
       const updated = Number((data?.result && (data.result.updated ?? data.result?.[0]?.updated)) || 0);
       toast({ title: "Crons reativados", description: `${updated} job(s) atualizados.` });
@@ -968,7 +1108,7 @@ export default function AdminOverview() {
     } finally {
       setCronBulkAction(null);
     }
-  }, [toast, addLog, fetchCrons]);
+  }, [toast, addLog, fetchCrons, invokeProtectedFunction]);
 
   const fetchAlerts = useCallback(async () => {
     const [alertsRes, exposureBeatRes, metadataBeatRes] = await Promise.all([
@@ -1013,21 +1153,65 @@ export default function AdminOverview() {
 
   // ─── Polling ──────────────────────────────────────────────
 
-  // Fast polling for metadata (5s), slower for everything else (30s)
+  // Fast polling for metadata (15s), slower for heavy blocks (60s), only while tab is visible.
   useEffect(() => {
-    const tickFast = async () => {
-      await fetchMeta();
-      setLastRefresh(timeNow());
+    let cancelled = false;
+    const hasDocument = typeof document !== "undefined";
+    const isVisible = () => !hasDocument || document.visibilityState === "visible";
+
+    const tickFast = async (force = false) => {
+      if (cancelled || (!force && !isVisible())) return;
+      if (fastPollInFlightRef.current) return;
+      fastPollInFlightRef.current = true;
+      try {
+        await fetchOverviewBundle(false);
+        if (!cancelled) setLastRefresh(timeNow());
+      } finally {
+        fastPollInFlightRef.current = false;
+      }
     };
-    const tickSlow = async () => {
-      await Promise.all([fetchCensus(), fetchExposure(), fetchLinkGraph(), fetchLookup(), fetchRalph(), fetchCrons(), fetchReports(), fetchAlerts()]);
+
+    const tickSlow = async (force = false) => {
+      if (cancelled || (!force && !isVisible())) return;
+      if (slowPollInFlightRef.current) return;
+      slowPollInFlightRef.current = true;
+      try {
+        await Promise.all([
+          fetchOverviewBundle(false),
+          fetchRalph(),
+          fetchCrons(),
+          fetchReports(),
+        ]);
+      } finally {
+        slowPollInFlightRef.current = false;
+      }
     };
-    tickFast();
-    tickSlow();
-    const fastId = setInterval(tickFast, 5_000);
-    const slowId = setInterval(tickSlow, 30_000);
-    return () => { clearInterval(fastId); clearInterval(slowId); };
-  }, [fetchCensus, fetchMeta, fetchExposure, fetchLinkGraph, fetchLookup, fetchRalph, fetchCrons, fetchReports, fetchAlerts]);
+
+    void tickFast(true);
+    void tickSlow(true);
+
+    const fastId = window.setInterval(() => void tickFast(false), 15_000);
+    const slowId = window.setInterval(() => void tickSlow(false), 60_000);
+
+    const onVisibilityChange = () => {
+      if (!isVisible()) return;
+      void tickFast(true);
+      void tickSlow(true);
+    };
+
+    if (hasDocument) {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(fastId);
+      window.clearInterval(slowId);
+      if (hasDocument) {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
+  }, [fetchOverviewBundle, fetchRalph, fetchCrons, fetchReports]);
 
   // ─── Weekly pipeline (preserved logic) ────────────────────
 
@@ -1071,12 +1255,12 @@ export default function AdminOverview() {
   }, [applyReportState]);
 
   const triggerOrchestrateTick = useCallback(async (reportId: string) => {
-    const { data, error } = await supabase.functions.invoke("discover-collector", { body: { mode: "orchestrate", reportId } });
+    const { data, error } = await invokeProtectedFunction("discover-collector", { mode: "orchestrate", reportId });
     if (error) { addLog(`Tick falhou: ${error.message}`); return; }
     if (data?.throughput_per_min != null) {
       addLog(`Tick: ${fmt(data.metrics_done_count)}/${fmt(data.queue_total)} | ${fmt(data.throughput_per_min)} ilhas/min | workers ${data.workers_active ?? 0}`);
     } else addLog("Tick orchestrate executado.");
-  }, [addLog]);
+  }, [addLog, invokeProtectedFunction]);
 
   useEffect(() => {
     (async () => {
@@ -1107,7 +1291,7 @@ export default function AdminOverview() {
 
   const handleGenerate = async () => {
     setLogs([]); addLog("Iniciando pipeline..."); setGenerating(true); setPipelineOpen(true);
-    const startRes = await supabase.functions.invoke("discover-collector", { body: { mode: "start" } });
+    const startRes = await invokeProtectedFunction("discover-collector", { mode: "start" });
     if (startRes.error || !startRes.data?.success) {
       addLog(`Falha no start: ${startRes.data?.error || startRes.error?.message || "erro"}`);
       setGenerating(false); return;

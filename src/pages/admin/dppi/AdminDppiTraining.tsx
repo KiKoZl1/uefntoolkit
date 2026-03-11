@@ -15,6 +15,14 @@ export default function AdminDppiTraining() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const { data: authData, error: authError } = await supabase.auth.getSession();
+    if (authError || !authData?.session?.access_token) {
+      setReadiness(null);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
     const [logsRes, healthRes] = await Promise.all([
       dataSelect<any[]>({
         table: "dppi_training_log",
@@ -22,7 +30,12 @@ export default function AdminDppiTraining() {
         order: [{ column: "requested_at", ascending: false }],
         limit: 100,
       }),
-      supabase.functions.invoke("dppi-health", { body: {} }),
+      supabase.functions.invoke("dppi-health", {
+        body: {},
+        headers: {
+          Authorization: `Bearer ${authData.session.access_token}`,
+        },
+      }),
     ]);
 
     setRows(Array.isArray(logsRes.data) ? logsRes.data : []);

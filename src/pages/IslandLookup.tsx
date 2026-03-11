@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -233,6 +233,37 @@ function calcTotals(data: any) {
   };
 }
 
+function buildLookupSummary(payload: any) {
+  const daily = payload?.dailyMetrics;
+  const events = payload?.eventsV2?.meaningful || payload?.metadataEvents || [];
+  const sum = (key: string) => {
+    if (!daily?.[key]) return 0;
+    return (daily[key] as any[]).reduce((acc, row) => acc + asNum(row?.value), 0);
+  };
+  const peak = () => {
+    if (!daily?.peakCCU) return 0;
+    return Math.max(0, ...(daily.peakCCU as any[]).map((row) => asNum(row?.value)));
+  };
+
+  return {
+    code: payload?.metadata?.code || null,
+    title: payload?.metadata?.title || null,
+    creator: payload?.metadata?.creatorCode || null,
+    category: payload?.metadata?.category || null,
+    tags: payload?.metadata?.tags || [],
+    unique7d: sum("uniquePlayers"),
+    plays7d: sum("plays"),
+    minutes7d: sum("minutesPlayed"),
+    peakCcu7d: peak(),
+    favorites7d: sum("favorites"),
+    recommends7d: sum("recommendations"),
+    discovery: payload?.discoverySignalsV2?.summary || null,
+    weeklyTail: (payload?.weeklyPerformance || []).slice(-6),
+    competitorsRank: payload?.competitorsV2?.primaryIslandRank || null,
+    latestEventTs: events?.[0]?.ts || null,
+  };
+}
+
 function metricDelta(a: number, b: number) {
   const delta = a - b;
   const pct = b > 0 ? (delta / b) * 100 : null;
@@ -275,6 +306,7 @@ export default function IslandLookup() {
   const [aiData, setAiData] = useState<any | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const aiRequestRunRef = useRef(0);
   const [recentLookups, setRecentLookups] = useState<any[]>([]);
   const [imagePreview, setImagePreview] = useState<{
     open: boolean;
@@ -348,10 +380,13 @@ export default function IslandLookup() {
   };
 
   const fetchLookupAi = async (main: any, compare: any | null) => {
+    const runId = ++aiRequestRunRef.current;
     setAiLoading(true);
     setAiData(null);
     setAiError(null);
     try {
+      const primarySummary = buildLookupSummary(main);
+      const compareSummary = compare ? buildLookupSummary(compare) : null;
       const payloadFingerprint = hashText(
         JSON.stringify({
           version: "lookup_ai_v2",
@@ -370,13 +405,55 @@ export default function IslandLookup() {
           compareCode: compare?.metadata?.code || null,
           locale: i18n.language,
           windowDays: 7,
+          includeRecent: false,
+          primarySummary,
+          compareSummary,
           payloadFingerprint,
         },
       });
       if (res.error) throw res.error;
       if (res.data?.error) throw new Error(String(res.data.error));
+      if (runId !== aiRequestRunRef.current) return;
+
       setAiData(res.data);
+
+      const shouldPollEnrichment =
+        String(res.data?.phase || "").trim() !== "enriched" &&
+        Boolean(res.data?.enriching);
+
+      setAiLoading(false);
+
+      if (shouldPollEnrichment) {
+        const pollAttempts = 8;
+        for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+          if (runId !== aiRequestRunRef.current) return;
+
+          const poll = await supabase.functions.invoke("discover-island-lookup-ai", {
+            body: {
+              primaryCode: main?.metadata?.code,
+              compareCode: compare?.metadata?.code || null,
+              locale: i18n.language,
+              windowDays: 7,
+              includeRecent: false,
+              primarySummary,
+              compareSummary,
+              payloadFingerprint,
+            },
+          });
+
+          if (poll.error || poll.data?.error) continue;
+          if (runId !== aiRequestRunRef.current) return;
+
+          setAiData(poll.data);
+
+          const enriched = String(poll.data?.phase || "").trim() === "enriched";
+          const stillEnriching = Boolean(poll.data?.enriching);
+          if (enriched || !stillEnriching) break;
+        }
+      }
     } catch (e: any) {
+      if (runId !== aiRequestRunRef.current) return;
       const message =
         e?.context?.message ||
         e?.context?.error ||
@@ -384,7 +461,9 @@ export default function IslandLookup() {
         "AI lookup insights unavailable";
       setAiError(message);
     } finally {
-      setAiLoading(false);
+      if (runId === aiRequestRunRef.current) {
+        setAiLoading(false);
+      }
     }
   };
 
@@ -394,6 +473,7 @@ export default function IslandLookup() {
     setLoading(true);
     setData(null);
     setCompareData(null);
+    aiRequestRunRef.current += 1;
     setAiData(null);
     setAiError(null);
 
@@ -443,6 +523,12 @@ export default function IslandLookup() {
     setCompareCode(cmp);
     await runLookup(mainCode, cmp);
   };
+
+  useEffect(() => {
+    return () => {
+      aiRequestRunRef.current += 1;
+    };
+  }, []);
 
   const openImagePreview = (url: string | null, title = "Thumbnail") => {
     if (!url) return;
@@ -1046,6 +1132,8 @@ export default function IslandLookup() {
                 <Sparkles className="h-4 w-4 text-primary" />
                 {t("islandLookup.aiInsightsTitle")}
                 {aiData?.cacheHit && <Badge variant="outline">cache</Badge>}
+                {aiData?.phase === "baseline" && <Badge variant="secondary">baseline</Badge>}
+                {aiData?.phase === "enriched" && <Badge variant="outline">enriched</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -1060,6 +1148,12 @@ export default function IslandLookup() {
               )}
               {!aiLoading && aiData && (
                 <>
+                  {aiData?.phase === "baseline" && aiData?.enriching && (
+                    <div className="text-xs text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Enriquecendo insights com IA...
+                    </div>
+                  )}
                   <p className="text-sm">{aiData.summaryGlobal}</p>
                   {aiSectionText && (
                     <p className="text-sm text-muted-foreground">

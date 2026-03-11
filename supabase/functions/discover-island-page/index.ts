@@ -17,7 +17,7 @@ const corsHeaders = {
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
 const ISLAND_CODE_RE = /^\d{4}-\d{4}-\d{4}$/;
-const CACHE_TTL_MINUTES = 2;
+const CACHE_TTL_MINUTES = 5;
 const CACHE_STALE_MINUTES = 10;
 const ACTIVE_CACHE_RETENTION_DAYS = 3;
 const DEFAULT_REFRESH_BATCH = 50;
@@ -143,6 +143,21 @@ type CachePayload = {
   asOf: string;
 };
 
+type SummaryPayload = {
+  meta: CachePayload["meta"];
+  kpisNow: CachePayload["kpisNow"];
+  overview24h: CachePayload["overview24h"];
+  overviewAllTime: CachePayload["overviewAllTime"];
+  platformDistribution?: CachePayload["platformDistribution"];
+  asOf: string;
+  cache?: {
+    hit: boolean;
+    stale: boolean;
+    asOf?: string;
+  };
+  partial?: boolean;
+};
+
 function json(res: unknown, status = 200) {
   return new Response(JSON.stringify(res), {
     status,
@@ -154,6 +169,16 @@ function mustEnv(key: string): string {
   const v = Deno.env.get(key);
   if (!v) throw new Error(`Missing env var: ${key}`);
   return v;
+}
+
+function runInBackground(task: Promise<unknown> | unknown) {
+  const promise = Promise.resolve(task as any);
+  const edgeRuntime = (globalThis as any)?.EdgeRuntime;
+  if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+    edgeRuntime.waitUntil(promise.catch(() => void 0));
+    return;
+  }
+  promise.catch(() => void 0);
 }
 
 function asNum(v: unknown): number {
@@ -271,6 +296,18 @@ function normalizePlatformName(value: unknown): "pc" | "console" | "mobile" | nu
   ) return "console";
   if (raw.includes("mobile") || raw.includes("android") || raw.includes("ios") || raw.includes("phone")) return "mobile";
   return null;
+}
+
+function summaryFromCachePayload(payload: CachePayload, cacheHit: boolean, stale: boolean): SummaryPayload {
+  return {
+    meta: payload.meta,
+    kpisNow: payload.kpisNow,
+    overview24h: payload.overview24h,
+    overviewAllTime: payload.overviewAllTime,
+    platformDistribution: payload.platformDistribution ?? null,
+    asOf: payload.asOf,
+    cache: { hit: cacheHit, stale, asOf: payload.asOf },
+  };
 }
 
 function parsePlatformDistribution(...sources: unknown[]): { pc: number; console: number; mobile: number } | null {
@@ -1059,9 +1096,81 @@ async function buildFreshPayload(
   };
 }
 
+async function buildSummaryFallback(
+  supabase: any,
+  islandCode: string,
+  nowIso: string,
+): Promise<SummaryPayload> {
+  const [metadataRes, cacheRes, latestReportRes] = await Promise.all([
+    supabase
+      .from("discover_link_metadata")
+      .select("title,support_code,image_url,published_at_epic,updated_at_epic")
+      .eq("link_code", islandCode)
+      .maybeSingle(),
+    supabase
+      .from("discover_islands_cache")
+      .select("title,creator_code,image_url,category,tags,published_at_epic,updated_at_epic,last_week_peak_ccu")
+      .eq("island_code", islandCode)
+      .maybeSingle(),
+    supabase
+      .from("discover_report_islands")
+      .select("week_unique,week_plays,week_minutes,week_minutes_per_player_avg,week_peak_ccu_max,week_favorites,week_recommends,week_d1_avg,week_d7_avg")
+      .eq("island_code", islandCode)
+      .eq("status", "reported")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const report = latestReportRes?.data || null;
+  const title = String(metadataRes?.data?.title || cacheRes?.data?.title || islandCode);
+  const imageUrl = pickImageUrl(metadataRes?.data?.image_url, cacheRes?.data?.image_url);
+  const creatorCode = String(metadataRes?.data?.support_code || cacheRes?.data?.creator_code || "") || null;
+
+  return {
+    meta: {
+      islandCode,
+      title,
+      imageUrl,
+      creatorCode,
+      category: String(cacheRes?.data?.category || "") || null,
+      tags: tagsToArray(cacheRes?.data?.tags),
+      publishedAtEpic: asIso(metadataRes?.data?.published_at_epic || cacheRes?.data?.published_at_epic),
+      updatedAtEpic: asIso(metadataRes?.data?.updated_at_epic || cacheRes?.data?.updated_at_epic),
+    },
+    kpisNow: {
+      playersNow: 0,
+      rankNow: null,
+      peak24h: asNum(report?.week_peak_ccu_max),
+      peakAllTime: Math.max(asNum(report?.week_peak_ccu_max), asNum(cacheRes?.data?.last_week_peak_ccu)),
+    },
+    overview24h: {
+      uniquePlayers: asNum(report?.week_unique),
+      plays: asNum(report?.week_plays),
+      favorites: asNum(report?.week_favorites),
+      recommends: asNum(report?.week_recommends),
+      minutesPlayed: asNum(report?.week_minutes),
+      avgMinutesPerPlayer: asNum(report?.week_minutes_per_player_avg),
+      avgSessionMinutes: 0,
+      retentionD1: asNum(report?.week_d1_avg),
+      retentionD7: asNum(report?.week_d7_avg),
+    },
+    overviewAllTime: {
+      minutesPlayed: asNum(report?.week_minutes),
+      favorites: asNum(report?.week_favorites),
+      recommends: asNum(report?.week_recommends),
+    },
+    platformDistribution: null,
+    asOf: nowIso,
+    cache: { hit: false, stale: true, asOf: nowIso },
+    partial: true,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
   const now = new Date();
   const nowIso = now.toISOString();
   const nowMs = now.getTime();
@@ -1081,12 +1190,23 @@ serve(async (req) => {
         body,
         timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 4500),
       });
-      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, corsHeaders);
-      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
+      const timing = [
+        `total;dur=${(Date.now() - startedAt).toFixed(1)}`,
+        `bridge;dur=${Number(proxied.bridgeMs || 0).toFixed(1)}`,
+        String(proxied.upstreamServerTiming || "").trim(),
+      ].filter(Boolean).join(", ");
+      if (proxied.ok) return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": timing });
+      if (proxied.status >= 400 && proxied.status < 500 && proxied.data) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": timing });
+      }
+      return dataBridgeUnavailableResponse({ ...corsHeaders, "Server-Timing": timing }, proxied.error);
     }
 
     if (shouldBlockLocalExecution(req)) {
-      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
+      return dataBridgeUnavailableResponse(
+        { ...corsHeaders, "Server-Timing": `total;dur=${(Date.now() - startedAt).toFixed(1)}` },
+        "strict proxy mode",
+      );
     }
 
     const mode = String(body?.mode || "").trim().toLowerCase();
@@ -1243,6 +1363,12 @@ serve(async (req) => {
       cache: { hit: cacheHit, stale, asOf: payload.asOf },
     });
 
+    const responseSummaryFromPayload = (
+      payload: CachePayload,
+      cacheHit: boolean,
+      stale: boolean,
+    ) => summaryFromCachePayload(payload, cacheHit, stale);
+
     const { data: cacheRow } = await supabase
       .from("discover_island_page_cache")
       .select("payload_json,as_of,expires_at,hit_count")
@@ -1253,6 +1379,25 @@ serve(async (req) => {
 
     const payload = cacheRow?.payload_json as CachePayload | null;
     if (payload) {
+      const asOfMs = toEpoch(payload.asOf);
+      const stale = asOfMs == null || (nowMs - asOfMs) > CACHE_STALE_MINUTES * 60 * 1000;
+
+      if (mode === "summary") {
+        runInBackground(
+          supabase
+            .from("discover_island_page_cache")
+            .update({
+              last_accessed_at: nowIso,
+              hit_count: asNum(cacheRow?.hit_count) + 1,
+              updated_at: nowIso,
+            })
+            .eq("island_code", islandCode)
+            .eq("region", region)
+            .eq("surface_name", surfaceName),
+        );
+        return json(responseSummaryFromPayload(payload, true, stale));
+      }
+
       let normalized = normalizeSeriesByRange(payload);
       if (!normalized) {
         try {
@@ -1299,19 +1444,47 @@ serve(async (req) => {
         normalized = legacyFallbackSeriesByRange(payload as unknown as Record<string, unknown>);
       }
 
-      const asOfMs = toEpoch(payload.asOf);
-      const stale = asOfMs == null || (nowMs - asOfMs) > CACHE_STALE_MINUTES * 60 * 1000;
-      await supabase
-        .from("discover_island_page_cache")
-        .update({
-          last_accessed_at: nowIso,
-          hit_count: asNum(cacheRow?.hit_count) + 1,
-          updated_at: nowIso,
-        })
-        .eq("island_code", islandCode)
-        .eq("region", region)
-        .eq("surface_name", surfaceName);
+      runInBackground(
+        supabase
+          .from("discover_island_page_cache")
+          .update({
+            last_accessed_at: nowIso,
+            hit_count: asNum(cacheRow?.hit_count) + 1,
+            updated_at: nowIso,
+          })
+          .eq("island_code", islandCode)
+          .eq("region", region)
+          .eq("surface_name", surfaceName),
+      );
       return json(responseFromPayload(payload, normalized, true, stale));
+    }
+
+    if (mode === "summary") {
+      const fallbackSummary = await buildSummaryFallback(supabase, islandCode, nowIso);
+      runInBackground((async () => {
+        try {
+          const freshPayload = await buildFreshPayload(supabase, islandCode, region, surfaceName);
+          const expiresAt = new Date(Date.now() + cacheTtlMinutes() * 60 * 1000).toISOString();
+          await supabase.from("discover_island_page_cache").upsert(
+            {
+              island_code: islandCode,
+              region,
+              surface_name: surfaceName,
+              payload_json: freshPayload as unknown as Record<string, unknown>,
+              as_of: freshPayload.asOf,
+              expires_at: expiresAt,
+              updated_at: new Date().toISOString(),
+              last_accessed_at: new Date().toISOString(),
+              hit_count: 0,
+              last_refresh_error: null,
+            },
+            { onConflict: "island_code,region,surface_name" },
+          );
+        } catch {
+          // best-effort warmup only
+        }
+      })());
+      return json(fallbackSummary);
     }
 
     const freshPayload = await buildFreshPayload(supabase, islandCode, region, surfaceName);

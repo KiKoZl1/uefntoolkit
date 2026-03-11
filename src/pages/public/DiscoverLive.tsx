@@ -304,6 +304,8 @@ export default function DiscoverLive() {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [timelineData, setTimelineData] = useState<PanelTimelinePayload | null>(null);
+  const [visibleMainRails, setVisibleMainRails] = useState(6);
+  const [visibleFixedRails, setVisibleFixedRails] = useState(1);
   const initialBusy = loading;
 
   useEffect(() => {
@@ -347,6 +349,80 @@ export default function DiscoverLive() {
     () => displayRails.filter((r) => r.panelKey !== "other_experiences_by_epic" && r.panelKey !== "featured_collections"),
     [displayRails],
   );
+
+  useEffect(() => {
+    if (mainRails.length === 0) {
+      setVisibleMainRails(0);
+      return;
+    }
+
+    const initial = Math.min(6, mainRails.length);
+    setVisibleMainRails(initial);
+    if (mainRails.length <= 6) return;
+
+    let cancelled = false;
+    const scheduleStep = () => {
+      if (cancelled) return;
+      const idle = (window as any).requestIdleCallback as ((cb: () => void, opts?: { timeout: number }) => number) | undefined;
+      setVisibleMainRails((prev) => {
+        const next = Math.min(mainRails.length, prev + 4);
+        if (next < mainRails.length) {
+          if (typeof idle === "function") {
+            idle(() => {
+              if (!cancelled) scheduleStep();
+            }, { timeout: 180 });
+          } else {
+            window.setTimeout(() => {
+              if (!cancelled) scheduleStep();
+            }, 140);
+          }
+        }
+        return next;
+      });
+    };
+
+    window.setTimeout(() => {
+      if (!cancelled) {
+        scheduleStep();
+      }
+    }, 120);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mainRails.length]);
+
+  useEffect(() => {
+    if (fixedExperienceRails.length === 0) {
+      setVisibleFixedRails(0);
+      return;
+    }
+
+    setVisibleFixedRails(1);
+    if (fixedExperienceRails.length <= 1) return;
+
+    let cancelled = false;
+    const step = () => {
+      if (cancelled) return;
+      setVisibleFixedRails((prev) => {
+        const next = Math.min(fixedExperienceRails.length, prev + 1);
+        if (next < fixedExperienceRails.length) {
+          window.setTimeout(() => {
+            if (!cancelled) step();
+          }, 260);
+        }
+        return next;
+      });
+    };
+
+    window.setTimeout(() => {
+      if (!cancelled) step();
+    }, 220);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fixedExperienceRails.length]);
 
   const highlights = useMemo<DiscoveryHighlight[]>(() => {
     const islandRows = mainRails
@@ -667,7 +743,7 @@ export default function DiscoverLive() {
         {mainRails.length === 0 ? (
           <PageState variant="section" title={t("discover.noDataFilter")} description={t("discover.highlightsSubtitle")} />
         ) : (
-          mainRails.map((rail) => {
+          mainRails.slice(0, visibleMainRails).map((rail) => {
             const isHomebar = rail.panelKey === "homebar";
             const isGameCollections = rail.panelKey === "game_collections";
             const allowTimeline = rail.rowKind !== "collection" && rail.panelKey !== "game_collections" && rail.panelKey !== "other_experiences_by_epic";
@@ -823,7 +899,16 @@ export default function DiscoverLive() {
           })
         )}
 
-        {fixedExperienceRails.map((rail) => (
+        {visibleMainRails < mainRails.length ? (
+          <div className="flex items-center justify-center py-1">
+            <Badge variant="outline" className="gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Carregando mais paineis...
+            </Badge>
+          </div>
+        ) : null}
+
+        {fixedExperienceRails.slice(0, visibleFixedRails).map((rail) => (
           <Card key={`fixed-${rail.panelName}`} className="scroll-mt-24">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">

@@ -30,9 +30,15 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useIslandPageQuery } from "@/hooks/queries/publicQueries";
+import { useIslandPageQuery, useIslandPageSummaryQuery } from "@/hooks/queries/publicQueries";
 import { PageState } from "@/components/ui/page-state";
-import type { IslandChartRange, IslandPageResponse, IslandSeriesBundle, IslandSeriesPoint } from "@/types/discover-island-page";
+import type {
+  IslandChartRange,
+  IslandPageResponse,
+  IslandPageSummaryResponse,
+  IslandSeriesBundle,
+  IslandSeriesPoint,
+} from "@/types/discover-island-page";
 
 const ISLAND_CODE_RE = /^\d{4}-\d{4}-\d{4}$/;
 const CHART_RANGES: IslandChartRange[] = ["1D", "1W", "1M", "ALL"];
@@ -195,29 +201,54 @@ export default function IslandPage() {
   const [avgPlaytimeRange, setAvgPlaytimeRange] = useState<IslandChartRange>("1D");
   const [totalPlaytimeRange, setTotalPlaytimeRange] = useState<IslandChartRange>("1D");
   const [sessionsRange, setSessionsRange] = useState<IslandChartRange>("1D");
-  const [data, setData] = useState<IslandPageResponse | null>(null);
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [overlayProgress, setOverlayProgress] = useState(0);
   const [imagePreview, setImagePreview] = useState<{ src: string; label: string } | null>(null);
 
   const isValidCode = ISLAND_CODE_RE.test(code);
-  const islandQuery = useIslandPageQuery(code, isValidCode);
-  const loading = islandQuery.isLoading;
-  const error = islandQuery.error instanceof Error ? islandQuery.error.message : null;
+  const summaryQuery = useIslandPageSummaryQuery(code, isValidCode);
+  const summaryData = (summaryQuery.data as IslandPageSummaryResponse | undefined) ?? null;
+  const islandQuery = useIslandPageQuery(code, isValidCode && (summaryQuery.isFetched || Boolean(summaryData)));
+  const data = (islandQuery.data as IslandPageResponse | undefined) ?? null;
+  const summaryLoading = summaryQuery.isLoading && !summaryData && !data;
+  const summaryError = summaryQuery.error instanceof Error ? summaryQuery.error.message : null;
+  const detailsLoading = islandQuery.isLoading && !data;
+  const detailsError = islandQuery.error instanceof Error ? islandQuery.error.message : null;
+
+  const displayData = useMemo<IslandPageResponse | null>(() => {
+    if (data) return data;
+    if (!summaryData) return null;
+    const emptySeriesByRange: Record<IslandChartRange, IslandSeriesBundle> = {
+      "1D": EMPTY_SERIES_BUNDLE,
+      "1W": EMPTY_SERIES_BUNDLE,
+      "1M": EMPTY_SERIES_BUNDLE,
+      ALL: EMPTY_SERIES_BUNDLE,
+    };
+    return {
+      ...summaryData,
+      seriesByRange: emptySeriesByRange,
+      series: EMPTY_SERIES_BUNDLE,
+      panelTimeline24h: { rows: [] },
+      updates: {
+        events: [],
+        technicalFilteredCount: 0,
+        lastMeaningfulUpdateAt: null,
+      },
+      dppi_radar: null,
+      range: "1D",
+    };
+  }, [data, summaryData]);
 
   useEffect(() => {
-    setData((islandQuery.data as IslandPageResponse | undefined) ?? null);
-  }, [islandQuery.data]);
-
-  useEffect(() => {
-    if (!error) return;
-    toast({ title: t("common.error"), description: error || t("islandPage.loadFailed"), variant: "destructive" });
-  }, [error, t, toast]);
+    if (!summaryError && !detailsError) return;
+    const message = summaryError || detailsError || t("islandPage.loadFailed");
+    toast({ title: t("common.error"), description: message, variant: "destructive" });
+  }, [summaryError, detailsError, t, toast]);
 
   useEffect(() => {
     let intervalId: number | undefined;
     let hideTimeoutId: number | undefined;
-    if (loading) {
+    if (summaryLoading) {
       setOverlayVisible(true);
       setOverlayProgress((prev) => (prev >= 5 ? prev : 5));
       intervalId = window.setInterval(() => setOverlayProgress((prev) => Math.min(92, prev + 4)), 120);
@@ -232,7 +263,7 @@ export default function IslandPage() {
       if (intervalId != null) window.clearInterval(intervalId);
       if (hideTimeoutId != null) window.clearTimeout(hideTimeoutId);
     };
-  }, [loading]);
+  }, [summaryLoading]);
 
   const sharePage = async () => {
     try {
@@ -244,14 +275,14 @@ export default function IslandPage() {
   };
 
   const openInFortnite = () => {
-    if (!data?.meta.islandCode) return;
-    const creator = data.meta.creatorCode ? `@${data.meta.creatorCode}/` : "";
-    window.open(`https://www.fortnite.com/${creator}${data.meta.islandCode}`, "_blank", "noopener,noreferrer");
+    if (!displayData?.meta.islandCode) return;
+    const creator = displayData.meta.creatorCode ? `@${displayData.meta.creatorCode}/` : "";
+    window.open(`https://www.fortnite.com/${creator}${displayData.meta.islandCode}`, "_blank", "noopener,noreferrer");
   };
 
   const bundleForRange = useCallback(
-    (range: IslandChartRange): IslandSeriesBundle => data?.seriesByRange?.[range] || data?.series || EMPTY_SERIES_BUNDLE,
-    [data],
+    (range: IslandChartRange): IslandSeriesBundle => displayData?.seriesByRange?.[range] || displayData?.series || EMPTY_SERIES_BUNDLE,
+    [displayData],
   );
 
   const playerRows = useMemo(
@@ -288,8 +319,8 @@ export default function IslandPage() {
   );
 
   const engagementMixRows = useMemo(() => {
-    const uniquePlayers = Math.max(0, asNum(data?.overview24h.uniquePlayers));
-    const plays = Math.max(0, asNum(data?.overview24h.plays));
+    const uniquePlayers = Math.max(0, asNum(displayData?.overview24h.uniquePlayers));
+    const plays = Math.max(0, asNum(displayData?.overview24h.plays));
     const sessions24h = Math.max(
       0,
       (bundleForRange("1D").sessions || []).reduce((sum, point) => sum + asNum(point.current), 0),
@@ -301,18 +332,18 @@ export default function IslandPage() {
       { name: t("islandPage.plays"), value: (plays / sum) * 100, color: CHART_PREVIOUS },
       { name: t("islandPage.sessions"), value: (sessions24h / sum) * 100, color: "hsl(220,14%,64%)" },
     ];
-  }, [data?.overview24h.uniquePlayers, data?.overview24h.plays, bundleForRange, t]);
+  }, [displayData?.overview24h.uniquePlayers, displayData?.overview24h.plays, bundleForRange, t]);
 
   const updates = useMemo(
-    () => (data?.updates.events || []).filter((ev) => ev.eventType === "epic_updated" || ev.eventType === "thumb_changed").slice(0, 8),
-    [data?.updates.events],
+    () => (displayData?.updates.events || []).filter((ev) => ev.eventType === "epic_updated" || ev.eventType === "thumb_changed").slice(0, 8),
+    [displayData?.updates.events],
   );
 
   const panelBase = useMemo(() => {
-    const asOf = data?.asOf ? Date.parse(data.asOf) : Date.now();
+    const asOf = displayData?.asOf ? Date.parse(displayData.asOf) : Date.now();
     const start = asOf - 24 * 60 * 60 * 1000;
     return { start, duration: Math.max(1, asOf - start) };
-  }, [data?.asOf]);
+  }, [displayData?.asOf]);
 
   const weeklyRows = useMemo(() => {
     const candidates = [bundleForRange("ALL"), bundleForRange("1M"), bundleForRange("1W")];
@@ -368,7 +399,7 @@ export default function IslandPage() {
     );
   }
 
-  if (loading && !data) {
+  if (summaryLoading && !displayData) {
     return (
       <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
         <PageState variant="section" title={t("common.loading")} description={t("islandPage.loading")} />
@@ -376,15 +407,15 @@ export default function IslandPage() {
     );
   }
 
-  if (error && !data) {
+  if (summaryError && !displayData) {
     return (
       <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
         <PageState
           variant="section"
           tone="error"
           title={t("common.error")}
-          description={error}
-          action={{ label: t("common.reload"), onClick: () => void islandQuery.refetch() }}
+          description={summaryError}
+          action={{ label: t("common.reload"), onClick: () => void summaryQuery.refetch() }}
         />
       </div>
     );
@@ -394,13 +425,18 @@ export default function IslandPage() {
     <div className="relative mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-6 md:py-8">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_14%_0%,rgba(148,163,184,0.08),transparent_38%),radial-gradient(circle_at_82%_2%,rgba(51,65,85,0.08),transparent_34%)]" />
 
-      {error ? <div className="text-sm text-red-300">{error}</div> : null}
+      {detailsError ? <div className="text-sm text-red-300">{detailsError}</div> : null}
 
-      {data ? (
+      {displayData ? (
         <>
+          {!data && summaryData ? (
+            <div className="rounded-xl border border-border/60 bg-card/70 p-3 text-sm text-zinc-300">
+              {t("islandPage.loading")} {t("common.details") || "details"}...
+            </div>
+          ) : null}
           <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-card/80">
             <div className="absolute inset-0">
-              {data.meta.imageUrl ? <img src={data.meta.imageUrl} alt={data.meta.title} className="h-full w-full object-cover" /> : null}
+              {displayData.meta.imageUrl ? <img src={displayData.meta.imageUrl} alt={displayData.meta.title} className="h-full w-full object-cover" /> : null}
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/20 to-background/95" />
               <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent via-background/80 to-background" />
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(59,130,246,0.12),transparent_44%)]" />
@@ -409,27 +445,27 @@ export default function IslandPage() {
             <div className="relative z-10 flex min-h-[360px] flex-col justify-end p-4 md:min-h-[390px] md:p-6">
               <div className="space-y-3 pb-4">
                 <div className="flex flex-wrap gap-2">
-                  {(data.meta.tags || []).slice(0, 4).map((tag) => (
+                  {(displayData.meta.tags || []).slice(0, 4).map((tag) => (
                     <Badge key={tag} className="border border-border/70 bg-background/55 text-zinc-100">
                       {tag}
                     </Badge>
                   ))}
                 </div>
-                <h1 className="font-display text-4xl font-bold leading-tight md:text-6xl">{data.meta.title}</h1>
+                <h1 className="font-display text-4xl font-bold leading-tight md:text-6xl">{displayData.meta.title}</h1>
                 <div className="flex items-end justify-between gap-3">
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-100/95">
                     <span className="inline-flex items-center gap-1">
-                      <Hash className="h-3.5 w-3.5" /> {t("islandPage.islandCodeLabel")}: {data.meta.islandCode}
+                      <Hash className="h-3.5 w-3.5" /> {t("islandPage.islandCodeLabel")}: {displayData.meta.islandCode}
                     </span>
-                    {data.meta.creatorCode ? <span>@{data.meta.creatorCode}</span> : null}
-                    {data.meta.publishedAtEpic ? (
+                    {displayData.meta.creatorCode ? <span>@{displayData.meta.creatorCode}</span> : null}
+                    {displayData.meta.publishedAtEpic ? (
                       <span className="inline-flex items-center gap-1">
-                        <CalendarDays className="h-3.5 w-3.5" /> {t("islandPage.publishedLabel")} {new Date(data.meta.publishedAtEpic).toLocaleDateString(locale)}
+                        <CalendarDays className="h-3.5 w-3.5" /> {t("islandPage.publishedLabel")} {new Date(displayData.meta.publishedAtEpic).toLocaleDateString(locale)}
                       </span>
                     ) : null}
-                    {data.meta.updatedAtEpic ? (
+                    {displayData.meta.updatedAtEpic ? (
                       <span className="inline-flex items-center gap-1">
-                        <Clock3 className="h-3.5 w-3.5" /> {t("islandPage.updatedLabel")} {new Date(data.meta.updatedAtEpic).toLocaleDateString(locale)}
+                        <Clock3 className="h-3.5 w-3.5" /> {t("islandPage.updatedLabel")} {new Date(displayData.meta.updatedAtEpic).toLocaleDateString(locale)}
                       </span>
                     ) : null}
                   </div>
@@ -455,10 +491,10 @@ export default function IslandPage() {
           <section className="relative z-10 -mt-7 overflow-hidden rounded-2xl border border-border/60 bg-card/90">
             <div className="grid grid-cols-2 md:grid-cols-4">
               {[
-                { label: t("islandPage.playersNow"), value: fmtCompact(asNum(data.kpisNow.playersNow), locale) },
-                { label: t("islandPage.peak24h"), value: fmtCompact(asNum(data.kpisNow.peak24h), locale) },
-                { label: t("islandPage.peakAllTime"), value: fmtCompact(asNum(data.kpisNow.peakAllTime), locale) },
-                { label: t("islandPage.globalRank"), value: data.kpisNow.rankNow != null ? `#${data.kpisNow.rankNow}` : "-" },
+                { label: t("islandPage.playersNow"), value: fmtCompact(asNum(displayData.kpisNow.playersNow), locale) },
+                { label: t("islandPage.peak24h"), value: fmtCompact(asNum(displayData.kpisNow.peak24h), locale) },
+                { label: t("islandPage.peakAllTime"), value: fmtCompact(asNum(displayData.kpisNow.peakAllTime), locale) },
+                { label: t("islandPage.globalRank"), value: displayData.kpisNow.rankNow != null ? `#${displayData.kpisNow.rankNow}` : "-" },
               ].map((item, idx) => (
                 <div
                   key={item.label}
@@ -517,15 +553,15 @@ export default function IslandPage() {
               <CardContent className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.minutesPlayed")}</p>
-                  <p className="text-3xl font-semibold">{fmtCompact(asNum(data.overviewAllTime.minutesPlayed), locale)}</p>
+                  <p className="text-3xl font-semibold">{fmtCompact(asNum(displayData.overviewAllTime.minutesPlayed), locale)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.favorites")}</p>
-                  <p className="text-3xl font-semibold">{fmtCompact(asNum(data.overviewAllTime.favorites), locale)}</p>
+                  <p className="text-3xl font-semibold">{fmtCompact(asNum(displayData.overviewAllTime.favorites), locale)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.recommendations")}</p>
-                  <p className="text-3xl font-semibold">{fmtCompact(asNum(data.overviewAllTime.recommends), locale)}</p>
+                  <p className="text-3xl font-semibold">{fmtCompact(asNum(displayData.overviewAllTime.recommends), locale)}</p>
                 </div>
               </CardContent>
             </SurfaceCard>
@@ -537,26 +573,51 @@ export default function IslandPage() {
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.avgSessionTime")}</p>
-                  <p className="text-2xl font-semibold">{asNum(data.overview24h.avgSessionMinutes).toFixed(1)}m</p>
+                  <p className="text-2xl font-semibold">{asNum(displayData.overview24h.avgSessionMinutes).toFixed(1)}m</p>
                 </div>
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.retentionD1D7")}</p>
                   <p className="text-2xl font-semibold">
-                    {fmtPercent(asNum(data.overview24h.retentionD1), locale)} / {fmtPercent(asNum(data.overview24h.retentionD7), locale)}
+                    {fmtPercent(asNum(displayData.overview24h.retentionD1), locale)} / {fmtPercent(asNum(displayData.overview24h.retentionD7), locale)}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.avgMinPerPlayer")}</p>
-                  <p className="text-2xl font-semibold">{asNum(data.overview24h.avgMinutesPerPlayer).toFixed(1)}m</p>
+                  <p className="text-2xl font-semibold">{asNum(displayData.overview24h.avgMinutesPerPlayer).toFixed(1)}m</p>
                 </div>
                 <div className="rounded-2xl border border-border/60 bg-background/35 p-3.5">
                   <p className="text-xs text-zinc-400">{t("islandPage.uniquePlayers24h")}</p>
-                  <p className="text-2xl font-semibold">{fmtCompact(asNum(data.overview24h.uniquePlayers), locale)}</p>
+                  <p className="text-2xl font-semibold">{fmtCompact(asNum(displayData.overview24h.uniquePlayers), locale)}</p>
                 </div>
               </CardContent>
             </SurfaceCard>
           </div>
 
+          {!data && detailsLoading ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SurfaceCard>
+                <CardHeader>
+                  <CardTitle className="text-xl">{t("islandPage.metricTrends")}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="h-6 w-2/3 animate-pulse rounded bg-muted/40" />
+                  <div className="h-[220px] animate-pulse rounded-xl bg-muted/30" />
+                </CardContent>
+              </SurfaceCard>
+              <SurfaceCard>
+                <CardHeader>
+                  <CardTitle className="text-xl">{t("islandPage.historyOfUpdates")}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="h-5 w-1/2 animate-pulse rounded bg-muted/40" />
+                  <div className="h-[220px] animate-pulse rounded-xl bg-muted/30" />
+                </CardContent>
+              </SurfaceCard>
+            </div>
+          ) : null}
+
+          {data ? (
+            <>
           <section className="space-y-4">
             <h3 className="text-3xl font-display font-semibold">{t("islandPage.engagementBreakdown")}</h3>
             <div className="grid gap-4 lg:grid-cols-[1.5fr_0.5fr]">
@@ -960,6 +1021,8 @@ export default function IslandPage() {
               )}
             </section>
           </div>
+            </>
+          ) : null}
         </>
       ) : null}
 

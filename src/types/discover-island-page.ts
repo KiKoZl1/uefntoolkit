@@ -124,3 +124,18 @@ export type IslandPageResponse = {
     asOf?: string;
   };
 };
+
+export type IslandPageSummaryResponse = {
+  meta: IslandPageResponse["meta"];
+  kpisNow: IslandPageResponse["kpisNow"];
+  overview24h: IslandPageResponse["overview24h"];
+  overviewAllTime: IslandPageResponse["overviewAllTime"];
+  platformDistribution?: IslandPageResponse["platformDistribution"];
+  asOf: string;
+  cache?: {
+    hit: boolean;
+    stale: boolean;
+    asOf?: string;
+  };
+  partial?: boolean;
+};

@@ -85,6 +85,7 @@ type InvokeDataFnArgs = {
   functionName: string;
   body: unknown;
   timeoutMs?: number;
+  extraHeaders?: Record<string, string>;
 };
 
 type InvokeDataFnResult = {
@@ -92,11 +93,15 @@ type InvokeDataFnResult = {
   status: number;
   data: any;
   error?: string;
+  bridgeMs: number;
+  upstreamServerTiming?: string | null;
 };
 
 export async function invokeDataFunction(args: InvokeDataFnArgs): Promise<InvokeDataFnResult> {
   const { req, functionName, body } = args;
   const timeoutMs = Math.max(500, args.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const extraHeaders = args.extraHeaders || {};
+  const startedAt = Date.now();
 
   const dataUrl = env("DATA_SUPABASE_URL");
   const dataKey = env("DATA_SUPABASE_SERVICE_ROLE_KEY");
@@ -119,6 +124,7 @@ export async function invokeDataFunction(args: InvokeDataFnArgs): Promise<Invoke
         "x-bridge-hop": "1",
         // Forward user token for traceability/auditing only; data-side auth can ignore.
         "x-forwarded-authorization": authHeader,
+        ...extraHeaders,
       },
       body: JSON.stringify(body ?? {}),
     });
@@ -137,16 +143,35 @@ export async function invokeDataFunction(args: InvokeDataFnArgs): Promise<Invoke
         status: response.status,
         data: parsed,
         error: parsed?.error || `Data function ${functionName} failed (${response.status})`,
+        bridgeMs: Date.now() - startedAt,
+        upstreamServerTiming: response.headers.get("server-timing"),
       };
     }
 
-    return { ok: true, status: response.status, data: parsed };
+    return {
+      ok: true,
+      status: response.status,
+      data: parsed,
+      bridgeMs: Date.now() - startedAt,
+      upstreamServerTiming: response.headers.get("server-timing"),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, status: 502, data: null, error: message };
+    return { ok: false, status: 502, data: null, error: message, bridgeMs: Date.now() - startedAt };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function mergeServerTiming(base: string | null, bridgeMs?: number): string | null {
+  const parts: string[] = [];
+  const normalizedBase = String(base || "").trim();
+  if (normalizedBase) parts.push(normalizedBase);
+  if (typeof bridgeMs === "number" && Number.isFinite(bridgeMs) && bridgeMs >= 0) {
+    parts.push(`bridge;dur=${bridgeMs.toFixed(1)}`);
+  }
+  if (!parts.length) return null;
+  return parts.join(", ");
 }
 
 export function dataOwnerHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -157,13 +182,22 @@ export function dataOwnerHeaders(extra: Record<string, string> = {}): Record<str
 }
 
 export function dataProxyResponse(payload: unknown, status: number, baseHeaders: Record<string, string> = {}): Response {
+  const mergedServerTiming = mergeServerTiming(
+    baseHeaders["Server-Timing"] || baseHeaders["server-timing"] || null,
+    payload && typeof payload === "object" && "bridgeMs" in (payload as any)
+      ? Number((payload as any).bridgeMs)
+      : undefined,
+  );
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    "Content-Type": "application/json",
+    ...dataOwnerHeaders(),
+  };
+  if (mergedServerTiming) headers["Server-Timing"] = mergedServerTiming;
+
   return new Response(JSON.stringify(payload ?? {}), {
     status,
-    headers: {
-      ...baseHeaders,
-      "Content-Type": "application/json",
-      ...dataOwnerHeaders(),
-    },
+    headers,
   });
 }
 

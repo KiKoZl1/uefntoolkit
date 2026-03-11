@@ -29,14 +29,29 @@ export default defineConfig(() => ({
           if (id.includes("node_modules/react") || id.includes("node_modules/react-dom") || id.includes("scheduler")) {
             return "vendor-react";
           }
+          if (id.includes("node_modules/react-router-dom")) {
+            return "vendor-router";
+          }
           if (id.includes("@supabase/supabase-js") || id.includes("@tanstack/react-query")) {
             return "vendor-data";
+          }
+          if (id.includes("node_modules/i18next") || id.includes("node_modules/react-i18next")) {
+            return "vendor-i18n";
+          }
+          if (id.includes("node_modules/lucide-react")) {
+            return "vendor-icons";
           }
           if (id.includes("node_modules/recharts")) {
             return "vendor-charts";
           }
+          if (id.includes("node_modules/react-markdown")) {
+            return "vendor-markdown";
+          }
           if (id.includes("node_modules/three")) {
             return "vendor-three";
+          }
+          if (id.includes("node_modules/psd.js") || id.includes("node_modules/jszip")) {
+            return "vendor-thumb";
           }
           if (id.includes("node_modules/@radix-ui")) {
             return "vendor-radix";

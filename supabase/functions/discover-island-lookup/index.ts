@@ -3,7 +3,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   dataBridgeUnavailableResponse,
-  dataOwnerHeaders,
+  dataProxyResponse,
   getEnvNumber,
   invokeDataFunction,
   isInternalBridgeRequest,
@@ -19,6 +19,7 @@ const corsHeaders = {
 
 const EPIC_API = "https://api.fortnite.com/ecosystem/v1";
 const DISCOVERY_SURFACE = "CreativeDiscoverySurface_Frontend";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const COMPETITOR_WEIGHTS = {
   unique: 0.25,
@@ -28,9 +29,123 @@ const COMPETITOR_WEIGHTS = {
   retentionComposite: 0.2,
   advocacy: 0.05,
 } as const;
+const PREWARM_CACHE_USER_ID =
+  String(Deno.env.get("DISCOVERY_PREWARM_CACHE_USER_ID") || "00000000-0000-0000-0000-000000000000").trim();
+const TOKEN_SUB_CACHE = new Map<string, { sub: string; expiresAt: number }>();
+type MemoryEntry<T> = { value: T; expiresAt: number };
+const LOOKUP_RESPONSE_MEM = new Map<string, MemoryEntry<Record<string, unknown>>>();
+const RECENT_LOOKUPS_MEM = new Map<string, MemoryEntry<any[]>>();
+
+function readMemory<T>(store: Map<string, MemoryEntry<T>>, key: string): T | null {
+  const row = store.get(key);
+  if (!row) return null;
+  if (row.expiresAt <= Date.now()) {
+    store.delete(key);
+    return null;
+  }
+  return row.value;
+}
+
+function writeMemory<T>(store: Map<string, MemoryEntry<T>>, key: string, value: T, ttlMs: number, maxSize: number) {
+  store.set(key, { value, expiresAt: Date.now() + Math.max(1_000, ttlMs) });
+  if (store.size <= maxSize) return;
+
+  const now = Date.now();
+  for (const [k, v] of store.entries()) {
+    if (v.expiresAt <= now) store.delete(k);
+    if (store.size <= maxSize) return;
+  }
+
+  while (store.size > maxSize) {
+    const oldest = store.keys().next().value as string | undefined;
+    if (!oldest) break;
+    store.delete(oldest);
+  }
+}
+
+function lookupMemTtlMs(): number {
+  return Math.max(5_000, getEnvNumber("LOOKUP_MEMORY_CACHE_TTL_MS", 20_000));
+}
+
+function recentMemTtlMs(): number {
+  return Math.max(3_000, getEnvNumber("LOOKUP_RECENT_MEMORY_CACHE_TTL_MS", 10_000));
+}
+
+function lookupMemKey(primaryCode: string, compareCode: string): string {
+  return `${String(primaryCode || "").trim()}::${String(compareCode || "").trim()}`;
+}
+
+function getCachedSub(token: string): string | null {
+  const row = TOKEN_SUB_CACHE.get(token);
+  if (!row) return null;
+  if (row.expiresAt <= Date.now()) {
+    TOKEN_SUB_CACHE.delete(token);
+    return null;
+  }
+  return row.sub;
+}
+
+function cacheSub(token: string, sub: string, ttlMs = 60_000) {
+  TOKEN_SUB_CACHE.set(token, { sub, expiresAt: Date.now() + Math.max(5_000, ttlMs) });
+  if (TOKEN_SUB_CACHE.size > 512) {
+    const now = Date.now();
+    for (const [k, v] of TOKEN_SUB_CACHE.entries()) {
+      if (v.expiresAt <= now) TOKEN_SUB_CACHE.delete(k);
+      if (TOKEN_SUB_CACHE.size <= 384) break;
+    }
+  }
+}
 
 function dayIso(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function extractBearerToken(req: Request): string {
+  const auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4;
+    if (pad) b64 += "=".repeat(4 - pad);
+    const payload = JSON.parse(atob(b64));
+    return payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+async function hasServiceRoleKey(req: Request, serviceKey: string, supabaseUrl: string): Promise<boolean> {
+  const bearer = extractBearerToken(req);
+  const apikey = String(req.headers.get("apikey") || "").trim();
+  const token = bearer || apikey;
+  if (!token) return false;
+  if (token === serviceKey) return true;
+
+  // Fast negative path for regular user JWTs.
+  const bearerRole = bearer ? String(decodeJwtPayload(bearer)?.role || "").trim() : "";
+  if (bearerRole && bearerRole !== "service_role") return false;
+  if (!bearer) {
+    const apiRole = apikey ? String(decodeJwtPayload(apikey)?.role || "").trim() : "";
+    if (apiRole && apiRole !== "service_role") return false;
+  }
+
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/admin/users?per_page=1&page=1`, {
+      method: "GET",
+      headers: {
+        apikey: token,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
 }
 
 function asNum(v: unknown): number {
@@ -260,6 +375,82 @@ async function listRecentLookups(service: any, userId: string) {
   }));
 }
 
+async function getRecentLookupsCached(service: any, userId: string): Promise<any[]> {
+  const cacheKey = String(userId || "").trim();
+  if (!cacheKey) return [];
+
+  const fromMem = readMemory(RECENT_LOOKUPS_MEM, cacheKey);
+  if (fromMem) return fromMem;
+
+  const rows = await listRecentLookups(service, cacheKey);
+  writeMemory(RECENT_LOOKUPS_MEM, cacheKey, rows, recentMemTtlMs(), 2048);
+  return rows;
+}
+
+function runInBackground(task: Promise<unknown> | unknown) {
+  const promise = Promise.resolve(task as any);
+  const edgeRuntime = (globalThis as any)?.EdgeRuntime;
+  if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+    edgeRuntime.waitUntil(promise.catch(() => void 0));
+    return;
+  }
+  promise.catch(() => void 0);
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; status: number; data: any | null; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const raw = await res.text();
+    let parsed: any = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!res.ok) return { ok: false, status: res.status, data: parsed, error: `Epic request failed (${res.status})` };
+    return { ok: true, status: res.status, data: parsed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, status: 599, data: null, error: message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function prependRecentLookup(
+  rows: any[],
+  payload: Record<string, unknown>,
+  primaryCode: string,
+  compareCode: string,
+): any[] {
+  const current = {
+    primaryImageUrl: pickImageUrl(
+      (payload as any)?.metadata?.imageUrl,
+      (payload as any)?.metadata?.thumbnailUrl,
+      (payload as any)?.internalCard?.imageUrl,
+      (payload as any)?.internalCard?.thumbUrl,
+      (payload as any)?.internalCard?.thumbnailUrl,
+    ),
+    primaryCode,
+    compareCode,
+    primaryTitle: String((payload as any)?.metadata?.title || primaryCode),
+    compareTitle: compareCode || null,
+    createdAt: new Date().toISOString(),
+    lastAccessedAt: new Date().toISOString(),
+    hitCount: 0,
+  };
+  const deduped = [
+    current,
+    ...(rows || []).filter((r: any) => String(r?.primaryCode || "") !== primaryCode || String(r?.compareCode || "") !== compareCode),
+  ];
+  return deduped.slice(0, 3);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -267,6 +458,7 @@ serve(async (req) => {
   let service: any = null;
   let code = "unknown";
   let userId: string | null = null;
+  let serviceRoleMode = false;
 
   try {
     let body: any = {};
@@ -290,36 +482,66 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const sb = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
-      const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData, error: claimsError } = await sb.auth.getClaims(token);
-      userId = String(claimsData?.claims?.sub || "") || null;
-      if (claimsError || !claimsData?.claims || !userId) {
-        await safeLogRun(service, {
-          user_id: userId,
-          island_code: code,
-          status: "error",
-          duration_ms: Date.now() - startedAt,
-          error_type: "auth_error",
-          error_message: "Unauthorized",
-        });
+      serviceRoleMode = await hasServiceRoleKey(req, sbService, sbUrl);
+      if (!serviceRoleMode) {
+        const token = authHeader.replace("Bearer ", "");
+        const cachedSub = getCachedSub(token);
+        if (cachedSub) {
+          userId = cachedSub;
+        } else {
+          const sb = createClient(sbUrl, sbAnon, { global: { headers: { Authorization: authHeader } } });
+          const { data: claimsData, error: claimsError } = await sb.auth.getClaims(token);
+          userId = String(claimsData?.claims?.sub || "") || null;
+          if (claimsError || !claimsData?.claims || !userId) {
+            await safeLogRun(service, {
+              user_id: userId,
+              island_code: code,
+              status: "error",
+              duration_ms: Date.now() - startedAt,
+              error_type: "auth_error",
+              error_message: "Unauthorized",
+            });
+            return new Response(JSON.stringify({ error: "Unauthorized" }), {
+              status: 401,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          cacheSub(token, userId);
+        }
+        if (!userId) {
+          await safeLogRun(service, {
+            user_id: userId,
+            island_code: code,
+            status: "error",
+            duration_ms: Date.now() - startedAt,
+            error_type: "auth_error",
+            error_message: "Unauthorized",
+          });
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } else {
+      const forwardedUserId = String(req.headers.get("x-forwarded-user-id") || "").trim();
+      if (forwardedUserId && !UUID_RE.test(forwardedUserId)) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-    } else {
-      userId = null;
+      userId = forwardedUserId || null;
     }
 
     const mode = String(body?.mode || "").trim().toLowerCase();
     if (mode === "recent") {
-      if (!userId) {
+      if (!userId || serviceRoleMode) {
         return new Response(JSON.stringify({ recentLookups: [] }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const recentLookups = await listRecentLookups(service, userId);
+      const recentLookups = await getRecentLookupsCached(service, userId);
       return new Response(JSON.stringify({ recentLookups }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -345,6 +567,7 @@ serve(async (req) => {
 
     code = String(islandCode).trim().substring(0, 30);
     const compareKey = compareIslandCode || "";
+    const fastLookupKey = lookupMemKey(code, compareKey);
     if (!/^\d{4}-\d{4}-\d{4}$/.test(code) && !/^[a-zA-Z0-9_-]+$/.test(code)) {
       await safeLogRun(service, {
         user_id: userId,
@@ -360,10 +583,77 @@ serve(async (req) => {
       });
     }
 
-    const canUseUserCache = !internalBridge && Boolean(userId);
-    const cacheUserId = userId || "";
+    if (!internalBridge && shouldProxyToData(req)) {
+      const proxied = await invokeDataFunction({
+        req,
+        functionName: "discover-island-lookup",
+        body,
+        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 5000),
+        extraHeaders: userId ? { "x-forwarded-user-id": userId } : undefined,
+      });
+      const proxyTiming = [
+        `total;dur=${(Date.now() - startedAt).toFixed(1)}`,
+        `bridge;dur=${Number(proxied.bridgeMs || 0).toFixed(1)}`,
+        String(proxied.upstreamServerTiming || "").trim(),
+      ].filter(Boolean).join(", ");
+
+      if (proxied.ok) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": proxyTiming });
+      }
+      if (proxied.status >= 400 && proxied.status < 500 && proxied.data) {
+        return dataProxyResponse(proxied.data, proxied.status, { ...corsHeaders, "Server-Timing": proxyTiming });
+      }
+      return dataBridgeUnavailableResponse({ ...corsHeaders, "Server-Timing": proxyTiming }, proxied.error);
+    }
+
+    if (!internalBridge && shouldBlockLocalExecution(req)) {
+      return dataBridgeUnavailableResponse(
+        { ...corsHeaders, "Server-Timing": `total;dur=${(Date.now() - startedAt).toFixed(1)}` },
+        "strict proxy mode",
+      );
+    }
+
+    const userCacheEnabled = !serviceRoleMode && Boolean(userId);
+    const sharedCacheEnabled = serviceRoleMode;
+    const cacheUserId = userCacheEnabled ? String(userId) : (sharedCacheEnabled ? PREWARM_CACHE_USER_ID : "");
+    const canWriteCache = Boolean(cacheUserId);
+    const cacheKeepLimit = userCacheEnabled
+      ? 3
+      : (sharedCacheEnabled ? Math.max(50, getEnvNumber("LOOKUP_SHARED_CACHE_KEEP", 200)) : 0);
+
+    const memoryPayload = readMemory(LOOKUP_RESPONSE_MEM, fastLookupKey);
+    if (memoryPayload) {
+      const recentLookupsDb = userCacheEnabled ? await getRecentLookupsCached(service, cacheUserId) : [];
+      const recentLookups = userCacheEnabled
+        ? prependRecentLookup(recentLookupsDb, memoryPayload, code, compareKey)
+        : [];
+      if (userCacheEnabled) {
+        writeMemory(RECENT_LOOKUPS_MEM, cacheUserId, recentLookups, recentMemTtlMs(), 2048);
+      }
+      runInBackground(
+        safeLogRun(service, {
+          user_id: userId,
+          island_code: code,
+          status: "ok",
+          duration_ms: Date.now() - startedAt,
+          cache_hit: true,
+          cache_scope: "memory",
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          ...memoryPayload,
+          cacheHit: true,
+          recentLookups,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     let cachedLookup: any = null;
-    if (canUseUserCache) {
+    if (cacheUserId) {
       const { data } = await service
         .from("discover_lookup_recent")
         .select("id,payload_json,hit_count,last_accessed_at,created_at")
@@ -374,28 +664,99 @@ serve(async (req) => {
       cachedLookup = data;
     }
 
-    if (cachedLookup?.payload_json) {
-      const nowIso = new Date().toISOString();
-      await service
+    let sharedLookup: any = null;
+    if (!cachedLookup?.payload_json) {
+      const { data } = await service
         .from("discover_lookup_recent")
-        .update({
-          hit_count: asNum(cachedLookup.hit_count) + 1,
-          last_accessed_at: nowIso,
-        })
-        .eq("id", cachedLookup.id);
+        .select("id,user_id,payload_json,hit_count,last_accessed_at,created_at,primary_title,compare_title")
+        .eq("primary_code", code)
+        .eq("compare_code", compareKey)
+        .order("last_accessed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      sharedLookup = data;
+    }
 
-      const recentLookups = await listRecentLookups(service, cacheUserId);
-      await safeLogRun(service, {
-        user_id: userId,
-        island_code: code,
-        status: "ok",
-        duration_ms: Date.now() - startedAt,
-        cache_hit: true,
-      });
+    const cacheRow = cachedLookup?.payload_json ? cachedLookup : sharedLookup;
+    if (cacheRow?.payload_json) {
+      const nowIso = new Date().toISOString();
+      const payload = cacheRow.payload_json as Record<string, unknown>;
+      writeMemory(LOOKUP_RESPONSE_MEM, fastLookupKey, payload, lookupMemTtlMs(), 1024);
+      const recentLookupsDb = userCacheEnabled ? await getRecentLookupsCached(service, cacheUserId) : [];
+      const recentLookups = userCacheEnabled
+        ? prependRecentLookup(recentLookupsDb, payload, code, compareKey)
+        : [];
+      if (userCacheEnabled) {
+        writeMemory(RECENT_LOOKUPS_MEM, cacheUserId, recentLookups, recentMemTtlMs(), 2048);
+      }
+
+      runInBackground((async () => {
+        const tasks: Promise<any>[] = [];
+        if (cachedLookup?.id) {
+          tasks.push(
+            service
+              .from("discover_lookup_recent")
+              .update({
+                hit_count: asNum(cachedLookup.hit_count) + 1,
+                last_accessed_at: nowIso,
+              })
+              .eq("id", cachedLookup.id),
+          );
+        }
+        if (canWriteCache && (!cachedLookup?.id || String(cacheRow?.user_id || "") !== cacheUserId)) {
+          tasks.push(
+            service
+              .from("discover_lookup_recent")
+              .upsert(
+                {
+                  user_id: cacheUserId,
+                  primary_code: code,
+                  compare_code: compareKey,
+                  primary_title: String((payload as any)?.metadata?.title || cacheRow?.primary_title || code),
+                  compare_title: compareIslandCode || cacheRow?.compare_title || null,
+                  payload_json: payload,
+                  created_at: nowIso,
+                  last_accessed_at: nowIso,
+                  hit_count: 0,
+                },
+                { onConflict: "user_id,primary_code,compare_code" },
+              ),
+          );
+          if (cacheKeepLimit > 0) {
+            tasks.push((async () => {
+              const { data: keepRows } = await service
+                .from("discover_lookup_recent")
+                .select("id")
+                .eq("user_id", cacheUserId)
+                .order("last_accessed_at", { ascending: false })
+                .limit(cacheKeepLimit);
+              const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
+              if (keepIds.length > 0) {
+                await service
+                  .from("discover_lookup_recent")
+                  .delete()
+                  .eq("user_id", cacheUserId)
+                  .not("id", "in", `(${keepIds.join(",")})`);
+              }
+            })());
+          }
+        }
+        tasks.push(
+          safeLogRun(service, {
+            user_id: userId,
+            island_code: code,
+            status: "ok",
+            duration_ms: Date.now() - startedAt,
+            cache_hit: true,
+            cache_scope: cachedLookup?.id ? "user" : "shared",
+          }),
+        );
+        await Promise.all(tasks);
+      })());
 
       return new Response(
         JSON.stringify({
-          ...(cachedLookup.payload_json as Record<string, unknown>),
+          ...payload,
           cacheHit: true,
           recentLookups,
         }),
@@ -405,127 +766,18 @@ serve(async (req) => {
       );
     }
 
-    if (!internalBridge && shouldProxyToData(req)) {
-      const proxied = await invokeDataFunction({
-        req,
-        functionName: "discover-island-lookup",
-        body,
-        timeoutMs: getEnvNumber("LOOKUP_DATA_TIMEOUT_MS", 5000),
-      });
-
-      if (proxied.ok && proxied.data && typeof proxied.data === "object" && !proxied.data.error) {
-        const proxiedData = proxied.data as Record<string, unknown>;
-        const bridgedPayload = { ...proxiedData } as Record<string, unknown>;
-        delete bridgedPayload.cacheHit;
-        delete bridgedPayload.recentLookups;
-        delete bridgedPayload.bridge;
-
-        const nowIso = new Date().toISOString();
-        if (canUseUserCache) {
-          await service
-            .from("discover_lookup_recent")
-            .upsert(
-              {
-                user_id: cacheUserId,
-                primary_code: code,
-                compare_code: compareKey,
-                primary_title: String((bridgedPayload as any)?.metadata?.title || code),
-                compare_title: compareIslandCode || null,
-                payload_json: bridgedPayload,
-                created_at: nowIso,
-                last_accessed_at: nowIso,
-                hit_count: 0,
-              },
-              { onConflict: "user_id,primary_code,compare_code" },
-            );
-
-          const { data: keepRows } = await service
-            .from("discover_lookup_recent")
-            .select("id")
-            .eq("user_id", cacheUserId)
-            .order("last_accessed_at", { ascending: false })
-            .limit(3);
-          const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
-          if (keepIds.length > 0) {
-            await service
-              .from("discover_lookup_recent")
-              .delete()
-              .eq("user_id", cacheUserId)
-              .not("id", "in", `(${keepIds.join(",")})`);
-          }
-        }
-
-        const recentLookups = canUseUserCache ? await listRecentLookups(service, cacheUserId) : [];
-        await safeLogRun(service, {
-          user_id: userId,
-          island_code: code,
-          status: "ok",
-          duration_ms: Date.now() - startedAt,
-          cache_hit: false,
-          bridge_hit: true,
-        });
-
-        return new Response(
-          JSON.stringify({
-            ...bridgedPayload,
-            cacheHit: false,
-            recentLookups,
-          }),
-          {
-            headers: { ...corsHeaders, ...dataOwnerHeaders(), "Content-Type": "application/json" },
-          },
-        );
-      }
-      return dataBridgeUnavailableResponse(corsHeaders, proxied.error);
-    }
-
-    if (!internalBridge && shouldBlockLocalExecution(req)) {
-      return dataBridgeUnavailableResponse(corsHeaders, "strict proxy mode");
-    }
-
-    const metaRes = await fetch(`${EPIC_API}/islands/${code}`);
-    if (!metaRes.ok) {
-      const message = metaRes.status === 404 ? "Island not found" : `Epic metadata failed (${metaRes.status})`;
-      await safeLogRun(service, {
-        user_id: userId,
-        island_code: code,
-        status: "error",
-        duration_ms: Date.now() - startedAt,
-        error_type: classifyLookupError(message, metaRes.status),
-        error_message: message,
-      });
-      return new Response(JSON.stringify({ error: message }), {
-        status: metaRes.status === 404 ? 404 : 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const metadata = await metaRes.json();
-
     const now = new Date();
     const to = new Date(now);
     to.setUTCHours(0, 0, 0, 0);
     const from = new Date(to);
     from.setUTCDate(from.getUTCDate() - 7);
-
-    const metricsRes = await fetch(
-      `${EPIC_API}/islands/${code}/metrics/day?from=${from.toISOString()}&to=${to.toISOString()}`,
-    );
-    let metrics = null;
-    if (metricsRes.ok) metrics = await metricsRes.json();
-
     const from24h = new Date(now);
     from24h.setUTCHours(from24h.getUTCHours() - 24);
-    const hourlyRes = await fetch(
-      `${EPIC_API}/islands/${code}/metrics/hour?from=${from24h.toISOString()}&to=${now.toISOString()}`,
-    );
-    let hourlyMetrics = null;
-    if (hourlyRes.ok) hourlyMetrics = await hourlyRes.json();
-
     const now14 = new Date();
     now14.setUTCDate(now14.getUTCDate() - 14);
     const fromDay14 = dayIso(now14);
 
-    const [cardRpc, rollupRes, reportIslandsRes, latestReportRes] = await Promise.all([
+    const dbQueriesPromise = Promise.all([
       service.rpc("get_island_card", { p_island_code: code, p_window_hours: 168 }),
       service
         .from("discovery_exposure_rollup_daily")
@@ -548,6 +800,33 @@ serve(async (req) => {
         .order("week_end", { ascending: false })
         .limit(1),
     ]);
+
+    const [metaFetch, metricsFetch, hourlyFetch, dbQueries] = await Promise.all([
+      fetchJsonWithTimeout(`${EPIC_API}/islands/${code}`, 8000),
+      fetchJsonWithTimeout(`${EPIC_API}/islands/${code}/metrics/day?from=${from.toISOString()}&to=${to.toISOString()}`, 8000),
+      fetchJsonWithTimeout(`${EPIC_API}/islands/${code}/metrics/hour?from=${from24h.toISOString()}&to=${now.toISOString()}`, 8000),
+      dbQueriesPromise,
+    ]);
+
+    if (!metaFetch.ok) {
+      const message = metaFetch.status === 404 ? "Island not found" : `Epic metadata failed (${metaFetch.status})`;
+      await safeLogRun(service, {
+        user_id: userId,
+        island_code: code,
+        status: "error",
+        duration_ms: Date.now() - startedAt,
+        error_type: classifyLookupError(message, metaFetch.status),
+        error_message: message,
+      });
+      return new Response(JSON.stringify({ error: message }), {
+        status: metaFetch.status === 404 ? 404 : 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const metadata = metaFetch.data || {};
+    const metrics = metricsFetch.ok ? metricsFetch.data : null;
+    const hourlyMetrics = hourlyFetch.ok ? hourlyFetch.data : null;
+    const [cardRpc, rollupRes, reportIslandsRes, latestReportRes] = dbQueries;
 
     let eventsRes = await service
       .from("discover_link_metadata_events")
@@ -1025,7 +1304,8 @@ serve(async (req) => {
     };
 
     const nowIso = new Date().toISOString();
-    if (!canUseUserCache) {
+    writeMemory(LOOKUP_RESPONSE_MEM, fastLookupKey, responsePayload as Record<string, unknown>, lookupMemTtlMs(), 1024);
+    if (!canWriteCache) {
       await safeLogRun(service, {
         user_id: userId,
         island_code: code,
@@ -1067,33 +1347,44 @@ serve(async (req) => {
         { onConflict: "user_id,primary_code,compare_code" },
       );
 
-    const { data: keepRows } = await service
-      .from("discover_lookup_recent")
-      .select("id")
-      .eq("user_id", cacheUserId)
-      .order("last_accessed_at", { ascending: false })
-      .limit(3);
-    const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
-    if (keepIds.length > 0) {
-      await service
-        .from("discover_lookup_recent")
-        .delete()
-        .eq("user_id", cacheUserId)
-        .not("id", "in", `(${keepIds.join(",")})`);
+    const recentLookupsDb = userCacheEnabled ? await getRecentLookupsCached(service, cacheUserId) : [];
+    const recentLookups = userCacheEnabled
+      ? prependRecentLookup(recentLookupsDb, responsePayload as Record<string, unknown>, code, compareKey)
+      : [];
+    if (userCacheEnabled) {
+      writeMemory(RECENT_LOOKUPS_MEM, cacheUserId, recentLookups, recentMemTtlMs(), 2048);
     }
-    const recentLookups = await listRecentLookups(service, cacheUserId);
 
-    await safeLogRun(service, {
-      user_id: userId,
-      island_code: code,
-      status: "ok",
-      duration_ms: Date.now() - startedAt,
-      has_internal_card: Boolean(internalCard),
-      has_discovery_signals: exposurePanelsTopLegacy.length > 0 || exposureDailyMinutesLegacy.length > 0,
-      has_weekly_performance: weeklyPerformance.length > 0,
-      category_leaders_count: categoryLeaders.length,
-      cache_hit: false,
-    });
+    runInBackground((async () => {
+      if (cacheKeepLimit > 0) {
+        const { data: keepRows } = await service
+          .from("discover_lookup_recent")
+          .select("id")
+          .eq("user_id", cacheUserId)
+          .order("last_accessed_at", { ascending: false })
+          .limit(cacheKeepLimit);
+        const keepIds = (keepRows || []).map((r: any) => asNum(r.id)).filter((v) => v > 0);
+        if (keepIds.length > 0) {
+          await service
+            .from("discover_lookup_recent")
+            .delete()
+            .eq("user_id", cacheUserId)
+            .not("id", "in", `(${keepIds.join(",")})`);
+        }
+      }
+
+      await safeLogRun(service, {
+        user_id: userId,
+        island_code: code,
+        status: "ok",
+        duration_ms: Date.now() - startedAt,
+        has_internal_card: Boolean(internalCard),
+        has_discovery_signals: exposurePanelsTopLegacy.length > 0 || exposureDailyMinutesLegacy.length > 0,
+        has_weekly_performance: weeklyPerformance.length > 0,
+        category_leaders_count: categoryLeaders.length,
+        cache_hit: false,
+      });
+    })());
 
     return new Response(
       JSON.stringify({

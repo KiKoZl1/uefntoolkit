@@ -9,6 +9,9 @@ verify_jwt = true
 [functions.discover-island-lookup]
 verify_jwt = false
 
+[functions.discover-island-page]
+verify_jwt = false
+
 [functions.discover-report-ai]
 verify_jwt = true
 
@@ -31,7 +34,7 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.discover-cron-admin]
-verify_jwt = true
+verify_jwt = false
 
 [functions.discover-data-api]
 verify_jwt = false
@@ -61,7 +64,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.dppi-health]
-verify_jwt = true
+verify_jwt = false
 
 [functions.dppi-release-set]
 verify_jwt = true

@@ -95,3 +95,20 @@ export async function dataPublicReportBundle(slug: string): Promise<any> {
   const res = await invokeDataApi<{ data: any }>("public_report_bundle", { slug });
   return res.data;
 }
+
+export async function dataAdminOverviewBundle(forceRefresh = false): Promise<{
+  data: any;
+  asOf: string | null;
+  cache: { hit: boolean; source: string };
+}> {
+  const res = await invokeDataApi<{
+    data: any;
+    asOf: string | null;
+    cache: { hit: boolean; source: string };
+  }>("admin_overview_bundle", { forceRefresh });
+  return {
+    data: res.data ?? {},
+    asOf: res.asOf ?? null,
+    cache: res.cache ?? { hit: false, source: "unknown" },
+  };
+}

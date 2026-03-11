@@ -13,23 +13,52 @@ export default function AdminDppiOverview() {
   const [payload, setPayload] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     setError(null);
-    const { data, error } = await supabase.functions.invoke("dppi-health", { body: {} });
+
+    const { data: authData, error: authError } = await supabase.auth.getSession();
+    if (authError || !authData?.session?.access_token) {
+      setError(authError?.message || "auth_session_not_ready");
+      if (!opts?.silent) setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke("dppi-health", {
+      body: {},
+      headers: {
+        Authorization: `Bearer ${authData.session.access_token}`,
+      },
+    });
     if (error || data?.success === false) {
       setError(error?.message || data?.error || "failed_to_load_dppi_health");
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
       return;
     }
     setPayload(data);
-    setLoading(false);
+    if (!opts?.silent) setLoading(false);
   }, []);
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), 60_000);
-    return () => window.clearInterval(id);
+    const hasDocument = typeof document !== "undefined";
+    const id = window.setInterval(() => {
+      if (hasDocument && document.visibilityState !== "visible") return;
+      void load({ silent: true });
+    }, 60_000);
+    const onVisibilityChange = () => {
+      if (!hasDocument || document.visibilityState !== "visible") return;
+      void load({ silent: true });
+    };
+    if (hasDocument) {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+    return () => {
+      window.clearInterval(id);
+      if (hasDocument) {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
   }, [load]);
 
   async function runRefreshBatch() {
