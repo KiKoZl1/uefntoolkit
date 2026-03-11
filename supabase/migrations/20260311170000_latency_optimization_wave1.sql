@@ -25,18 +25,28 @@ ALTER TABLE public.discover_admin_overview_snapshot ENABLE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename = 'discover_admin_overview_snapshot'
-      AND policyname = 'select_discover_admin_overview_snapshot_authenticated'
-  ) THEN
-    CREATE POLICY select_discover_admin_overview_snapshot_authenticated
+  -- Do not expose this snapshot to all authenticated users.
+  -- Reads should stay behind discover-data-api admin checks.
+  IF to_regclass('public.user_roles') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_policies
+       WHERE schemaname = 'public'
+         AND tablename = 'discover_admin_overview_snapshot'
+         AND policyname = 'select_discover_admin_overview_snapshot_admin'
+     ) THEN
+    CREATE POLICY select_discover_admin_overview_snapshot_admin
       ON public.discover_admin_overview_snapshot
       FOR SELECT
       TO authenticated
-      USING (true);
+      USING (
+        EXISTS (
+          SELECT 1
+          FROM public.user_roles ur
+          WHERE ur.user_id = auth.uid()
+            AND ur.role IN ('admin', 'editor')
+        )
+      );
   END IF;
 
   IF NOT EXISTS (
@@ -471,6 +481,10 @@ BEGIN
 END $$;
 
 -- Additive indexes for frequent read paths observed in pg_stat snapshots.
+-- Guardrails to avoid long blocking locks during deploy on growing tables.
+SET lock_timeout = '5s';
+SET statement_timeout = '15min';
+
 CREATE INDEX IF NOT EXISTS idx_discovery_exposure_ticks_ts_status
   ON public.discovery_exposure_ticks (ts_start DESC, status);
 
@@ -489,3 +503,5 @@ CREATE INDEX IF NOT EXISTS idx_discover_lookup_recent_primary_compare_access
 CREATE INDEX IF NOT EXISTS idx_discover_lookup_ai_recent_primary_compare_created
   ON public.discover_lookup_ai_recent (primary_code, compare_code, locale, window_days, created_at DESC);
 
+RESET statement_timeout;
+RESET lock_timeout;

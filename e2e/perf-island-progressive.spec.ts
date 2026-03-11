@@ -1,4 +1,4 @@
-﻿import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 test("island progressive fetch profile", async ({ page, baseURL }) => {
   test.setTimeout(240_000);
@@ -77,4 +77,16 @@ test("island progressive fetch profile", async ({ page, baseURL }) => {
   };
 
   console.log("ISLAND_PROGRESSIVE_PROFILE=" + JSON.stringify(result));
+  const summaryP95Max = Number(process.env.PERF_ISLAND_SUMMARY_P95_MAX_MS || 3000);
+  const fullP95Max = Number(process.env.PERF_ISLAND_FULL_P95_MAX_MS || 2000);
+  const summaryMaxOutlier = Number(process.env.PERF_ISLAND_SUMMARY_MAX_OUTLIER_MS || 9000);
+  const fullMaxOutlier = Number(process.env.PERF_ISLAND_FULL_MAX_OUTLIER_MS || 9000);
+
+  expect(summaryVals.length).toBeGreaterThanOrEqual(4);
+  expect(fullVals.length).toBeGreaterThanOrEqual(4);
+  expect(result.summary.p95_ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(summaryP95Max);
+  expect(result.full.p95_ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(fullP95Max);
+  expect(result.summary.max_ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(summaryMaxOutlier);
+  expect(result.full.max_ms ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(fullMaxOutlier);
 });
+
