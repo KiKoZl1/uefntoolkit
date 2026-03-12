@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { executeCommerceTool } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type Preset = "heroic" | "confronto" | "epicidade" | "overview" | "cinematic" | "god_view" | "custom";
 const CameraGizmo3D = lazy(() => import("@/features/tgis-thumb-tools/CameraGizmo3D"));
@@ -31,6 +34,7 @@ const PRESETS: Array<{ id: Preset; label: string; values: { azimuth: number; ele
 
 export default function CameraControlPage() {
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
   const { history, currentAsset, setCurrentAsset, registerAsset, deleteAsset } = useThumbTools();
   const [sourceImageUrl, setSourceImageUrl] = useState("");
   const [preset, setPreset] = useState<Preset>("custom");
@@ -87,20 +91,34 @@ export default function CameraControlPage() {
     }
 
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("tgis-camera-control", {
-      body: {
-        assetId: currentAsset?.id || undefined,
-        sourceImageUrl,
-        preset,
-        azimuth,
-        elevation,
-        distance,
-      },
-    });
+    let data: any = null;
+    let error: Error | null = null;
+    try {
+      const commerce = await executeCommerceTool({
+        toolCode: "camera_control",
+        payload: {
+          assetId: currentAsset?.id || undefined,
+          sourceImageUrl,
+          preset,
+          azimuth,
+          elevation,
+          distance,
+        },
+      });
+      data = commerce?.tool_result || null;
+    } catch (e) {
+      error = e as Error;
+      data = (e as any)?.payload || null;
+    }
     setLoading(false);
 
     if (error || data?.success === false) {
-      setErrorText(String(error?.message || data?.error || "Falha no camera control."));
+      const code = String((data as any)?.error_code || "");
+      if (code === "INSUFFICIENT_CREDITS") {
+        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      } else {
+        setErrorText(String(error?.message || data?.error || "Falha no camera control."));
+      }
       return;
     }
 
@@ -162,6 +180,7 @@ export default function CameraControlPage() {
     () => CAMERA_CONTROL_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % CAMERA_CONTROL_PHASES.length],
     [loadingElapsedSec],
   );
+  const creditCost = getCost("camera_control");
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
@@ -257,6 +276,9 @@ export default function CameraControlPage() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                 Gerar ajuste de camera
               </Button>
+              <div className="flex justify-center">
+                <ToolCostBadge cost={creditCost} />
+              </div>
               <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                 {loading ? `Processando (${loadingElapsedSec || 1}s)` : "Ajuste estimado: ~20-40s"}
               </p>

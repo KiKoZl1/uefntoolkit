@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { executeCommerceTool } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type EditMode = "mask_edit" | "character_replace";
 type EffectiveMode = "mask_edit" | "character_replace" | "custom_character";
@@ -73,6 +76,7 @@ async function readImageDimensions(file: File): Promise<{ width: number; height:
 
 export default function EditStudioPage() {
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
   const { history, currentAsset, registerAsset, setCurrentAsset, deleteAsset } = useThumbTools();
   const [mode, setMode] = useState<EditMode>("mask_edit");
   const [prompt, setPrompt] = useState("");
@@ -366,22 +370,36 @@ export default function EditStudioPage() {
       ? canvasRef.current?.toDataURL("image/png")
       : undefined;
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("tgis-edit-studio", {
-      body: {
-        assetId: currentAsset?.id || undefined,
-        sourceImageUrl,
-        mode: effectiveMode,
-        prompt: promptValue || undefined,
-        maskDataUrl,
-        replacementSkinId: effectiveMode === "character_replace" ? replacementSkinIdValue : undefined,
-        customCharacterImageUrl: effectiveMode === "custom_character" ? customCharacterImageUrlValue : undefined,
-        tags,
-        contextBoost,
-      },
-    });
+    let data: any = null;
+    let error: Error | null = null;
+    try {
+      const commerce = await executeCommerceTool({
+        toolCode: "edit_studio",
+        payload: {
+          assetId: currentAsset?.id || undefined,
+          sourceImageUrl,
+          mode: effectiveMode,
+          prompt: promptValue || undefined,
+          maskDataUrl,
+          replacementSkinId: effectiveMode === "character_replace" ? replacementSkinIdValue : undefined,
+          customCharacterImageUrl: effectiveMode === "custom_character" ? customCharacterImageUrlValue : undefined,
+          tags,
+          contextBoost,
+        },
+      });
+      data = commerce?.tool_result || null;
+    } catch (e) {
+      error = e as Error;
+      data = (e as any)?.payload || null;
+    }
     setLoading(false);
     if (error || data?.success === false) {
-      setErrorText(String(error?.message || data?.error || "Falha no edit studio."));
+      const code = String((data as any)?.error_code || "");
+      if (code === "INSUFFICIENT_CREDITS") {
+        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      } else {
+        setErrorText(String(error?.message || data?.error || "Falha no edit studio."));
+      }
       return;
     }
     const imageUrl = String(data?.image?.url || "").trim();
@@ -440,6 +458,7 @@ export default function EditStudioPage() {
     () => EDIT_STUDIO_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % EDIT_STUDIO_PHASES.length],
     [loadingElapsedSec],
   );
+  const creditCost = getCost("edit_studio");
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
@@ -637,10 +656,17 @@ export default function EditStudioPage() {
                 <Switch checked={contextBoost} onCheckedChange={setContextBoost} />
               </div>
 
-              <Button onClick={submit} disabled={loading || uploadingSource || uploadingCustomCharacter} className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide">
+              <Button
+                onClick={submit}
+                disabled={loading || uploadingSource || uploadingCustomCharacter}
+                className="h-11 w-full gap-2 text-base font-bold uppercase tracking-wide"
+              >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                 Executar Edit Studio
               </Button>
+              <div className="flex justify-center">
+                <ToolCostBadge cost={creditCost} />
+              </div>
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
             </CardContent>
           </Card>

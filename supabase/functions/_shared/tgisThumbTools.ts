@@ -26,6 +26,12 @@ export type ResolvedUser = {
   token: string;
 };
 
+export type CommerceGatewayContext = {
+  operationId: string;
+  gatewayUserId: string;
+  idempotencyKey: string | null;
+};
+
 export function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -49,6 +55,73 @@ export function createServiceClient() {
 export function extractBearer(req: Request): string {
   const authHeader = (req.headers.get("Authorization") || req.headers.get("authorization") || "").trim();
   return authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+}
+
+function getEnvBool(name: string, fallback: boolean): boolean {
+  const raw = String(Deno.env.get(name) || "").trim().toLowerCase();
+  if (!raw) return fallback;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
+async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
+  const keyData = new TextEncoder().encode(secret);
+  const msgData = new TextEncoder().encode(payload);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, msgData);
+  const bytes = new Uint8Array(signature);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+export async function requireCommerceGateway(
+  req: Request,
+  auth: ResolvedUser,
+  toolCode: "surprise_gen" | "edit_studio" | "camera_control" | "layer_decomposition",
+): Promise<CommerceGatewayContext | null> {
+  const enforce = getEnvBool("COMMERCE_GATEWAY_ENFORCE", true);
+  if (!enforce || auth.isAdmin) return null;
+
+  const secret = String(Deno.env.get("COMMERCE_GATEWAY_SECRET") || "").trim();
+  if (!secret) throw new Error("commerce_gateway_misconfigured");
+
+  const signature = String(req.headers.get("x-commerce-gateway-signature") || "").trim().toLowerCase();
+  const operationId = String(req.headers.get("x-commerce-operation-id") || "").trim();
+  const gatewayUserId = String(req.headers.get("x-commerce-user-id") || "").trim();
+  const gatewayToolCode = String(req.headers.get("x-commerce-tool-code") || "").trim();
+  const idempotencyKey = String(req.headers.get("x-commerce-idempotency-key") || "").trim() || null;
+
+  if (!signature || !operationId || !gatewayUserId || !gatewayToolCode) {
+    throw new Error("commerce_gateway_required");
+  }
+  if (gatewayUserId !== auth.userId) {
+    throw new Error("commerce_gateway_user_mismatch");
+  }
+  if (gatewayToolCode !== toolCode) {
+    throw new Error("commerce_gateway_tool_mismatch");
+  }
+
+  const expected = await hmacSha256Hex(secret, `${operationId}:${gatewayUserId}:${gatewayToolCode}`);
+  if (!constantTimeEqual(signature, expected)) {
+    throw new Error("commerce_gateway_signature_invalid");
+  }
+
+  return { operationId, gatewayUserId, idempotencyKey };
 }
 
 export async function resolveUser(req: Request, service = createServiceClient()): Promise<ResolvedUser> {

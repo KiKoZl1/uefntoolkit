@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { executeCommerceTool } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type LayerItem = {
   index: number;
@@ -24,6 +27,7 @@ const FIXED_LAYER_COUNT = 4;
 
 export default function LayerDecompositionPage() {
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
   const { history, currentAsset, setCurrentAsset, deleteAsset } = useThumbTools();
   const [sourceImageUrl, setSourceImageUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,6 +42,7 @@ export default function LayerDecompositionPage() {
     const byUrl = sourceCandidates.find((x) => x.image_url === sourceImageUrl);
     return byUrl?.id ?? null;
   }, [currentAsset?.id, sourceCandidates, sourceImageUrl]);
+  const creditCost = getCost("layer_decomposition");
 
   useEffect(() => {
     if (currentAsset?.image_url) setSourceImageUrl(currentAsset.image_url);
@@ -78,17 +83,31 @@ export default function LayerDecompositionPage() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("tgis-layer-decompose", {
-      body: {
-        assetId: currentAsset?.id || undefined,
-        sourceImageUrl,
-        numLayers: FIXED_LAYER_COUNT,
-      },
-    });
+    let data: any = null;
+    let error: Error | null = null;
+    try {
+      const commerce = await executeCommerceTool({
+        toolCode: "layer_decomposition",
+        payload: {
+          assetId: currentAsset?.id || undefined,
+          sourceImageUrl,
+          numLayers: FIXED_LAYER_COUNT,
+        },
+      });
+      data = commerce?.tool_result || null;
+    } catch (e) {
+      error = e as Error;
+      data = (e as any)?.payload || null;
+    }
     setLoading(false);
 
     if (error || data?.success === false) {
-      setErrorText(String(error?.message || data?.error || "Falha no layer decomposition."));
+      const code = String((data as any)?.error_code || "");
+      if (code === "INSUFFICIENT_CREDITS") {
+        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      } else {
+        setErrorText(String(error?.message || data?.error || "Falha no layer decomposition."));
+      }
       return;
     }
 
@@ -202,6 +221,9 @@ export default function LayerDecompositionPage() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers3 className="h-4 w-4" />}
                 Decompor camadas
               </Button>
+              <div className="flex justify-center">
+                <ToolCostBadge cost={creditCost} />
+              </div>
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
               {warningText ? <p className="text-xs text-amber-500">{warningText}</p> : null}
             </CardContent>

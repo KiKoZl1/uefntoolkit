@@ -11,6 +11,9 @@ import { deleteWidgetKitHistory, listWidgetKitHistory, saveWidgetKitHistory } fr
 import { parsePsdFile, summarizePsdJson } from "@/lib/widgetkit/psd-parser";
 import { generateBeginObject } from "@/lib/widgetkit/umg-generator";
 import type { PsdJson, PsdParseSummary, UmgOutput, WidgetKitHistoryItem } from "@/types/widgetkit";
+import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type PsdToolStatus =
   | "idle"
@@ -58,6 +61,7 @@ function metaCount(item: WidgetKitHistoryItem, key: string, fallback: number): n
 export default function PsdToUmgTool({ active }: { active: boolean }) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
 
   const [status, setStatus] = useState<PsdToolStatus>("idle");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -126,29 +130,60 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
 
   async function handleGenerate(saveHistory: boolean) {
     if (!parsedJson || !summary) return;
-
-    const output = generateBeginObject(parsedJson, { includeTint });
-    setUmgOutput(output);
-    setStatus("ready");
-
-    if (!saveHistory) return;
-
+    let operationId = "";
     try {
-      const saved = await saveWidgetKitHistory({
-        tool: "psd-umg",
-        name: parsedJson.file,
-        data: parsedJson,
-        meta: {
-          totalLayers: summary.totalLayers,
-          groupCount: summary.groupCount,
-          imageCount: summary.imageCount,
-          textCount: summary.textCount,
-          includeTint,
+      const billing = await executeCommerceTool({
+        toolCode: "psd_to_umg",
+        payload: {
+          file_name: parsedJson.file,
+          total_layers: summary.totalLayers,
+          include_tint: includeTint,
         },
       });
-      setHistory((prev) => [saved, ...prev].slice(0, 10));
-    } catch {
-      toast({ title: t("common.error"), description: t("widgetKit.historySaveError"), variant: "destructive" });
+      operationId = String(billing?.operation_id || "");
+
+      const output = generateBeginObject(parsedJson, { includeTint });
+      setUmgOutput(output);
+      setStatus("ready");
+
+      if (!saveHistory) return;
+
+      try {
+        const saved = await saveWidgetKitHistory({
+          tool: "psd-umg",
+          name: parsedJson.file,
+          data: parsedJson,
+          meta: {
+            totalLayers: summary.totalLayers,
+            groupCount: summary.groupCount,
+            imageCount: summary.imageCount,
+            textCount: summary.textCount,
+            includeTint,
+          },
+        });
+        setHistory((prev) => [saved, ...prev].slice(0, 10));
+      } catch {
+        toast({ title: t("common.error"), description: t("widgetKit.historySaveError"), variant: "destructive" });
+      }
+    } catch (error) {
+      const code = String((error as any)?.payload?.error_code || "");
+      if (operationId) {
+        try {
+          await reverseCommerceOperation({
+            operationId,
+            reason: "client_local_tool_failed_psd_to_umg",
+          });
+        } catch {
+          // best effort
+        }
+      }
+      toast({
+        title: t("common.error"),
+        description: code === "INSUFFICIENT_CREDITS"
+          ? "Saldo insuficiente. Compre creditos extras para continuar."
+          : String((error as Error)?.message || "Falha ao consumir creditos."),
+        variant: "destructive",
+      });
     }
   }
 
@@ -199,6 +234,7 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
 
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
   const isBusy = status === "parsing";
+  const creditCost = getCost("psd_to_umg");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -313,10 +349,13 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
                   </Label>
                 </div>
 
-                <Button onClick={() => void handleGenerate(true)}>
+                <Button onClick={() => void handleGenerate(true)} className="w-full">
                   <Sparkles className="mr-2 h-4 w-4" />
                   {t("widgetKit.psdUmg.btnGenerate")}
                 </Button>
+                <div className="flex justify-center">
+                  <ToolCostBadge cost={creditCost} />
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Faça upload de um .psd para mostrar a estrutura.</p>

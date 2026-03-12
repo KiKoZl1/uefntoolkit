@@ -14,6 +14,7 @@ import {
   normalizeSlug,
   normalizeText,
   pickImageUrlFromFal,
+  requireCommerceGateway,
   resolveUser,
   updateToolRun,
 } from "../_shared/tgisThumbTools.ts";
@@ -118,6 +119,7 @@ serve(async (req) => {
 
   try {
     const auth = await resolveUser(req, service);
+    await requireCommerceGateway(req, auth, "camera_control");
     const cfg = await loadRuntimeToolConfig(service);
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
 
@@ -256,7 +258,13 @@ serve(async (req) => {
       }
     }
     const msg = e instanceof Error ? e.message : String(e);
-    const status = msg === "unauthorized" ? 401 : msg === "forbidden_asset_ownership" ? 403 : 500;
+    const status = msg === "unauthorized"
+      ? 401
+      : msg === "forbidden_asset_ownership"
+        ? 403
+        : msg.startsWith("commerce_gateway_")
+          ? (msg === "commerce_gateway_misconfigured" ? 503 : 403)
+          : 500;
     return json({ success: false, error: msg }, status);
   }
 });

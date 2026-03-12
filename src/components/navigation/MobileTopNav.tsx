@@ -10,6 +10,8 @@ import { isNavItemActive, isNavItemProtectedForAccess } from "@/navigation/confi
 import { resolveNavItemIcon } from "@/navigation/iconMap";
 import { PlatformBrand } from "@/components/brand/PlatformBrand";
 import { AuthGateDialog } from "@/components/navigation/AuthGateDialog";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { getToolCodeForNavItem } from "@/lib/commerce/toolCosts";
 
 interface MobileTopNavProps {
   context: TopBarContext;
@@ -22,6 +24,7 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
   const [open, setOpen] = useState(false);
   const [authGate, setAuthGate] = useState<{ open: boolean; label?: string }>({ open: false });
   const { t, i18n } = useTranslation();
+  const { getCost } = useToolCosts();
   const location = useLocation();
   const isInAdminArea = location.pathname.startsWith("/admin");
   const contextSwitchTo = isInAdminArea ? "/app" : "/admin";
@@ -64,6 +67,8 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
                       const active = isNavItemActive(item, location.pathname);
                       const protectedForAccess = isNavItemProtectedForAccess(item, access);
                       const ItemIcon = resolveNavItemIcon(item.icon);
+                      const toolCode = getToolCodeForNavItem(item.id);
+                      const toolCost = access.isAuthenticated && toolCode ? getCost(toolCode) : 0;
 
                       if (protectedForAccess) {
                         return (
@@ -79,9 +84,16 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
                               "border-transparent text-foreground/85 hover:border-border/80 hover:bg-muted/60",
                             )}
                           >
-                            <div className="flex items-center gap-2 text-sm font-medium">
-                              {ItemIcon ? <ItemIcon className="h-3.5 w-3.5 text-primary" /> : null}
-                              {t(item.labelKey)}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-sm font-medium">
+                                {ItemIcon ? <ItemIcon className="h-3.5 w-3.5 text-primary" /> : null}
+                                {t(item.labelKey)}
+                              </div>
+                              {toolCost > 0 ? (
+                                <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                  {toolCost} cr
+                                </span>
+                              ) : null}
                             </div>
                             {item.descriptionKey ? <div className="text-xs text-muted-foreground">{t(item.descriptionKey)}</div> : null}
                           </button>
@@ -101,9 +113,16 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
                               : "border-transparent text-foreground/85 hover:border-border/80 hover:bg-muted/60",
                           )}
                         >
-                          <div className="flex items-center gap-2 text-sm font-medium">
-                            {ItemIcon ? <ItemIcon className="h-3.5 w-3.5 text-primary" /> : null}
-                            {t(item.labelKey)}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-sm font-medium">
+                              {ItemIcon ? <ItemIcon className="h-3.5 w-3.5 text-primary" /> : null}
+                              {t(item.labelKey)}
+                            </div>
+                            {toolCost > 0 ? (
+                              <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                {toolCost} cr
+                              </span>
+                            ) : null}
                           </div>
                           {item.descriptionKey ? <div className="text-xs text-muted-foreground">{t(item.descriptionKey)}</div> : null}
                         </Link>

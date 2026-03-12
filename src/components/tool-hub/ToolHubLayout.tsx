@@ -4,6 +4,7 @@ import { ArrowUpRight, Wrench } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToolHubConfig, ToolHubToolConfig } from "@/tool-hubs/registry";
 import { cn } from "@/lib/utils";
+import { useToolCosts } from "@/hooks/useToolCosts";
 
 interface ToolHubLayoutProps {
   hub: ToolHubConfig;
@@ -13,6 +14,7 @@ interface ToolHubLayoutProps {
 
 export function ToolHubLayout({ hub, isAuthenticated = true, onProtectedToolClick }: ToolHubLayoutProps) {
   const { t } = useTranslation();
+  const { getCost } = useToolCosts();
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 px-6 py-6 md:space-y-8 md:py-8">
@@ -33,6 +35,7 @@ export function ToolHubLayout({ hub, isAuthenticated = true, onProtectedToolClic
       <div className="grid gap-4 md:grid-cols-2 xl:gap-5">
         {hub.tools.map((tool) => {
           const blockedForAnon = Boolean(tool.requiresAuth && !isAuthenticated);
+          const toolCost = isAuthenticated && tool.toolCode ? getCost(tool.toolCode) : 0;
           const card = (
             <Card className="h-full border-border/70 bg-card/35 transition-[transform,border-color,background-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-primary/45 hover:bg-card/60 hover:shadow-[0_0_0_1px_rgba(255,127,0,0.12)]">
               <CardHeader className="flex flex-row items-start gap-3.5 space-y-0 pb-3">
@@ -40,7 +43,14 @@ export function ToolHubLayout({ hub, isAuthenticated = true, onProtectedToolClic
                   <tool.icon className="h-4 w-4" />
                 </div>
                 <div className="space-y-1.5">
-                  <CardTitle className="text-xl font-semibold tracking-tight">{t(tool.titleKey)}</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-xl font-semibold tracking-tight">{t(tool.titleKey)}</CardTitle>
+                    {toolCost > 0 ? (
+                      <span className="inline-flex items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                        {toolCost} creditos
+                      </span>
+                    ) : null}
+                  </div>
                   <CardDescription className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
                     {t(tool.descriptionKey)}
                   </CardDescription>

@@ -123,3 +123,6 @@ verify_jwt = false
 [functions.tgis-delete-asset]
 verify_jwt = false
 
+[functions.commerce]
+verify_jwt = false
+

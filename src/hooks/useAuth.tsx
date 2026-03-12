@@ -81,10 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from("user_roles")
         .select("role")
         .eq("user_id", userId)
-        .limit(1)
-        .single();
+        .limit(1);
 
-      const nextRole = error ? "client" : ((data?.role as AppRole) || "client");
+      const fetchedRole = Array.isArray(data) ? (data[0]?.role as AppRole | undefined) : undefined;
+      const nextRole = error ? "client" : fetchedRole || "client";
       const fetchedAt = Date.now();
       roleCacheRef.current.set(userId, { role: nextRole, fetchedAt });
       writeStoredRole(userId, nextRole, fetchedAt);

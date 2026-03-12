@@ -1,4 +1,5 @@
 import { BarChart3, Binary, Camera, FileCode2, ImagePlus, LayoutDashboard, Layers3, LucideIcon, Search, Wand2 } from "lucide-react";
+import { CommerceToolCode } from "@/lib/commerce/toolCosts";
 
 export type ToolHubId = "analyticsTools" | "thumbTools" | "widgetKit";
 
@@ -8,6 +9,7 @@ export interface ToolHubToolConfig {
   titleKey: string;
   descriptionKey: string;
   icon: LucideIcon;
+  toolCode?: CommerceToolCode;
   requiresAuth?: boolean;
 }
 
@@ -61,6 +63,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsGenerate",
         descriptionKey: "nav.toolsGenerateDesc",
         icon: ImagePlus,
+        toolCode: "surprise_gen",
         requiresAuth: true,
       },
       {
@@ -69,6 +72,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsEditStudio",
         descriptionKey: "nav.toolsEditStudioDesc",
         icon: Wand2,
+        toolCode: "edit_studio",
         requiresAuth: true,
       },
       {
@@ -77,6 +81,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsCameraControl",
         descriptionKey: "nav.toolsCameraControlDesc",
         icon: Camera,
+        toolCode: "camera_control",
         requiresAuth: true,
       },
       {
@@ -85,6 +90,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsLayerDecomposition",
         descriptionKey: "nav.toolsLayerDecompositionDesc",
         icon: Layers3,
+        toolCode: "layer_decomposition",
         requiresAuth: true,
       },
     ],
@@ -100,6 +106,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.widgetKitPsdUmg",
         descriptionKey: "nav.widgetKitPsdUmgDesc",
         icon: Binary,
+        toolCode: "psd_to_umg",
         requiresAuth: true,
       },
       {
@@ -108,6 +115,7 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.widgetKitUmgVerse",
         descriptionKey: "nav.widgetKitUmgVerseDesc",
         icon: FileCode2,
+        toolCode: "umg_to_verse",
         requiresAuth: true,
       },
     ],

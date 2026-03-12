@@ -90,6 +90,19 @@ const parserMocks = vi.hoisted(() => ({
   }),
 }));
 
+const commerceMocks = vi.hoisted(() => ({
+  executeCommerceTool: vi.fn(async () => ({
+    operation_id: "op-test-1",
+    tool_code: "umg_to_verse",
+    credit_cost: 4,
+    debit_source: "weekly_wallet",
+    remaining_weekly_available: 96,
+    remaining_extra_wallet: 0,
+    status: "allowed",
+  })),
+  reverseCommerceOperation: vi.fn(async () => ({ ok: true })),
+}));
+
 vi.mock("@/lib/widgetkit/history", () => ({
   listWidgetKitHistory: historyMocks.listWidgetKitHistory,
   saveWidgetKitHistory: historyMocks.saveWidgetKitHistory,
@@ -98,6 +111,11 @@ vi.mock("@/lib/widgetkit/history", () => ({
 
 vi.mock("@/lib/widgetkit/uasset-parser", () => ({
   parseUassetFile: parserMocks.parseUassetFile,
+}));
+
+vi.mock("@/lib/commerce/client", () => ({
+  executeCommerceTool: commerceMocks.executeCommerceTool,
+  reverseCommerceOperation: commerceMocks.reverseCommerceOperation,
 }));
 
 describe("WidgetKit UI", () => {
@@ -138,6 +156,7 @@ describe("WidgetKit UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate Verse" }));
     expect(await screen.findByText("wdb_test_manager.verse")).toBeInTheDocument();
+    expect(commerceMocks.executeCommerceTool).toHaveBeenCalledTimes(1);
     expect(historyMocks.saveWidgetKitHistory).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "New upload" }));

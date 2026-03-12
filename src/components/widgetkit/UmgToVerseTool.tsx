@@ -9,6 +9,9 @@ import { deleteWidgetKitHistory, listWidgetKitHistory, saveWidgetKitHistory } fr
 import { parseUassetFile } from "@/lib/widgetkit/uasset-parser";
 import { generateVerseOutput } from "@/lib/widgetkit/verse-generator";
 import type { GeneratedOutput, ParsedWidget, WidgetKitHistoryItem } from "@/types/widgetkit";
+import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type UmgToolStatus = "empty" | "parsing" | "preview" | "ready" | "no_fields" | "error_format";
 
@@ -49,6 +52,7 @@ function downloadTextFile(content: string, filename: string) {
 export default function UmgToVerseTool({ active }: { active: boolean }) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
 
   const [status, setStatus] = useState<UmgToolStatus>("empty");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -122,31 +126,61 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
 
   async function handleGenerate(saveHistory: boolean) {
     if (!parsedWidget || parsedWidget.fields.length === 0) return;
-
-    const output = generateVerseOutput(parsedWidget);
-    setGenerated(output);
-    setStatus("ready");
-
-    if (!saveHistory) return;
-
+    let operationId = "";
     try {
-      const saved = await saveWidgetKitHistory({
-        tool: "umg-verse",
-        name: `${parsedWidget.widgetName}.uasset`,
-        data: parsedWidget,
-        meta: {
-          totalFields: parsedWidget.fields.length,
-          messages: parsedWidget.fieldsByType.messages.length,
-          booleans: parsedWidget.fieldsByType.booleans.length,
-          floats: parsedWidget.fieldsByType.floats.length,
-          integers: parsedWidget.fieldsByType.integers.length,
-          assets: parsedWidget.fieldsByType.assets.length,
-          events: parsedWidget.fieldsByType.events.length,
+      const billing = await executeCommerceTool({
+        toolCode: "umg_to_verse",
+        payload: {
+          widget_name: parsedWidget.widgetName,
+          fields_total: parsedWidget.fields.length,
         },
       });
-      setHistory((prev) => [saved, ...prev].slice(0, 10));
-    } catch {
-      toast({ title: t("common.error"), description: t("widgetKit.historySaveError"), variant: "destructive" });
+      operationId = String(billing?.operation_id || "");
+
+      const output = generateVerseOutput(parsedWidget);
+      setGenerated(output);
+      setStatus("ready");
+
+      if (!saveHistory) return;
+
+      try {
+        const saved = await saveWidgetKitHistory({
+          tool: "umg-verse",
+          name: `${parsedWidget.widgetName}.uasset`,
+          data: parsedWidget,
+          meta: {
+            totalFields: parsedWidget.fields.length,
+            messages: parsedWidget.fieldsByType.messages.length,
+            booleans: parsedWidget.fieldsByType.booleans.length,
+            floats: parsedWidget.fieldsByType.floats.length,
+            integers: parsedWidget.fieldsByType.integers.length,
+            assets: parsedWidget.fieldsByType.assets.length,
+            events: parsedWidget.fieldsByType.events.length,
+          },
+        });
+        setHistory((prev) => [saved, ...prev].slice(0, 10));
+      } catch {
+        toast({ title: t("common.error"), description: t("widgetKit.historySaveError"), variant: "destructive" });
+      }
+    } catch (error) {
+      const code = String((error as any)?.payload?.error_code || "");
+      if (operationId) {
+        try {
+          await reverseCommerceOperation({
+            operationId,
+            reason: "client_local_tool_failed_umg_to_verse",
+          });
+        } catch {
+          // best effort
+        }
+      }
+      toast({
+        title: t("common.error"),
+        description: code === "INSUFFICIENT_CREDITS"
+          ? "Saldo insuficiente. Compre creditos extras para continuar."
+          : String((error as Error)?.message || "Falha ao consumir creditos."),
+        variant: "destructive",
+      });
     }
   }
 
@@ -200,6 +234,7 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
 
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
   const isBusy = status === "parsing";
+  const creditCost = getCost("umg_to_verse");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -296,10 +331,13 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
                   <div className="rounded-lg border border-border/70 bg-muted/30 p-2 text-xs">Event: {breakdown.events}</div>
                 </div>
 
-                <Button onClick={() => void handleGenerate(true)}>
+                <Button onClick={() => void handleGenerate(true)} className="w-full">
                   <Sparkles className="mr-2 h-4 w-4" />
                   {t("widgetKit.umgVerse.btnGenerate")}
                 </Button>
+                <div className="flex justify-center">
+                  <ToolCostBadge cost={creditCost} />
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Upload a .uasset to map Verse fields and prepare generation.</p>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeftRight, ChevronDown, LogOut, Shield, User } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Coins, LogOut, Shield, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import { NavAccessState, NavItem, TopBarContext } from "@/navigation/types";
 import { Button } from "@/components/ui/button";
 import { MobileTopNav } from "@/components/navigation/MobileTopNav";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,10 +27,23 @@ import {
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { PlatformBrand } from "@/components/brand/PlatformBrand";
 import { AuthGateDialog } from "@/components/navigation/AuthGateDialog";
+import { COMMERCE_CREDITS_UI_EVENT, getCommerceCreditsSummary } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { getToolCodeForNavItem } from "@/lib/commerce/toolCosts";
 
 interface TopBarProps {
   context: TopBarContext;
 }
+
+type TopBarCommerceSummary = {
+  planType: "free" | "pro";
+  spendableNow: number;
+  weeklyWallet: number;
+  freeMonthly: number;
+  extraWallet: number;
+};
+
+const COMMERCE_SUMMARY_CACHE_PREFIX = "commerce_topbar_summary_v1:";
 
 const FLYOUT_HUB_IDS = new Set(["analyticsToolsHub", "thumbToolsHub", "widgetKitHub"]);
 
@@ -59,12 +73,55 @@ function getUserInitials(name: string) {
   return `${(first?.[0] || "U").toUpperCase()}${(second?.[0] || "").toUpperCase()}`;
 }
 
+function toSafeInt(value: unknown): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.floor(raw));
+}
+
+function readCachedCommerceSummary(userId: string): TopBarCommerceSummary | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(`${COMMERCE_SUMMARY_CACHE_PREFIX}${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TopBarCommerceSummary>;
+    const planType = parsed.planType === "pro" ? "pro" : parsed.planType === "free" ? "free" : null;
+    if (!planType) return null;
+
+    return {
+      planType,
+      spendableNow: toSafeInt(parsed.spendableNow),
+      weeklyWallet: toSafeInt(parsed.weeklyWallet),
+      freeMonthly: toSafeInt(parsed.freeMonthly),
+      extraWallet: toSafeInt(parsed.extraWallet),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedCommerceSummary(userId: string, summary: TopBarCommerceSummary) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(`${COMMERCE_SUMMARY_CACHE_PREFIX}${userId}`, JSON.stringify(summary));
+  } catch {
+    // best effort only
+  }
+}
+
+function applyDelta(value: number, delta: number): number {
+  return Math.max(0, Math.floor(value + delta));
+}
+
 export function TopBar({ context }: TopBarProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const { user, isAdmin, isEditor, signOut } = useAuth();
+  const { getCost } = useToolCosts();
   const [openFlyoutMenu, setOpenFlyoutMenu] = useState<string | null>(null);
   const [authGate, setAuthGate] = useState<{ open: boolean; label?: string }>({ open: false });
+  const [commerceSummary, setCommerceSummary] = useState<TopBarCommerceSummary | null>(null);
+  const [commerceSummaryLoading, setCommerceSummaryLoading] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
   const analyticsContainerRef = useRef<HTMLDivElement | null>(null);
   const toolsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +150,7 @@ export function TopBar({ context }: TopBarProps) {
   const contextSwitchTo = isInAdminArea ? "/app" : "/admin";
   const contextSwitchLabel = isInAdminArea ? t("common.backToApp") : t("common.admin");
   const ContextSwitchIcon = isInAdminArea ? ArrowLeftRight : Shield;
+  const planLabel = commerceSummary?.planType === "pro" ? "Pro" : commerceSummary?.planType === "free" ? "Free" : "...";
 
   const clearCloseTimeout = useCallback(() => {
     if (closeTimeoutRef.current !== null) {
@@ -145,6 +203,117 @@ export function TopBar({ context }: TopBarProps) {
   useEffect(() => {
     setOpenFlyoutMenu(null);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!access.isAuthenticated || !user?.id) {
+      setCommerceSummary(null);
+      setCommerceSummaryLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    const cached = readCachedCommerceSummary(user.id);
+    if (cached) setCommerceSummary(cached);
+    setCommerceSummaryLoading(true);
+
+    const loadCommerceSummary = async () => {
+      try {
+        const payload = await getCommerceCreditsSummary();
+        if (isCancelled) return;
+
+        const summary = payload?.summary || {};
+        const weeklyWallet = toSafeInt(summary.weekly_wallet_available);
+        const freeMonthly = toSafeInt(summary.free_monthly_available);
+        const extraWallet = toSafeInt(summary.extra_wallet_available);
+        const spendableNow = toSafeInt(summary.spendable_now || (weeklyWallet + freeMonthly + extraWallet));
+        const planType = String(summary.plan_type || "free") === "pro" ? "pro" : "free";
+
+        const nextSummary: TopBarCommerceSummary = {
+          planType,
+          spendableNow,
+          weeklyWallet,
+          freeMonthly,
+          extraWallet,
+        };
+
+        setCommerceSummary(nextSummary);
+        writeCachedCommerceSummary(user.id, nextSummary);
+        setCommerceSummaryLoading(false);
+      } catch {
+        if (!isCancelled) setCommerceSummaryLoading(false);
+      }
+    };
+
+    void loadCommerceSummary();
+    const refreshId = window.setInterval(() => {
+      void loadCommerceSummary();
+    }, 60_000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(refreshId);
+    };
+  }, [access.isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    if (!access.isAuthenticated || !user?.id) return;
+
+    const handleCreditsUiEvent = (event: Event) => {
+      const detail = (event as CustomEvent<any>).detail;
+      if (!detail || typeof detail !== "object") return;
+
+      setCommerceSummary((prev) => {
+        const base: TopBarCommerceSummary = prev || {
+          planType: "free",
+          spendableNow: 0,
+          weeklyWallet: 0,
+          freeMonthly: 0,
+          extraWallet: 0,
+        };
+
+        if (detail.type === "optimistic_debit") {
+          const amount = toSafeInt(detail.amount);
+          if (amount <= 0) return base;
+          const next = {
+            ...base,
+            spendableNow: applyDelta(base.spendableNow, -amount),
+          };
+          writeCachedCommerceSummary(user.id, next);
+          return next;
+        }
+
+        if (detail.type === "rollback_debit") {
+          const amount = toSafeInt(detail.amount);
+          if (amount <= 0) return base;
+          const next = {
+            ...base,
+            spendableNow: applyDelta(base.spendableNow, amount),
+          };
+          writeCachedCommerceSummary(user.id, next);
+          return next;
+        }
+
+        if (detail.type === "sync_from_execute") {
+          const next = {
+            ...base,
+            weeklyWallet: toSafeInt(detail.weekly_wallet_available),
+            freeMonthly: toSafeInt(detail.free_monthly_available),
+            extraWallet: toSafeInt(detail.extra_wallet_available),
+            spendableNow: toSafeInt(detail.spendable_now),
+          };
+          writeCachedCommerceSummary(user.id, next);
+          return next;
+        }
+
+        return base;
+      });
+    };
+
+    window.addEventListener(COMMERCE_CREDITS_UI_EVENT, handleCreditsUiEvent as EventListener);
+    return () => {
+      window.removeEventListener(COMMERCE_CREDITS_UI_EVENT, handleCreditsUiEvent as EventListener);
+    };
+  }, [access.isAuthenticated, user?.id]);
 
   useEffect(() => {
     if (!openFlyoutMenu) return;
@@ -283,6 +452,8 @@ export function TopBar({ context }: TopBarProps) {
                     {shortcutItems.map((shortcut) => {
                       const ShortcutIcon = resolveNavItemIcon(shortcut.icon);
                       const shortcutProtected = isNavItemProtectedForAccess(shortcut, access);
+                      const shortcutToolCode = getToolCodeForNavItem(shortcut.id);
+                      const shortcutCost = access.isAuthenticated && shortcutToolCode ? getCost(shortcutToolCode) : 0;
                       return (
                         <Link
                           key={shortcut.id}
@@ -292,9 +463,16 @@ export function TopBar({ context }: TopBarProps) {
                           onClick={(event) => handleProtectedClick(event, shortcutProtected, shortcut.labelKey)}
                           className="nav-motion-fast block rounded-lg px-3 py-2 transition-[background-color,transform] hover:bg-primary/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
-                          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                            {ShortcutIcon ? <ShortcutIcon className="h-3.5 w-3.5 text-primary" /> : null}
-                            <span>{t(shortcut.labelKey)}</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                              {ShortcutIcon ? <ShortcutIcon className="h-3.5 w-3.5 text-primary" /> : null}
+                              <span>{t(shortcut.labelKey)}</span>
+                            </div>
+                            {shortcutCost > 0 ? (
+                              <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                {shortcutCost} cr
+                              </span>
+                            ) : null}
                           </div>
                           {shortcut.descriptionKey ? (
                             <div className="text-xs text-muted-foreground">{t(shortcut.descriptionKey)}</div>
@@ -310,46 +488,61 @@ export function TopBar({ context }: TopBarProps) {
 
           <div className="ml-auto hidden items-center gap-2 lg:flex">
             {access.isAuthenticated ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="h-10 gap-2 rounded-full border border-border/60 pl-2.5 pr-3" aria-label={t("nav.profileMenu")}>
-                    <Avatar className="h-6 w-6 border border-border/70">
-                      {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
-                      <AvatarFallback className="bg-muted text-[11px] font-semibold text-foreground">
-                        {getUserInitials(displayName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="max-w-36 truncate text-xs text-muted-foreground">{displayName}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuItem asChild>
-                    <Link to="/app">
-                      <User className="h-4 w-4" />
-                      {t("nav.account")}
-                    </Link>
-                  </DropdownMenuItem>
-                  {(isAdmin || isEditor) && (
+              <>
+                <Link
+                  to="/app/credits"
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-border/60 bg-background px-3 text-xs text-foreground/90 transition-colors hover:bg-muted/60"
+                  aria-label="Abrir creditos e plano"
+                >
+                  <Coins className="h-3.5 w-3.5 text-primary" />
+                  <span className="font-semibold tabular-nums">{commerceSummaryLoading && !commerceSummary ? "..." : (commerceSummary?.spendableNow ?? "...")}</span>
+                  <span className="text-muted-foreground">{commerceSummaryLoading && !commerceSummary ? "carregando" : "disponiveis"}</span>
+                  <Badge variant={commerceSummary?.planType === "pro" ? "default" : "secondary"} className="h-5 px-2 text-[10px] uppercase tracking-[0.12em]">
+                    {planLabel}
+                  </Badge>
+                </Link>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="h-10 gap-2 rounded-full border border-border/60 pl-2.5 pr-3" aria-label={t("nav.profileMenu")}>
+                      <Avatar className="h-6 w-6 border border-border/70">
+                        {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
+                        <AvatarFallback className="bg-muted text-[11px] font-semibold text-foreground">
+                          {getUserInitials(displayName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="max-w-36 truncate text-xs text-muted-foreground">{displayName}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
                     <DropdownMenuItem asChild>
-                      <Link to={contextSwitchTo}>
-                        <ContextSwitchIcon className="h-4 w-4" />
-                        {contextSwitchLabel}
+                      <Link to="/app/billing">
+                        <User className="h-4 w-4" />
+                        {t("nav.account")}
                       </Link>
                     </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      handleSignOut();
-                    }}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {t("common.signOut")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {(isAdmin || isEditor) && (
+                      <DropdownMenuItem asChild>
+                        <Link to={contextSwitchTo}>
+                          <ContextSwitchIcon className="h-4 w-4" />
+                          {contextSwitchLabel}
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        handleSignOut();
+                      }}
+                    >
+                      <LogOut className="h-4 w-4" />
+                      {t("common.signOut")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
             ) : (
               <>
                 <Button variant="ghost" size="sm" asChild>
