@@ -37,6 +37,7 @@ const WidgetKitShell = lazy(() => import("./pages/widgetkit/WidgetKitShell"));
 const PsdToUmgPage = lazy(() => import("./pages/widgetkit/PsdToUmgPage"));
 const UmgToVersePage = lazy(() => import("./pages/widgetkit/UmgToVersePage"));
 const BillingPage = lazy(() => import("./pages/BillingPage"));
+const CreditsPage = lazy(() => import("./pages/CreditsPage"));
 
 // Admin pages
 const AdminOverview = lazy(() => import("./pages/admin/AdminOverview"));
@@ -111,6 +112,7 @@ const App = () => (
                 <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
                 <Route path="island-lookup" element={<IslandLookup />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="credits" element={<CreditsPage />} />
                 <Route path="thumb-generator" element={<Navigate to="/app/thumb-tools/generate" replace />} />
                 <Route path="widgetkit" element={<WidgetKitShell />}>
                   <Route index element={<WidgetKit />} />

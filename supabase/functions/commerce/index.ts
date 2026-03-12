@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, idempotency-key, stripe-signature, x-commerce-internal-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, idempotency-key, stripe-signature, x-commerce-internal-secret, x-device-fingerprint-hash",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
@@ -24,6 +24,8 @@ type ToolCode =
   | "layer_decomposition"
   | "psd_to_umg"
   | "umg_to_verse";
+
+type SubscriptionStatus = "inactive" | "active" | "past_due" | "cancel_at_period_end" | "expired" | "canceled";
 
 const TOOL_FUNCTION_MAP: Record<Exclude<ToolCode, "psd_to_umg" | "umg_to_verse">, string> = {
   surprise_gen: "tgis-generate",
@@ -57,6 +59,12 @@ function optionalEnv(name: string): string {
   return String(Deno.env.get(name) || "").trim();
 }
 
+function envInt(name: string, fallback: number, min = 1, max = 1_000_000): number {
+  const raw = Number(optionalEnv(name));
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(raw)));
+}
+
 function extractBearer(req: Request): string {
   const header = normalizeText(req.headers.get("Authorization") || req.headers.get("authorization"));
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
@@ -80,6 +88,36 @@ function decodeQueryInt(url: URL, key: string, fallback: number, min: number, ma
   const raw = Number(url.searchParams.get(key));
   if (!Number.isFinite(raw)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(raw)));
+}
+
+function getClientIp(req: Request): string {
+  const xff = normalizeText(req.headers.get("x-forwarded-for"));
+  if (xff) return normalizeText(xff.split(",")[0]);
+  const realIp = normalizeText(req.headers.get("x-real-ip"));
+  if (realIp) return realIp;
+  const cfIp = normalizeText(req.headers.get("cf-connecting-ip"));
+  if (cfIp) return cfIp;
+  return "unknown";
+}
+
+function normalizeFingerprint(value: unknown): string | null {
+  const raw = normalizeText(value).toLowerCase();
+  if (!raw) return null;
+  if (!/^[a-f0-9]{64}$/.test(raw)) return null;
+  return raw;
+}
+
+function extractDeviceFingerprintHash(req: Request, body?: JsonRecord): string | null {
+  const fromHeader = normalizeFingerprint(req.headers.get("x-device-fingerprint-hash"));
+  if (fromHeader) return fromHeader;
+
+  const fromQuery = normalizeFingerprint(new URL(req.url).searchParams.get("dfp"));
+  if (fromQuery) return fromQuery;
+
+  const fromBody = normalizeFingerprint(body?.device_fingerprint_hash);
+  if (fromBody) return fromBody;
+
+  return null;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -283,6 +321,71 @@ async function stripeCreateCheckoutSession(args: {
   return { id, url };
 }
 
+function toIsoFromUnix(value: unknown): string | null {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return new Date(raw * 1000).toISOString();
+}
+
+function mapStripeSubscriptionStatus(
+  value: unknown,
+  cancelAtPeriodEnd?: unknown,
+): SubscriptionStatus {
+  const status = normalizeText(value).toLowerCase();
+  const wantsCancelAtPeriodEnd = Boolean(cancelAtPeriodEnd);
+  if (wantsCancelAtPeriodEnd && (status === "active" || status === "trialing")) return "cancel_at_period_end";
+  if (status === "past_due" || status === "unpaid") return "past_due";
+  if (status === "canceled") return "canceled";
+  if (status === "incomplete_expired") return "expired";
+  if (status === "active" || status === "trialing") return "active";
+  return "inactive";
+}
+
+function buildStripeSubscriptionSnapshot(raw: any): {
+  status: SubscriptionStatus;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+} {
+  return {
+    status: mapStripeSubscriptionStatus(raw?.status, raw?.cancel_at_period_end),
+    current_period_start: toIsoFromUnix(raw?.current_period_start),
+    current_period_end: toIsoFromUnix(raw?.current_period_end),
+    cancel_at_period_end: Boolean(raw?.cancel_at_period_end),
+  };
+}
+
+async function stripeFetchSubscriptionDetails(subscriptionId: string): Promise<{
+  status: SubscriptionStatus;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}> {
+  const stripeKey = optionalEnv("STRIPE_SECRET_KEY");
+  if (!stripeKey) throw new Error("stripe_not_configured");
+
+  const resp = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${stripeKey}`,
+    },
+  });
+
+  const text = await resp.text();
+  let parsed: any = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { error: { message: text } };
+  }
+
+  if (!resp.ok) {
+    throw new Error(normalizeText(parsed?.error?.message) || `stripe_subscription_http_${resp.status}`);
+  }
+
+  return buildStripeSubscriptionSnapshot(parsed);
+}
+
 function mapPackCodeToConfigKey(packCode: string): string | null {
   if (packCode === "pack_250") return "pack_small_credits";
   if (packCode === "pack_650") return "pack_medium_credits";
@@ -304,6 +407,23 @@ function buildPackCatalog(configRows: Array<{ config_key: string; value_json: an
   ];
 }
 
+function buildToolCostCatalog(configRows: Array<{ config_key: string; value_json: any }>) {
+  const map = new Map(configRows.map((r) => [r.config_key, r.value_json]));
+  const get = (key: string, fallback: number) => {
+    const raw = Number(map.get(key)?.value);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+  };
+
+  return {
+    surprise_gen: get("tool_cost_surprise_gen", 15),
+    edit_studio: get("tool_cost_edit_studio", 4),
+    camera_control: get("tool_cost_camera_control", 3),
+    layer_decomposition: get("tool_cost_layer_decomposition", 8),
+    psd_to_umg: get("tool_cost_psd_to_umg", 2),
+    umg_to_verse: get("tool_cost_umg_to_verse", 2),
+  };
+}
+
 function stripeVerifySignature(rawBody: string, signatureHeader: string, secret: string): Promise<boolean> {
   return (async () => {
     const parts = signatureHeader.split(",").map((x) => x.trim());
@@ -315,8 +435,26 @@ function stripeVerifySignature(rawBody: string, signatureHeader: string, secret:
   })();
 }
 
+function buildWalletSummary(wallet: any, planType: string) {
+  const weeklyAvailable = Math.max(0, Number(wallet?.weekly_wallet || 0));
+  const freeMonthlyAvailable = Math.max(0, Number(wallet?.free_monthly_remaining || 0));
+  const extraWalletAvailable = Math.max(0, Number(wallet?.extra_wallet || 0));
+  const monthlyPlanRemaining = Math.max(0, Number(wallet?.monthly_plan_remaining || 0));
+  const spendableNow = weeklyAvailable + freeMonthlyAvailable + extraWalletAvailable;
+
+  return {
+    spendable_now: spendableNow,
+    weekly_wallet_available: weeklyAvailable,
+    free_monthly_available: freeMonthlyAvailable,
+    extra_wallet_available: extraWalletAvailable,
+    monthly_plan_remaining: monthlyPlanRemaining,
+    plan_type: normalizeText(planType || "free"),
+  };
+}
+
 async function handleMeCredits(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
-  await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: null });
+  const deviceFingerprintHash = extractDeviceFingerprintHash(req);
+  await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
   await service.rpc("commerce_open_cycle_if_needed", { p_user_id: user.userId, p_now: new Date().toISOString(), p_idempotency_prefix: "cycle_open" });
   await service.rpc("commerce_sync_access_state", { p_user_id: user.userId });
 
@@ -332,7 +470,49 @@ async function handleMeCredits(req: Request, service: ReturnType<typeof createCl
     cycle = data;
   }
 
-  return json({ success: true, account, wallet, cycle, subscription: sub || null });
+  return json({
+    success: true,
+    account,
+    wallet,
+    cycle,
+    subscription: sub || null,
+    summary: buildWalletSummary(wallet, account?.plan_type),
+  });
+}
+
+async function handleMeCreditsSummary(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
+  const deviceFingerprintHash = extractDeviceFingerprintHash(req);
+  await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
+
+  let { data: account } = await service
+    .from("commerce_accounts")
+    .select("plan_type,access_state")
+    .eq("user_id", user.userId)
+    .maybeSingle();
+
+  let { data: wallet } = await service
+    .from("commerce_wallets")
+    .select("current_cycle_id,weekly_wallet,monthly_plan_remaining,extra_wallet,free_monthly_remaining")
+    .eq("user_id", user.userId)
+    .maybeSingle();
+
+  if (!wallet?.current_cycle_id) {
+    await service.rpc("commerce_open_cycle_if_needed", { p_user_id: user.userId, p_now: new Date().toISOString(), p_idempotency_prefix: "cycle_open_topbar" });
+    const refreshed = await service
+      .from("commerce_wallets")
+      .select("current_cycle_id,weekly_wallet,monthly_plan_remaining,extra_wallet,free_monthly_remaining")
+      .eq("user_id", user.userId)
+      .maybeSingle();
+    wallet = refreshed.data;
+  }
+
+  const summary = buildWalletSummary(wallet, account?.plan_type);
+  return json({
+    success: true,
+    account: account || null,
+    wallet: wallet || null,
+    summary,
+  });
 }
 
 async function handleMeLedger(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
@@ -392,6 +572,10 @@ async function handleToolsExecute(req: Request, service: ReturnType<typeof creat
 
   if (!idempotencyKey) return json({ success: false, error: "missing_idempotency_key" }, 400);
   if (!toolCode) return json({ success: false, error: "missing_tool_code" }, 400);
+
+  const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
+  const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
+  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
 
   const payloadHash = await sha256Hex(JSON.stringify(payload));
 
@@ -555,6 +739,128 @@ async function handleBillingPacksList(service: ReturnType<typeof createClient>) 
   return json({ success: true, enabled, packs: buildPackCatalog(rows as any) });
 }
 
+async function handleCatalogToolCosts(service: ReturnType<typeof createClient>) {
+  const { data, error } = await service
+    .from("commerce_config")
+    .select("config_key,value_json")
+    .in("config_key", [
+      "tool_cost_surprise_gen",
+      "tool_cost_edit_studio",
+      "tool_cost_camera_control",
+      "tool_cost_layer_decomposition",
+      "tool_cost_psd_to_umg",
+      "tool_cost_umg_to_verse",
+    ]);
+
+  if (error) return json({ success: false, error: error.message }, 500);
+  return json({ success: true, tool_costs: buildToolCostCatalog(Array.isArray(data) ? (data as any) : []) });
+}
+
+async function enforceRateLimit(args: {
+  req: Request;
+  service: ReturnType<typeof createClient>;
+  scope: string;
+  user: AuthedUser | null;
+  limit: number;
+  windowSeconds: number;
+}): Promise<Response | null> {
+  const enabled = optionalEnv("COMMERCE_RATE_LIMIT_ENABLED").toLowerCase() !== "false";
+  if (!enabled) return null;
+
+  const limit = Math.max(1, Math.floor(args.limit));
+  const windowSeconds = Math.max(1, Math.floor(args.windowSeconds));
+  const subjectKey = args.user?.userId || `ip:${getClientIp(args.req)}`;
+
+  const { data, error } = await args.service.rpc("commerce_check_rate_limit", {
+    p_scope: args.scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds,
+  });
+
+  if (error) return json({ success: false, error: "rate_limit_check_failed" }, 500);
+
+  const payload = (data || {}) as any;
+  const allowed = Boolean(payload.allowed);
+  if (allowed) return null;
+
+  const retryAfter = Math.max(1, Number(payload.retry_after_seconds || windowSeconds));
+  return json(
+    {
+      success: false,
+      error: "rate_limited",
+      scope: args.scope,
+      retry_after_seconds: retryAfter,
+    },
+    429,
+    { "Retry-After": String(retryAfter) },
+  );
+}
+
+async function resolveUserIdForSubscriptionEvent(service: ReturnType<typeof createClient>, object: any): Promise<string | null> {
+  const metadataUserId = normalizeText(object?.metadata?.user_id);
+  if (metadataUserId) return metadataUserId;
+
+  const providerSubscriptionId = normalizeText(object?.subscription || object?.id);
+  if (providerSubscriptionId) {
+    const bySubscription = await service
+      .from("commerce_subscriptions")
+      .select("user_id")
+      .eq("provider_subscription_id", providerSubscriptionId)
+      .maybeSingle();
+    const userId = normalizeText(bySubscription.data?.user_id);
+    if (userId) return userId;
+  }
+
+  const providerCustomerId = normalizeText(object?.customer);
+  if (providerCustomerId) {
+    const byCustomer = await service
+      .from("commerce_subscriptions")
+      .select("user_id")
+      .eq("provider_customer_id", providerCustomerId)
+      .maybeSingle();
+    const userId = normalizeText(byCustomer.data?.user_id);
+    if (userId) return userId;
+  }
+
+  return null;
+}
+
+async function upsertStripeSubscriptionState(args: {
+  service: ReturnType<typeof createClient>;
+  userId: string;
+  providerCustomerId: string | null;
+  providerSubscriptionId: string;
+  snapshot: {
+    status: SubscriptionStatus;
+    current_period_start: string | null;
+    current_period_end: string | null;
+    cancel_at_period_end: boolean;
+  };
+  metadata?: Record<string, unknown>;
+}) {
+  await args.service.from("commerce_subscriptions").upsert({
+    user_id: args.userId,
+    provider: "stripe",
+    provider_customer_id: args.providerCustomerId,
+    provider_subscription_id: args.providerSubscriptionId,
+    status: args.snapshot.status,
+    current_period_start: args.snapshot.current_period_start,
+    current_period_end: args.snapshot.current_period_end,
+    cancel_at_period_end: args.snapshot.cancel_at_period_end,
+    metadata_json: args.metadata || {},
+  }, { onConflict: "user_id" });
+
+  if (args.snapshot.status === "active" || args.snapshot.status === "past_due" || args.snapshot.status === "cancel_at_period_end") {
+    await args.service.from("commerce_accounts").upsert({
+      user_id: args.userId,
+      plan_type: "pro",
+    }, { onConflict: "user_id" });
+  }
+
+  await args.service.rpc("commerce_sync_access_state", { p_user_id: args.userId });
+}
+
 async function handleBillingSubscriptionCheckout(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
   const body = await readJsonBody(req);
   const idempotencyKey = getIdempotencyKey(req, body);
@@ -568,6 +874,9 @@ async function handleBillingSubscriptionCheckout(req: Request, service: ReturnTy
   const appBase = optionalEnv("APP_BASE_URL") || new URL(req.url).origin;
   const successUrl = normalizeText(body.success_url) || `${appBase}/app/billing?checkout=success`;
   const cancelUrl = normalizeText(body.cancel_url) || `${appBase}/app/billing?checkout=cancel`;
+  const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
+  const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
+  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
 
   try {
     const session = await stripeCreateCheckoutSession({
@@ -611,8 +920,11 @@ async function handleBillingPackCheckout(req: Request, service: ReturnType<typeo
   if (!priceId) return json({ success: false, error: "stripe_pack_price_not_configured" }, 503);
 
   const appBase = optionalEnv("APP_BASE_URL") || new URL(req.url).origin;
-  const successUrl = normalizeText(body.success_url) || `${appBase}/app/billing?pack=success`;
-  const cancelUrl = normalizeText(body.cancel_url) || `${appBase}/app/billing?pack=cancel`;
+  const successUrl = normalizeText(body.success_url) || `${appBase}/app/credits?pack=success`;
+  const cancelUrl = normalizeText(body.cancel_url) || `${appBase}/app/credits?pack=cancel`;
+  const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
+  const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
+  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
 
   try {
     const session = await stripeCreateCheckoutSession({
@@ -650,10 +962,9 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
   const rawBody = await req.text();
   const sig = normalizeText(req.headers.get("stripe-signature"));
   const webhookSecret = optionalEnv("STRIPE_WEBHOOK_SECRET");
-  if (webhookSecret) {
-    const valid = await stripeVerifySignature(rawBody, sig, webhookSecret);
-    if (!valid) return json({ success: false, error: "invalid_webhook_signature" }, 401);
-  }
+  if (!webhookSecret) return json({ success: false, error: "stripe_webhook_secret_not_configured" }, 503);
+  const valid = await stripeVerifySignature(rawBody, sig, webhookSecret);
+  if (!valid) return json({ success: false, error: "invalid_webhook_signature" }, 401);
 
   let payload: any;
   try {
@@ -696,20 +1007,43 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
       const userId = normalizeText(metadata.user_id);
 
       if (flow === "subscription" && userId) {
+        const providerSubscriptionId = normalizeText(object?.subscription);
+        let subStatus: SubscriptionStatus = "active";
+        let currentPeriodStart: string | null = null;
+        let currentPeriodEnd: string | null = null;
+        let cancelAtPeriodEnd = false;
+
+        if (providerSubscriptionId) {
+          try {
+            const details = await stripeFetchSubscriptionDetails(providerSubscriptionId);
+            subStatus = details.status;
+            currentPeriodStart = details.current_period_start;
+            currentPeriodEnd = details.current_period_end;
+            cancelAtPeriodEnd = details.cancel_at_period_end;
+          } catch {
+            // Keep checkout completion robust even if subscription fetch fails.
+            subStatus = "active";
+          }
+        }
+
         await service.from("commerce_subscriptions").upsert({
           user_id: userId,
           provider: "stripe",
           provider_customer_id: normalizeText(object?.customer),
-          provider_subscription_id: normalizeText(object?.subscription),
-          status: "active",
-          current_period_start: null,
-          current_period_end: null,
-          cancel_at_period_end: false,
+          provider_subscription_id: providerSubscriptionId || null,
+          status: subStatus,
+          current_period_start: currentPeriodStart,
+          current_period_end: currentPeriodEnd,
+          cancel_at_period_end: cancelAtPeriodEnd,
           metadata_json: { last_checkout_session_id: normalizeText(object?.id) },
         }, { onConflict: "user_id" });
 
         await service.from("commerce_accounts").upsert({ user_id: userId, plan_type: "pro", access_state: "pro_active" }, { onConflict: "user_id" });
-        await service.rpc("commerce_open_cycle_if_needed", { p_user_id: userId, p_now: new Date().toISOString(), p_idempotency_prefix: "cycle_open" });
+        await service.rpc("commerce_open_cycle_if_needed", {
+          p_user_id: userId,
+          p_now: currentPeriodStart || new Date().toISOString(),
+          p_idempotency_prefix: "cycle_open_webhook",
+        });
         await service.rpc("commerce_sync_access_state", { p_user_id: userId });
       }
 
@@ -729,6 +1063,56 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
           .from("commerce_pack_purchases")
           .update({ status: "completed", provider_payment_intent_id: normalizeText(object?.payment_intent) || null, metadata_json: { event_id: eventId } })
           .eq("provider_checkout_session_id", normalizeText(object?.id));
+      }
+    }
+
+    if (eventType === "invoice.paid" || eventType === "invoice.payment_failed") {
+      const userId = await resolveUserIdForSubscriptionEvent(service, object);
+      const providerSubscriptionId = normalizeText(object?.subscription);
+      if (userId && providerSubscriptionId) {
+        let snapshot = buildStripeSubscriptionSnapshot({
+          status: eventType === "invoice.payment_failed" ? "past_due" : "active",
+          cancel_at_period_end: false,
+          current_period_start: null,
+          current_period_end: null,
+        });
+        try {
+          snapshot = await stripeFetchSubscriptionDetails(providerSubscriptionId);
+        } catch {
+          // keep fallback snapshot above
+        }
+        await upsertStripeSubscriptionState({
+          service,
+          userId,
+          providerCustomerId: normalizeText(object?.customer) || null,
+          providerSubscriptionId,
+          snapshot,
+          metadata: { last_invoice_event: eventType, invoice_id: normalizeText(object?.id) || null },
+        });
+      }
+    }
+
+    if (eventType === "customer.subscription.updated" || eventType === "customer.subscription.deleted") {
+      const userId = await resolveUserIdForSubscriptionEvent(service, object);
+      const providerSubscriptionId = normalizeText(object?.id);
+      if (userId && providerSubscriptionId) {
+        const snapshot = eventType === "customer.subscription.deleted"
+          ? {
+              status: "canceled" as SubscriptionStatus,
+              current_period_start: toIsoFromUnix(object?.current_period_start),
+              current_period_end: toIsoFromUnix(object?.current_period_end),
+              cancel_at_period_end: Boolean(object?.cancel_at_period_end),
+            }
+          : buildStripeSubscriptionSnapshot(object);
+
+        await upsertStripeSubscriptionState({
+          service,
+          userId,
+          providerCustomerId: normalizeText(object?.customer) || null,
+          providerSubscriptionId,
+          snapshot,
+          metadata: { last_subscription_event: eventType },
+        });
       }
     }
 
@@ -861,9 +1245,18 @@ serve(async (req) => {
   try {
     const user = await resolveUser(req, service);
 
+    if (req.method === "GET" && route === "/catalog/tool-costs") {
+      return await handleCatalogToolCosts(service);
+    }
+
     if (req.method === "GET" && route === "/me/credits") {
       if (!user) throw new Error("unauthorized");
       return await handleMeCredits(req, service, user);
+    }
+
+    if (req.method === "GET" && route === "/me/credits/summary") {
+      if (!user) throw new Error("unauthorized");
+      return await handleMeCreditsSummary(req, service, user);
     }
 
     if (req.method === "GET" && route === "/me/ledger") {
@@ -878,16 +1271,43 @@ serve(async (req) => {
 
     if (req.method === "POST" && route === "/tools/execute") {
       if (!user) throw new Error("unauthorized");
+      const limited = await enforceRateLimit({
+        req,
+        service,
+        scope: "tools_execute",
+        user,
+        limit: envInt("COMMERCE_RATE_LIMIT_EXECUTE_PER_MINUTE", 24, 1, 500),
+        windowSeconds: 60,
+      });
+      if (limited) return limited;
       return await handleToolsExecute(req, service, user);
     }
 
     if (req.method === "POST" && route === "/tools/reverse") {
       if (!user) throw new Error("unauthorized");
+      const limited = await enforceRateLimit({
+        req,
+        service,
+        scope: "tools_reverse",
+        user,
+        limit: envInt("COMMERCE_RATE_LIMIT_REVERSE_PER_MINUTE", 30, 1, 500),
+        windowSeconds: 60,
+      });
+      if (limited) return limited;
       return await handleToolsReverse(req, service, user);
     }
 
     if (req.method === "POST" && route === "/billing/subscription/checkout") {
       if (!user) throw new Error("unauthorized");
+      const limited = await enforceRateLimit({
+        req,
+        service,
+        scope: "billing_subscription_checkout",
+        user,
+        limit: envInt("COMMERCE_RATE_LIMIT_SUB_CHECKOUT_PER_HOUR", 6, 1, 100),
+        windowSeconds: 3600,
+      });
+      if (limited) return limited;
       return await handleBillingSubscriptionCheckout(req, service, user);
     }
 
@@ -898,11 +1318,29 @@ serve(async (req) => {
 
     if (req.method === "POST" && route.startsWith("/billing/packs/") && route.endsWith("/checkout")) {
       if (!user) throw new Error("unauthorized");
+      const limited = await enforceRateLimit({
+        req,
+        service,
+        scope: "billing_pack_checkout",
+        user,
+        limit: envInt("COMMERCE_RATE_LIMIT_PACK_CHECKOUT_PER_HOUR", 12, 1, 200),
+        windowSeconds: 3600,
+      });
+      if (limited) return limited;
       const packCode = normalizeText(route.split("/")[3]);
       return await handleBillingPackCheckout(req, service, user, packCode);
     }
 
     if (req.method === "POST" && route === "/billing/webhooks/provider") {
+      const limited = await enforceRateLimit({
+        req,
+        service,
+        scope: "billing_webhook_provider",
+        user: null,
+        limit: envInt("COMMERCE_RATE_LIMIT_WEBHOOK_PER_MINUTE", 240, 10, 2000),
+        windowSeconds: 60,
+      });
+      if (limited) return limited;
       return await handleWebhook(req, service);
     }
 

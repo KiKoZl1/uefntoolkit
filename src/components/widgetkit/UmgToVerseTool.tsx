@@ -10,6 +10,8 @@ import { parseUassetFile } from "@/lib/widgetkit/uasset-parser";
 import { generateVerseOutput } from "@/lib/widgetkit/verse-generator";
 import type { GeneratedOutput, ParsedWidget, WidgetKitHistoryItem } from "@/types/widgetkit";
 import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type UmgToolStatus = "empty" | "parsing" | "preview" | "ready" | "no_fields" | "error_format";
 
@@ -50,6 +52,7 @@ function downloadTextFile(content: string, filename: string) {
 export default function UmgToVerseTool({ active }: { active: boolean }) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
 
   const [status, setStatus] = useState<UmgToolStatus>("empty");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -231,6 +234,7 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
 
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
   const isBusy = status === "parsing";
+  const creditCost = getCost("umg_to_verse");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -327,10 +331,13 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
                   <div className="rounded-lg border border-border/70 bg-muted/30 p-2 text-xs">Event: {breakdown.events}</div>
                 </div>
 
-                <Button onClick={() => void handleGenerate(true)}>
+                <Button onClick={() => void handleGenerate(true)} className="w-full">
                   <Sparkles className="mr-2 h-4 w-4" />
                   {t("widgetKit.umgVerse.btnGenerate")}
                 </Button>
+                <div className="flex justify-center">
+                  <ToolCostBadge cost={creditCost} />
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Upload a .uasset to map Verse fields and prepare generation.</p>

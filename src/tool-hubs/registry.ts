@@ -1,6 +1,7 @@
-import { Binary, Camera, FileCode2, ImagePlus, Layers3, LucideIcon, Wand2 } from "lucide-react";
+import { BarChart3, Binary, Camera, FileCode2, ImagePlus, LayoutDashboard, Layers3, LucideIcon, Search, Wand2 } from "lucide-react";
+import { CommerceToolCode } from "@/lib/commerce/toolCosts";
 
-export type ToolHubId = "thumbTools" | "widgetKit";
+export type ToolHubId = "analyticsTools" | "thumbTools" | "widgetKit";
 
 export interface ToolHubToolConfig {
   id: string;
@@ -8,6 +9,8 @@ export interface ToolHubToolConfig {
   titleKey: string;
   descriptionKey: string;
   icon: LucideIcon;
+  toolCode?: CommerceToolCode;
+  requiresAuth?: boolean;
 }
 
 export interface ToolHubConfig {
@@ -18,6 +21,37 @@ export interface ToolHubConfig {
 }
 
 export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
+  analyticsTools: {
+    id: "analyticsTools",
+    titleKey: "nav.analyticsTools",
+    subtitleKey: "analyticsTools.subtitle",
+    tools: [
+      {
+        id: "island-analytics",
+        to: "/app",
+        titleKey: "nav.analyticsIslandAnalytics",
+        descriptionKey: "nav.analyticsIslandAnalyticsDesc",
+        icon: LayoutDashboard,
+        requiresAuth: true,
+      },
+      {
+        id: "island-lookup",
+        to: "/app/island-lookup",
+        titleKey: "nav.analyticsIslandLookup",
+        descriptionKey: "nav.analyticsIslandLookupDesc",
+        icon: Search,
+        requiresAuth: true,
+      },
+      {
+        id: "reports",
+        to: "/reports",
+        titleKey: "nav.reports",
+        descriptionKey: "nav.reportsDesc",
+        icon: BarChart3,
+        requiresAuth: false,
+      },
+    ],
+  },
   thumbTools: {
     id: "thumbTools",
     titleKey: "nav.thumbTools",
@@ -29,6 +63,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsGenerate",
         descriptionKey: "nav.toolsGenerateDesc",
         icon: ImagePlus,
+        toolCode: "surprise_gen",
+        requiresAuth: true,
       },
       {
         id: "edit-studio",
@@ -36,6 +72,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsEditStudio",
         descriptionKey: "nav.toolsEditStudioDesc",
         icon: Wand2,
+        toolCode: "edit_studio",
+        requiresAuth: true,
       },
       {
         id: "camera-control",
@@ -43,6 +81,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsCameraControl",
         descriptionKey: "nav.toolsCameraControlDesc",
         icon: Camera,
+        toolCode: "camera_control",
+        requiresAuth: true,
       },
       {
         id: "layer-decomposition",
@@ -50,6 +90,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.toolsLayerDecomposition",
         descriptionKey: "nav.toolsLayerDecompositionDesc",
         icon: Layers3,
+        toolCode: "layer_decomposition",
+        requiresAuth: true,
       },
     ],
   },
@@ -64,6 +106,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.widgetKitPsdUmg",
         descriptionKey: "nav.widgetKitPsdUmgDesc",
         icon: Binary,
+        toolCode: "psd_to_umg",
+        requiresAuth: true,
       },
       {
         id: "umg-verse",
@@ -71,6 +115,8 @@ export const TOOL_HUBS: Record<ToolHubId, ToolHubConfig> = {
         titleKey: "nav.widgetKitUmgVerse",
         descriptionKey: "nav.widgetKitUmgVerseDesc",
         icon: FileCode2,
+        toolCode: "umg_to_verse",
+        requiresAuth: true,
       },
     ],
   },

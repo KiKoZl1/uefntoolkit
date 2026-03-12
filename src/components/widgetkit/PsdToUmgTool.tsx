@@ -12,6 +12,8 @@ import { parsePsdFile, summarizePsdJson } from "@/lib/widgetkit/psd-parser";
 import { generateBeginObject } from "@/lib/widgetkit/umg-generator";
 import type { PsdJson, PsdParseSummary, UmgOutput, WidgetKitHistoryItem } from "@/types/widgetkit";
 import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type PsdToolStatus =
   | "idle"
@@ -59,6 +61,7 @@ function metaCount(item: WidgetKitHistoryItem, key: string, fallback: number): n
 export default function PsdToUmgTool({ active }: { active: boolean }) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
+  const { getCost } = useToolCosts();
 
   const [status, setStatus] = useState<PsdToolStatus>("idle");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -231,6 +234,7 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
 
   const locale = i18n.language === "pt-BR" ? "pt-BR" : "en-US";
   const isBusy = status === "parsing";
+  const creditCost = getCost("psd_to_umg");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -345,10 +349,13 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
                   </Label>
                 </div>
 
-                <Button onClick={() => void handleGenerate(true)}>
+                <Button onClick={() => void handleGenerate(true)} className="w-full">
                   <Sparkles className="mr-2 h-4 w-4" />
                   {t("widgetKit.psdUmg.btnGenerate")}
                 </Button>
+                <div className="flex justify-center">
+                  <ToolCostBadge cost={creditCost} />
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Faça upload de um .psd para mostrar a estrutura.</p>

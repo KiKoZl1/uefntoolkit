@@ -13,6 +13,8 @@ import { useTranslation } from "react-i18next";
 import { useThumbTools } from "@/features/tgis-thumb-tools/ThumbToolsProvider";
 import type { TgisGenerateResponse } from "@/types/tgis";
 import { executeCommerceTool } from "@/lib/commerce/client";
+import { useToolCosts } from "@/hooks/useToolCosts";
+import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
 
 type SkinSearchItem = {
   id: string;
@@ -110,6 +112,7 @@ async function invokeSkinSearch(q: string, limit = SKIN_RESULT_LIMIT): Promise<S
 export default function ThumbGenerator() {
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { getCost } = useToolCosts();
   const { registerAsset } = useThumbTools();
   const [loading, setLoading] = useState(false);
   const [rewritingPrompt, setRewritingPrompt] = useState(false);
@@ -406,6 +409,7 @@ export default function ThumbGenerator() {
     () => GENERATION_PHASES[Math.floor((Math.max(1, loadingElapsedSec) - 1) / 4) % GENERATION_PHASES.length],
     [loadingElapsedSec],
   );
+  const creditCost = getCost("surprise_gen");
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 md:px-6 md:py-8">
@@ -567,6 +571,9 @@ export default function ThumbGenerator() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 {loading || uploadingRef ? "Gerando..." : "Gerar imagem"}
               </Button>
+              <div className="flex justify-center">
+                <ToolCostBadge cost={creditCost} />
+              </div>
               <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                 {loading ? `Processando (${loadingElapsedSec || 1}s)` : "Tempo medio estimado: ~60s"}
               </p>

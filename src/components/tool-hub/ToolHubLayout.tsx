@@ -2,14 +2,19 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight, Wrench } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ToolHubConfig } from "@/tool-hubs/registry";
+import { ToolHubConfig, ToolHubToolConfig } from "@/tool-hubs/registry";
+import { cn } from "@/lib/utils";
+import { useToolCosts } from "@/hooks/useToolCosts";
 
 interface ToolHubLayoutProps {
   hub: ToolHubConfig;
+  isAuthenticated?: boolean;
+  onProtectedToolClick?: (tool: ToolHubToolConfig) => void;
 }
 
-export function ToolHubLayout({ hub }: ToolHubLayoutProps) {
+export function ToolHubLayout({ hub, isAuthenticated = true, onProtectedToolClick }: ToolHubLayoutProps) {
   const { t } = useTranslation();
+  const { getCost } = useToolCosts();
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 px-6 py-6 md:space-y-8 md:py-8">
@@ -28,20 +33,24 @@ export function ToolHubLayout({ hub }: ToolHubLayoutProps) {
       </header>
 
       <div className="grid gap-4 md:grid-cols-2 xl:gap-5">
-        {hub.tools.map((tool) => (
-          <Link
-            key={tool.id}
-            to={tool.to}
-            className="group nav-motion-base block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`${t("common.openTool")}: ${t(tool.titleKey)}`}
-          >
+        {hub.tools.map((tool) => {
+          const blockedForAnon = Boolean(tool.requiresAuth && !isAuthenticated);
+          const toolCost = isAuthenticated && tool.toolCode ? getCost(tool.toolCode) : 0;
+          const card = (
             <Card className="h-full border-border/70 bg-card/35 transition-[transform,border-color,background-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-primary/45 hover:bg-card/60 hover:shadow-[0_0_0_1px_rgba(255,127,0,0.12)]">
               <CardHeader className="flex flex-row items-start gap-3.5 space-y-0 pb-3">
                 <div className="rounded-xl border border-primary/35 bg-primary/10 p-2.5 text-primary transition-transform duration-200 group-hover:scale-105">
                   <tool.icon className="h-4 w-4" />
                 </div>
                 <div className="space-y-1.5">
-                  <CardTitle className="text-xl font-semibold tracking-tight">{t(tool.titleKey)}</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-xl font-semibold tracking-tight">{t(tool.titleKey)}</CardTitle>
+                    {toolCost > 0 ? (
+                      <span className="inline-flex items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                        {toolCost} creditos
+                      </span>
+                    ) : null}
+                  </div>
                   <CardDescription className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
                     {t(tool.descriptionKey)}
                   </CardDescription>
@@ -49,13 +58,38 @@ export function ToolHubLayout({ hub }: ToolHubLayoutProps) {
               </CardHeader>
               <CardContent className="pt-0">
                 <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary/90 transition-colors group-hover:text-primary">
-                  {t("common.openTool")}
+                  {blockedForAnon ? t("auth.signIn") : t("common.openTool")}
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </span>
               </CardContent>
             </Card>
-          </Link>
-        ))}
+          );
+
+          if (blockedForAnon) {
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => onProtectedToolClick?.(tool)}
+                className={cn("group nav-motion-base block rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+                aria-label={`${t("auth.signIn")}: ${t(tool.titleKey)}`}
+              >
+                {card}
+              </button>
+            );
+          }
+
+          return (
+            <Link
+              key={tool.id}
+              to={tool.to}
+              className="group nav-motion-base block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`${t("common.openTool")}: ${t(tool.titleKey)}`}
+            >
+              {card}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
