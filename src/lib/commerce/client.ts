@@ -291,6 +291,11 @@ export async function adminGetCommerceUser(userId: string) {
   return await request(`/admin/user/${encodeURIComponent(userId)}`, "GET");
 }
 
+export async function adminFindCommerceUserByEmail(email: string) {
+  const normalized = String(email || "").trim().toLowerCase();
+  return await request(`/admin/user-lookup?email=${encodeURIComponent(normalized)}`, "GET");
+}
+
 export async function adminGrantCredits(args: {
   userId: string;
   walletType: "extra_wallet" | "weekly_wallet" | "free_monthly";

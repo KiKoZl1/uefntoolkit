@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { executeCommerceTool } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type EditMode = "mask_edit" | "character_replace";
 type EffectiveMode = "mask_edit" | "character_replace" | "custom_character";
@@ -95,6 +96,7 @@ export default function EditStudioPage() {
   const [loading, setLoading] = useState(false);
   const [savingResult, setSavingResult] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
   const [resultUrl, setResultUrl] = useState("");
   const [pendingResultAssetId, setPendingResultAssetId] = useState("");
   const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
@@ -342,6 +344,7 @@ export default function EditStudioPage() {
 
   async function submit() {
     setErrorText("");
+    setInsufficientCredits(null);
     setResultUrl("");
     setPendingResultAssetId("");
     if (!sourceImageUrl) {
@@ -394,9 +397,9 @@ export default function EditStudioPage() {
     }
     setLoading(false);
     if (error || data?.success === false) {
-      const code = String((data as any)?.error_code || "");
-      if (code === "INSUFFICIENT_CREDITS") {
-        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      const insufficient = toInsufficientCreditsDetails(data);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
       } else {
         setErrorText(String(error?.message || data?.error || "Falha no edit studio."));
       }
@@ -667,6 +670,7 @@ export default function EditStudioPage() {
               <div className="flex justify-center">
                 <ToolCostBadge cost={creditCost} />
               </div>
+              {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
             </CardContent>
           </Card>

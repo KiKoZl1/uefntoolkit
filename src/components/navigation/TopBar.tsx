@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeftRight, ChevronDown, Coins, LogOut, Shield, User } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, LogOut, Shield, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -30,18 +30,16 @@ import { AuthGateDialog } from "@/components/navigation/AuthGateDialog";
 import { COMMERCE_CREDITS_UI_EVENT, getCommerceCreditsSummary } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { getToolCodeForNavItem } from "@/lib/commerce/toolCosts";
+import { CreditIcon } from "@/components/commerce/CreditIcon";
+import {
+  applyTopbarCreditsUiEvent,
+  type CommerceCreditsUiEventDetail,
+  type TopBarCommerceSummary,
+} from "@/lib/commerce/topbarCreditsUi";
 
 interface TopBarProps {
   context: TopBarContext;
 }
-
-type TopBarCommerceSummary = {
-  planType: "free" | "pro";
-  spendableNow: number;
-  weeklyWallet: number;
-  freeMonthly: number;
-  extraWallet: number;
-};
 
 const COMMERCE_SUMMARY_CACHE_PREFIX = "commerce_topbar_summary_v1:";
 
@@ -109,10 +107,6 @@ function writeCachedCommerceSummary(userId: string, summary: TopBarCommerceSumma
   }
 }
 
-function applyDelta(value: number, delta: number): number {
-  return Math.max(0, Math.floor(value + delta));
-}
-
 export function TopBar({ context }: TopBarProps) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -122,6 +116,7 @@ export function TopBar({ context }: TopBarProps) {
   const [authGate, setAuthGate] = useState<{ open: boolean; label?: string }>({ open: false });
   const [commerceSummary, setCommerceSummary] = useState<TopBarCommerceSummary | null>(null);
   const [commerceSummaryLoading, setCommerceSummaryLoading] = useState(false);
+  const optimisticDebitAppliedRef = useRef(0);
   const closeTimeoutRef = useRef<number | null>(null);
   const analyticsContainerRef = useRef<HTMLDivElement | null>(null);
   const toolsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -208,6 +203,7 @@ export function TopBar({ context }: TopBarProps) {
     if (!access.isAuthenticated || !user?.id) {
       setCommerceSummary(null);
       setCommerceSummaryLoading(false);
+      optimisticDebitAppliedRef.current = 0;
       return;
     }
 
@@ -238,6 +234,7 @@ export function TopBar({ context }: TopBarProps) {
 
         setCommerceSummary(nextSummary);
         writeCachedCommerceSummary(user.id, nextSummary);
+        optimisticDebitAppliedRef.current = 0;
         setCommerceSummaryLoading(false);
       } catch {
         if (!isCancelled) setCommerceSummaryLoading(false);
@@ -259,7 +256,7 @@ export function TopBar({ context }: TopBarProps) {
     if (!access.isAuthenticated || !user?.id) return;
 
     const handleCreditsUiEvent = (event: Event) => {
-      const detail = (event as CustomEvent<any>).detail;
+      const detail = (event as CustomEvent<CommerceCreditsUiEventDetail>).detail;
       if (!detail || typeof detail !== "object") return;
 
       setCommerceSummary((prev) => {
@@ -270,42 +267,11 @@ export function TopBar({ context }: TopBarProps) {
           freeMonthly: 0,
           extraWallet: 0,
         };
-
-        if (detail.type === "optimistic_debit") {
-          const amount = toSafeInt(detail.amount);
-          if (amount <= 0) return base;
-          const next = {
-            ...base,
-            spendableNow: applyDelta(base.spendableNow, -amount),
-          };
-          writeCachedCommerceSummary(user.id, next);
-          return next;
-        }
-
-        if (detail.type === "rollback_debit") {
-          const amount = toSafeInt(detail.amount);
-          if (amount <= 0) return base;
-          const next = {
-            ...base,
-            spendableNow: applyDelta(base.spendableNow, amount),
-          };
-          writeCachedCommerceSummary(user.id, next);
-          return next;
-        }
-
-        if (detail.type === "sync_from_execute") {
-          const next = {
-            ...base,
-            weeklyWallet: toSafeInt(detail.weekly_wallet_available),
-            freeMonthly: toSafeInt(detail.free_monthly_available),
-            extraWallet: toSafeInt(detail.extra_wallet_available),
-            spendableNow: toSafeInt(detail.spendable_now),
-          };
-          writeCachedCommerceSummary(user.id, next);
-          return next;
-        }
-
-        return base;
+        const optimisticState = { appliedDebit: optimisticDebitAppliedRef.current };
+        const next = applyTopbarCreditsUiEvent(base, detail, optimisticState);
+        optimisticDebitAppliedRef.current = optimisticState.appliedDebit;
+        writeCachedCommerceSummary(user.id, next);
+        return next;
       });
     };
 
@@ -469,8 +435,9 @@ export function TopBar({ context }: TopBarProps) {
                               <span>{t(shortcut.labelKey)}</span>
                             </div>
                             {shortcutCost > 0 ? (
-                              <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-                                {shortcutCost} cr
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                <CreditIcon className="h-3.5 w-3.5" glyphClassName="h-2 w-2" />
+                                {shortcutCost}
                               </span>
                             ) : null}
                           </div>
@@ -494,9 +461,8 @@ export function TopBar({ context }: TopBarProps) {
                   className="inline-flex h-10 items-center gap-2 rounded-full border border-border/60 bg-background px-3 text-xs text-foreground/90 transition-colors hover:bg-muted/60"
                   aria-label="Abrir creditos e plano"
                 >
-                  <Coins className="h-3.5 w-3.5 text-primary" />
+                  <CreditIcon className="h-4 w-4" glyphClassName="h-2.5 w-2.5" />
                   <span className="font-semibold tabular-nums">{commerceSummaryLoading && !commerceSummary ? "..." : (commerceSummary?.spendableNow ?? "...")}</span>
-                  <span className="text-muted-foreground">{commerceSummaryLoading && !commerceSummary ? "carregando" : "disponiveis"}</span>
                   <Badge variant={commerceSummary?.planType === "pro" ? "default" : "secondary"} className="h-5 px-2 text-[10px] uppercase tracking-[0.12em]">
                     {planLabel}
                   </Badge>

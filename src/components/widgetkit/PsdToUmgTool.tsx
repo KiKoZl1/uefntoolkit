@@ -14,6 +14,7 @@ import type { PsdJson, PsdParseSummary, UmgOutput, WidgetKitHistoryItem } from "
 import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type PsdToolStatus =
   | "idle"
@@ -73,6 +74,7 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
   const [summary, setSummary] = useState<PsdParseSummary | null>(null);
   const [umgOutput, setUmgOutput] = useState<UmgOutput | null>(null);
   const [includeTint, setIncludeTint] = useState(false);
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
 
   useEffect(() => {
     if (!active || historyLoadedOnce) return;
@@ -131,6 +133,7 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
   async function handleGenerate(saveHistory: boolean) {
     if (!parsedJson || !summary) return;
     let operationId = "";
+    setInsufficientCredits(null);
     try {
       const billing = await executeCommerceTool({
         toolCode: "psd_to_umg",
@@ -176,6 +179,11 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
         } catch {
           // best effort
         }
+      }
+      const insufficient = toInsufficientCreditsDetails((error as any)?.payload || null);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
+        return;
       }
       toast({
         title: t("common.error"),
@@ -356,6 +364,7 @@ export default function PsdToUmgTool({ active }: { active: boolean }) {
                 <div className="flex justify-center">
                   <ToolCostBadge cost={creditCost} />
                 </div>
+                {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Faça upload de um .psd para mostrar a estrutura.</p>

@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { executeCommerceTool } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type Preset = "heroic" | "confronto" | "epicidade" | "overview" | "cinematic" | "god_view" | "custom";
 const CameraGizmo3D = lazy(() => import("@/features/tgis-thumb-tools/CameraGizmo3D"));
@@ -44,6 +45,7 @@ export default function CameraControlPage() {
   const [loading, setLoading] = useState(false);
   const [savingResult, setSavingResult] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
   const [resultUrl, setResultUrl] = useState("");
   const [pendingResultAssetId, setPendingResultAssetId] = useState("");
   const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
@@ -83,6 +85,7 @@ export default function CameraControlPage() {
 
   async function runCameraControl() {
     setErrorText("");
+    setInsufficientCredits(null);
     setResultUrl("");
     setPendingResultAssetId("");
     if (!sourceImageUrl) {
@@ -113,9 +116,9 @@ export default function CameraControlPage() {
     setLoading(false);
 
     if (error || data?.success === false) {
-      const code = String((data as any)?.error_code || "");
-      if (code === "INSUFFICIENT_CREDITS") {
-        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      const insufficient = toInsufficientCreditsDetails(data);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
       } else {
         setErrorText(String(error?.message || data?.error || "Falha no camera control."));
       }
@@ -282,6 +285,7 @@ export default function CameraControlPage() {
               <p className="text-center text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                 {loading ? `Processando (${loadingElapsedSec || 1}s)` : "Ajuste estimado: ~20-40s"}
               </p>
+              {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
             </CardContent>
           </Card>

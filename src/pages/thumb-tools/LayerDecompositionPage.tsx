@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { executeCommerceTool } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type LayerItem = {
   index: number;
@@ -32,6 +33,7 @@ export default function LayerDecompositionPage() {
   const [sourceImageUrl, setSourceImageUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
   const [warningText, setWarningText] = useState("");
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -76,6 +78,7 @@ export default function LayerDecompositionPage() {
 
   async function runLayerDecomposition() {
     setErrorText("");
+    setInsufficientCredits(null);
     setWarningText("");
     setLayers([]);
     if (!sourceImageUrl) {
@@ -102,9 +105,9 @@ export default function LayerDecompositionPage() {
     setLoading(false);
 
     if (error || data?.success === false) {
-      const code = String((data as any)?.error_code || "");
-      if (code === "INSUFFICIENT_CREDITS") {
-        setErrorText("Saldo insuficiente. Compre creditos extras para continuar.");
+      const insufficient = toInsufficientCreditsDetails(data);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
       } else {
         setErrorText(String(error?.message || data?.error || "Falha no layer decomposition."));
       }
@@ -224,6 +227,7 @@ export default function LayerDecompositionPage() {
               <div className="flex justify-center">
                 <ToolCostBadge cost={creditCost} />
               </div>
+              {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
               {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
               {warningText ? <p className="text-xs text-amber-500">{warningText}</p> : null}
             </CardContent>

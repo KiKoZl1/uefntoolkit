@@ -287,7 +287,7 @@ const NAV_SECTIONS: NavSection[] = [
     labelKey: "nav.sectionWorkspace",
     contexts: ["app", "admin"],
     visibility: ["authenticated", "client", "editor", "admin"],
-    items: [navItems.workspace, navItems.billing],
+    items: [navItems.workspace],
   },
   {
     id: "thumbTools",
@@ -323,7 +323,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 const PRIMARY_ITEMS_BY_CONTEXT: Record<TopBarContext, string[]> = {
   public: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub"],
-  app: ["workspace", "billing", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub", "reports"],
+  app: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub", "reports"],
   admin: ["adminOverview", "adminReports", "adminIntel", "adminExposure", "adminDppi", "adminTgis", "adminCommerce"],
 };
 

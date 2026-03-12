@@ -2,6 +2,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCommerceRoleFlags } from "../_shared/commerceAuthz.ts";
+import { CommerceToolCode, isCommerceToolCode } from "../_shared/commerceTools.ts";
+import { isStripeTimestampWithinTolerance, parseStripeSignatureHeader } from "../_shared/stripeSignature.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,15 +21,17 @@ type AuthedUser = {
 
 type JsonRecord = Record<string, unknown>;
 
-type ToolCode =
-  | "surprise_gen"
-  | "edit_studio"
-  | "camera_control"
-  | "layer_decomposition"
-  | "psd_to_umg"
-  | "umg_to_verse";
+type ToolCode = CommerceToolCode;
 
 type SubscriptionStatus = "inactive" | "active" | "past_due" | "cancel_at_period_end" | "expired" | "canceled";
+
+type AuthUserSnapshot = {
+  id: string;
+  email: string | null;
+  created_at: string | null;
+  last_sign_in_at: string | null;
+  email_confirmed_at: string | null;
+};
 
 const TOOL_FUNCTION_MAP: Record<Exclude<ToolCode, "psd_to_umg" | "umg_to_verse">, string> = {
   surprise_gen: "tgis-generate",
@@ -45,6 +49,17 @@ function json(payload: unknown, status = 200, extraHeaders: Record<string, strin
       ...extraHeaders,
     },
   });
+}
+
+function internalServerError(context: string, error: unknown): Response {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[commerce] ${context}: ${message}`);
+  return json({ success: false, error: "internal_error" }, 500);
+}
+
+function logServerError(context: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[commerce] ${context}: ${message}`);
 }
 
 function normalizeText(value: unknown): string {
@@ -65,6 +80,88 @@ function envInt(name: string, fallback: number, min = 1, max = 1_000_000): numbe
   const raw = Number(optionalEnv(name));
   if (!Number.isFinite(raw)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(raw)));
+}
+
+function stripeRefId(value: unknown): string {
+  if (typeof value === "string") return normalizeText(value);
+  if (value && typeof value === "object") {
+    const id = normalizeText((value as any).id);
+    if (id) return id;
+  }
+  return "";
+}
+
+function toAuthUserSnapshot(raw: any): AuthUserSnapshot | null {
+  const id = normalizeText(raw?.id);
+  if (!id) return null;
+  return {
+    id,
+    email: normalizeText(raw?.email) || null,
+    created_at: normalizeText(raw?.created_at) || null,
+    last_sign_in_at: normalizeText(raw?.last_sign_in_at) || null,
+    email_confirmed_at: normalizeText(raw?.email_confirmed_at) || null,
+  };
+}
+
+async function getAuthUserByIdSafe(service: ReturnType<typeof createClient>, userId: string): Promise<AuthUserSnapshot | null> {
+  try {
+    const { data, error } = await service.auth.admin.getUserById(userId);
+    if (error) {
+      logServerError("getAuthUserByIdSafe", error);
+      return null;
+    }
+    return toAuthUserSnapshot(data?.user);
+  } catch (error) {
+    logServerError("getAuthUserByIdSafe.catch", error);
+    return null;
+  }
+}
+
+async function lookupAuthUserByEmailSafe(service: ReturnType<typeof createClient>, email: string): Promise<AuthUserSnapshot | null> {
+  const normalizedEmail = normalizeText(email).toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes("@")) return null;
+
+  try {
+    const { data, error } = await service.rpc("commerce_admin_lookup_user_by_email", { p_email: normalizedEmail });
+    if (!error) {
+      const row = Array.isArray(data) ? data[0] : null;
+      if (row?.user_id) {
+        return {
+          id: normalizeText(row.user_id),
+          email: normalizeText(row.email) || null,
+          created_at: normalizeText(row.created_at) || null,
+          last_sign_in_at: normalizeText(row.last_sign_in_at) || null,
+          email_confirmed_at: normalizeText(row.email_confirmed_at) || null,
+        };
+      }
+    } else {
+      logServerError("lookupAuthUserByEmailSafe.rpc", error);
+    }
+  } catch (error) {
+    logServerError("lookupAuthUserByEmailSafe.rpc.catch", error);
+  }
+
+  // Fallback for environments where RPC/schema exposure is inconsistent.
+  const perPage = envInt("COMMERCE_ADMIN_LOOKUP_PAGE_SIZE", 200, 20, 1000);
+  const maxPages = envInt("COMMERCE_ADMIN_LOOKUP_MAX_PAGES", 5, 1, 50);
+  for (let page = 1; page <= maxPages; page += 1) {
+    try {
+      const { data, error } = await service.auth.admin.listUsers({ page, perPage });
+      if (error) {
+        logServerError("lookupAuthUserByEmailSafe.listUsers", error);
+        break;
+      }
+      const users = Array.isArray(data?.users) ? data.users : [];
+      const found = users.find((candidate: any) => normalizeText(candidate?.email).toLowerCase() === normalizedEmail);
+      if (found) return toAuthUserSnapshot(found);
+      if (users.length < perPage) break;
+    } catch (error) {
+      logServerError("lookupAuthUserByEmailSafe.listUsers.catch", error);
+      break;
+    }
+  }
+
+  return null;
 }
 
 function extractBearer(req: Request): string {
@@ -351,10 +448,14 @@ function buildStripeSubscriptionSnapshot(raw: any): {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
 } {
+  const item = Array.isArray(raw?.items?.data) ? raw.items.data[0] : null;
+  const rawCurrentPeriodStart = raw?.current_period_start ?? item?.current_period_start ?? null;
+  const rawCurrentPeriodEnd = raw?.current_period_end ?? item?.current_period_end ?? null;
+
   return {
     status: mapStripeSubscriptionStatus(raw?.status, raw?.cancel_at_period_end),
-    current_period_start: toIsoFromUnix(raw?.current_period_start),
-    current_period_end: toIsoFromUnix(raw?.current_period_end),
+    current_period_start: toIsoFromUnix(rawCurrentPeriodStart),
+    current_period_end: toIsoFromUnix(rawCurrentPeriodEnd),
     cancel_at_period_end: Boolean(raw?.cancel_at_period_end),
   };
 }
@@ -388,6 +489,38 @@ async function stripeFetchSubscriptionDetails(subscriptionId: string): Promise<{
   }
 
   return buildStripeSubscriptionSnapshot(parsed);
+}
+
+async function stripeFetchCheckoutSessionRefs(sessionId: string): Promise<{
+  subscriptionId: string | null;
+  customerId: string | null;
+}> {
+  const stripeKey = optionalEnv("STRIPE_SECRET_KEY");
+  if (!stripeKey) throw new Error("stripe_not_configured");
+
+  const resp = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${stripeKey}`,
+    },
+  });
+
+  const text = await resp.text();
+  let parsed: any = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { error: { message: text } };
+  }
+
+  if (!resp.ok) {
+    throw new Error(normalizeText(parsed?.error?.message) || `stripe_checkout_session_http_${resp.status}`);
+  }
+
+  return {
+    subscriptionId: stripeRefId(parsed?.subscription) || null,
+    customerId: stripeRefId(parsed?.customer) || null,
+  };
 }
 
 function mapPackCodeToConfigKey(packCode: string): string | null {
@@ -428,14 +561,23 @@ function buildToolCostCatalog(configRows: Array<{ config_key: string; value_json
   };
 }
 
-function stripeVerifySignature(rawBody: string, signatureHeader: string, secret: string): Promise<boolean> {
+function stripeVerifySignature(
+  rawBody: string,
+  signatureHeader: string,
+  secret: string,
+  toleranceSeconds: number,
+): Promise<boolean> {
   return (async () => {
-    const parts = signatureHeader.split(",").map((x) => x.trim());
-    const t = parts.find((x) => x.startsWith("t="))?.slice(2) || "";
-    const v1 = parts.find((x) => x.startsWith("v1="))?.slice(3) || "";
-    if (!t || !v1) return false;
-    const expected = await hmacSha256Hex(secret, `${t}.${rawBody}`);
-    return constantTimeEqual(v1, expected);
+    const parsed = parseStripeSignatureHeader(signatureHeader);
+    if (!parsed.timestamp || parsed.signaturesV1.length === 0) return false;
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    if (!isStripeTimestampWithinTolerance(parsed.timestamp, nowUnix, toleranceSeconds)) {
+      return false;
+    }
+
+    const expected = await hmacSha256Hex(secret, `${parsed.timestamp}.${rawBody}`);
+    return parsed.signaturesV1.some((candidate) => constantTimeEqual(candidate, expected));
   })();
 }
 
@@ -462,11 +604,16 @@ async function handleMeCredits(req: Request, service: ReturnType<typeof createCl
   await service.rpc("commerce_open_cycle_if_needed", { p_user_id: user.userId, p_now: new Date().toISOString(), p_idempotency_prefix: "cycle_open" });
   await service.rpc("commerce_sync_access_state", { p_user_id: user.userId });
 
-  const [{ data: account }, { data: wallet }, { data: sub }] = await Promise.all([
+  const [{ data: account }, { data: wallet }, { data: subRaw }] = await Promise.all([
     service.from("commerce_accounts").select("*").eq("user_id", user.userId).maybeSingle(),
     service.from("commerce_wallets").select("*").eq("user_id", user.userId).maybeSingle(),
     service.from("commerce_subscriptions").select("*").eq("user_id", user.userId).maybeSingle(),
   ]);
+  const sub = await maybeReconcileStripeSubscriptionPeriods({
+    service,
+    userId: user.userId,
+    sub: subRaw,
+  });
 
   let cycle: any = null;
   if (wallet?.current_cycle_id) {
@@ -534,7 +681,7 @@ async function handleMeLedger(req: Request, service: ReturnType<typeof createCli
   if (beforeId > 0) query = query.lt("id", beforeId);
 
   const { data, error } = await query;
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleMeLedger", error);
 
   return json({ success: true, items: data || [] });
 }
@@ -553,7 +700,7 @@ async function handleMeUsageSummary(req: Request, service: ReturnType<typeof cre
   if (cycleId) query = query.eq("cycle_id", cycleId);
 
   const { data, error } = await query;
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleMeUsageSummary", error);
 
   const byTool: Record<string, number> = {};
   let total = 0;
@@ -569,17 +716,19 @@ async function handleMeUsageSummary(req: Request, service: ReturnType<typeof cre
 
 async function handleToolsExecute(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
   const body = await readJsonBody(req);
-  const toolCode = normalizeText(body.tool_code) as ToolCode;
+  const toolCodeRaw = normalizeText(body.tool_code);
   const requestId = normalizeText(body.request_id) || crypto.randomUUID();
   const idempotencyKey = getIdempotencyKey(req, body);
   const payload = (body.payload && typeof body.payload === "object") ? body.payload as JsonRecord : {};
 
   if (!idempotencyKey) return json({ success: false, error: "missing_idempotency_key" }, 400);
-  if (!toolCode) return json({ success: false, error: "missing_tool_code" }, 400);
+  if (!toolCodeRaw) return json({ success: false, error: "missing_tool_code" }, 400);
+  if (!isCommerceToolCode(toolCodeRaw)) return json({ success: false, error: "invalid_tool_code" }, 400);
+  const toolCode = toolCodeRaw;
 
   const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
   const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
-  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
+  if (ensureRes.error) return internalServerError("handleToolsExecute.ensureAccount", ensureRes.error);
 
   const payloadHash = await sha256Hex(JSON.stringify(payload));
 
@@ -591,7 +740,7 @@ async function handleToolsExecute(req: Request, service: ReturnType<typeof creat
     p_payload_hash: payloadHash,
   });
 
-  if (debitError) return json({ success: false, error: debitError.message }, 500);
+  if (debitError) return internalServerError("handleToolsExecute.debitToolCredits", debitError);
 
   const debit = (debitData || {}) as any;
   if (!debit.success) {
@@ -726,7 +875,7 @@ async function handleToolsReverse(req: Request, service: ReturnType<typeof creat
     p_actor_role: user.isAdmin ? "admin" : "user",
   });
 
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleToolsReverse", error);
   return json({ success: true, reversal: data || null });
 }
 
@@ -736,7 +885,7 @@ async function handleBillingPacksList(service: ReturnType<typeof createClient>) 
     .select("config_key,value_json")
     .in("config_key", ["enable_credit_packs", "pack_small_credits", "pack_medium_credits", "pack_large_credits"]);
 
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleBillingPacksList", error);
 
   const rows = Array.isArray(data) ? data : [];
   const enabled = rows.find((r) => r.config_key === "enable_credit_packs")?.value_json?.value !== false;
@@ -756,7 +905,7 @@ async function handleCatalogToolCosts(service: ReturnType<typeof createClient>) 
       "tool_cost_umg_to_verse",
     ]);
 
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleCatalogToolCosts", error);
   return json({ success: true, tool_costs: buildToolCostCatalog(Array.isArray(data) ? (data as any) : []) });
 }
 
@@ -805,7 +954,7 @@ async function resolveUserIdForSubscriptionEvent(service: ReturnType<typeof crea
   const metadataUserId = normalizeText(object?.metadata?.user_id);
   if (metadataUserId) return metadataUserId;
 
-  const providerSubscriptionId = normalizeText(object?.subscription || object?.id);
+  const providerSubscriptionId = stripeRefId(object?.subscription) || stripeRefId(object?.id);
   if (providerSubscriptionId) {
     const bySubscription = await service
       .from("commerce_subscriptions")
@@ -816,7 +965,7 @@ async function resolveUserIdForSubscriptionEvent(service: ReturnType<typeof crea
     if (userId) return userId;
   }
 
-  const providerCustomerId = normalizeText(object?.customer);
+  const providerCustomerId = stripeRefId(object?.customer);
   if (providerCustomerId) {
     const byCustomer = await service
       .from("commerce_subscriptions")
@@ -865,6 +1014,67 @@ async function upsertStripeSubscriptionState(args: {
   await args.service.rpc("commerce_sync_access_state", { p_user_id: args.userId });
 }
 
+async function maybeReconcileStripeSubscriptionPeriods(args: {
+  service: ReturnType<typeof createClient>;
+  userId: string;
+  sub: any;
+}): Promise<any> {
+  const sub = args.sub;
+  if (!sub || normalizeText(sub.provider).toLowerCase() !== "stripe") return sub;
+
+  const hasPeriod = Boolean(sub.current_period_start && sub.current_period_end);
+  const status = normalizeText(sub.status).toLowerCase();
+  const shouldTryReconcile = !hasPeriod && (status === "active" || status === "past_due" || status === "cancel_at_period_end");
+  if (!shouldTryReconcile) return sub;
+
+  let providerSubscriptionId = stripeRefId(sub.provider_subscription_id);
+  let providerCustomerId = stripeRefId(sub.provider_customer_id) || null;
+
+  if (!providerSubscriptionId) {
+    const lastCheckoutSessionId = stripeRefId(sub?.metadata_json?.last_checkout_session_id);
+    if (lastCheckoutSessionId) {
+      try {
+        const refs = await stripeFetchCheckoutSessionRefs(lastCheckoutSessionId);
+        providerSubscriptionId = refs.subscriptionId || "";
+        providerCustomerId = providerCustomerId || refs.customerId;
+      } catch (error) {
+        logServerError("maybeReconcileStripeSubscriptionPeriods.checkoutRefs", error);
+      }
+    }
+  }
+
+  if (!providerSubscriptionId) return sub;
+
+  try {
+    const snapshot = await stripeFetchSubscriptionDetails(providerSubscriptionId);
+    await upsertStripeSubscriptionState({
+      service: args.service,
+      userId: args.userId,
+      providerCustomerId: providerCustomerId || null,
+      providerSubscriptionId,
+      snapshot,
+      metadata: {
+        ...(sub?.metadata_json || {}),
+        reconciled_missing_period_at: new Date().toISOString(),
+      },
+    });
+
+    const refreshed = await args.service
+      .from("commerce_subscriptions")
+      .select("*")
+      .eq("user_id", args.userId)
+      .maybeSingle();
+    if (refreshed.error) {
+      logServerError("maybeReconcileStripeSubscriptionPeriods.refresh", refreshed.error);
+      return sub;
+    }
+    return refreshed.data || sub;
+  } catch (error) {
+    logServerError("maybeReconcileStripeSubscriptionPeriods.fetch", error);
+    return sub;
+  }
+}
+
 async function handleBillingSubscriptionCheckout(req: Request, service: ReturnType<typeof createClient>, user: AuthedUser) {
   const body = await readJsonBody(req);
   const idempotencyKey = getIdempotencyKey(req, body);
@@ -880,7 +1090,7 @@ async function handleBillingSubscriptionCheckout(req: Request, service: ReturnTy
   const cancelUrl = normalizeText(body.cancel_url) || `${appBase}/app/billing?checkout=cancel`;
   const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
   const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
-  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
+  if (ensureRes.error) return internalServerError("handleBillingSubscriptionCheckout.ensureAccount", ensureRes.error);
 
   try {
     const session = await stripeCreateCheckoutSession({
@@ -899,7 +1109,8 @@ async function handleBillingSubscriptionCheckout(req: Request, service: ReturnTy
 
     return json({ success: true, checkout_url: session.url, checkout_session_id: session.id });
   } catch (error) {
-    return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    logServerError("handleBillingSubscriptionCheckout.createCheckout", error);
+    return json({ success: false, error: "stripe_upstream_error" }, 502);
   }
 }
 
@@ -928,7 +1139,7 @@ async function handleBillingPackCheckout(req: Request, service: ReturnType<typeo
   const cancelUrl = normalizeText(body.cancel_url) || `${appBase}/app/credits?pack=cancel`;
   const deviceFingerprintHash = extractDeviceFingerprintHash(req, body);
   const ensureRes = await service.rpc("commerce_ensure_account", { p_user_id: user.userId, p_device_fingerprint_hash: deviceFingerprintHash });
-  if (ensureRes.error) return json({ success: false, error: ensureRes.error.message }, 500);
+  if (ensureRes.error) return internalServerError("handleBillingPackCheckout.ensureAccount", ensureRes.error);
 
   try {
     const session = await stripeCreateCheckoutSession({
@@ -958,7 +1169,8 @@ async function handleBillingPackCheckout(req: Request, service: ReturnType<typeo
 
     return json({ success: true, checkout_url: session.url, checkout_session_id: session.id, pack_code: packCode, credits: Math.floor(credits) });
   } catch (error) {
-    return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    logServerError("handleBillingPackCheckout.createCheckout", error);
+    return json({ success: false, error: "stripe_upstream_error" }, 502);
   }
 }
 
@@ -966,8 +1178,9 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
   const rawBody = await req.text();
   const sig = normalizeText(req.headers.get("stripe-signature"));
   const webhookSecret = optionalEnv("STRIPE_WEBHOOK_SECRET");
+  const signatureToleranceSeconds = envInt("STRIPE_WEBHOOK_TOLERANCE_SECONDS", 300, 30, 3600);
   if (!webhookSecret) return json({ success: false, error: "stripe_webhook_secret_not_configured" }, 503);
-  const valid = await stripeVerifySignature(rawBody, sig, webhookSecret);
+  const valid = await stripeVerifySignature(rawBody, sig, webhookSecret, signatureToleranceSeconds);
   if (!valid) return json({ success: false, error: "invalid_webhook_signature" }, 401);
 
   let payload: any;
@@ -1000,7 +1213,7 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
     .select("id")
     .single();
 
-  if (webhookInsertError) return json({ success: false, error: webhookInsertError.message }, 500);
+  if (webhookInsertError) return internalServerError("handleWebhook.insertEvent", webhookInsertError);
 
   try {
     const object = payload?.data?.object || {};
@@ -1011,7 +1224,7 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
       const userId = normalizeText(metadata.user_id);
 
       if (flow === "subscription" && userId) {
-        const providerSubscriptionId = normalizeText(object?.subscription);
+        const providerSubscriptionId = stripeRefId(object?.subscription);
         let subStatus: SubscriptionStatus = "active";
         let currentPeriodStart: string | null = null;
         let currentPeriodEnd: string | null = null;
@@ -1033,13 +1246,13 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
         await service.from("commerce_subscriptions").upsert({
           user_id: userId,
           provider: "stripe",
-          provider_customer_id: normalizeText(object?.customer),
+          provider_customer_id: stripeRefId(object?.customer) || null,
           provider_subscription_id: providerSubscriptionId || null,
           status: subStatus,
           current_period_start: currentPeriodStart,
           current_period_end: currentPeriodEnd,
           cancel_at_period_end: cancelAtPeriodEnd,
-          metadata_json: { last_checkout_session_id: normalizeText(object?.id) },
+          metadata_json: { last_checkout_session_id: stripeRefId(object?.id) },
         }, { onConflict: "user_id" });
 
         await service.from("commerce_accounts").upsert({ user_id: userId, plan_type: "pro", access_state: "pro_active" }, { onConflict: "user_id" });
@@ -1059,20 +1272,20 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
           p_pack_code: packCode,
           p_credits: credits,
           p_idempotency_key: `stripe:${eventId}:pack_grant`,
-          p_reference_id: normalizeText(object?.id),
+          p_reference_id: stripeRefId(object?.id),
           p_expires_at: null,
         });
 
         await service
           .from("commerce_pack_purchases")
-          .update({ status: "completed", provider_payment_intent_id: normalizeText(object?.payment_intent) || null, metadata_json: { event_id: eventId } })
-          .eq("provider_checkout_session_id", normalizeText(object?.id));
+          .update({ status: "completed", provider_payment_intent_id: stripeRefId(object?.payment_intent) || null, metadata_json: { event_id: eventId } })
+          .eq("provider_checkout_session_id", stripeRefId(object?.id));
       }
     }
 
     if (eventType === "invoice.paid" || eventType === "invoice.payment_failed") {
       const userId = await resolveUserIdForSubscriptionEvent(service, object);
-      const providerSubscriptionId = normalizeText(object?.subscription);
+      const providerSubscriptionId = stripeRefId(object?.subscription);
       if (userId && providerSubscriptionId) {
         let snapshot = buildStripeSubscriptionSnapshot({
           status: eventType === "invoice.payment_failed" ? "past_due" : "active",
@@ -1088,17 +1301,17 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
         await upsertStripeSubscriptionState({
           service,
           userId,
-          providerCustomerId: normalizeText(object?.customer) || null,
+          providerCustomerId: stripeRefId(object?.customer) || null,
           providerSubscriptionId,
           snapshot,
-          metadata: { last_invoice_event: eventType, invoice_id: normalizeText(object?.id) || null },
+          metadata: { last_invoice_event: eventType, invoice_id: stripeRefId(object?.id) || null },
         });
       }
     }
 
     if (eventType === "customer.subscription.updated" || eventType === "customer.subscription.deleted") {
       const userId = await resolveUserIdForSubscriptionEvent(service, object);
-      const providerSubscriptionId = normalizeText(object?.id);
+      const providerSubscriptionId = stripeRefId(object?.id);
       if (userId && providerSubscriptionId) {
         const snapshot = eventType === "customer.subscription.deleted"
           ? {
@@ -1112,7 +1325,7 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
         await upsertStripeSubscriptionState({
           service,
           userId,
-          providerCustomerId: normalizeText(object?.customer) || null,
+          providerCustomerId: stripeRefId(object?.customer) || null,
           providerSubscriptionId,
           snapshot,
           metadata: { last_subscription_event: eventType },
@@ -1125,12 +1338,14 @@ async function handleWebhook(req: Request, service: ReturnType<typeof createClie
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await service.from("commerce_webhook_events").update({ status: "failed", error_text: message }).eq("id", webhookRow.id);
-    return json({ success: false, error: message }, 500);
+    return internalServerError("handleWebhook.processEvent", error);
   }
 }
 
 async function handleAdminUserOverview(service: ReturnType<typeof createClient>, userId: string) {
-  const [accountRes, walletRes, subRes, ledgerRes, attemptsRes, abuseRes] = await Promise.all([
+  const [authUser, roleRes, accountRes, walletRes, subRes, ledgerRes, attemptsRes, abuseRes] = await Promise.all([
+    getAuthUserByIdSafe(service, userId),
+    service.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
     service.from("commerce_accounts").select("*").eq("user_id", userId).maybeSingle(),
     service.from("commerce_wallets").select("*").eq("user_id", userId).maybeSingle(),
     service.from("commerce_subscriptions").select("*").eq("user_id", userId).maybeSingle(),
@@ -1139,18 +1354,114 @@ async function handleAdminUserOverview(service: ReturnType<typeof createClient>,
     service.from("commerce_abuse_signals").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(50),
   ]);
 
-  if (accountRes.error || walletRes.error || subRes.error || ledgerRes.error || attemptsRes.error || abuseRes.error) {
+  if (roleRes.error || accountRes.error || walletRes.error || subRes.error || ledgerRes.error || attemptsRes.error || abuseRes.error) {
     return json({ success: false, error: "admin_user_query_failed" }, 500);
   }
 
+  if (!authUser && !accountRes.data && !walletRes.data && !subRes.data && (ledgerRes.data || []).length === 0) {
+    return json({ success: false, error: "user_not_found" }, 404);
+  }
+  const reconciledSub = await maybeReconcileStripeSubscriptionPeriods({
+    service,
+    userId,
+    sub: subRes.data || null,
+  });
+  const ledgerRows = Array.isArray(ledgerRes.data) ? ledgerRes.data : [];
+  const actorUserIds = Array.from(new Set(
+    ledgerRows
+      .map((entry: any) => normalizeText(entry?.actor_user_id))
+      .filter(Boolean),
+  ));
+
+  const actorProfileMap = new Map<string, { display_name: string | null; email: string | null }>();
+  if (actorUserIds.length > 0) {
+    try {
+      const { data: profileRows, error: profileError } = await service
+        .from("profiles")
+        .select("user_id,display_name")
+        .in("user_id", actorUserIds);
+      if (profileError) {
+        logServerError("handleAdminUserOverview.actorProfiles", profileError);
+      } else {
+        for (const row of profileRows || []) {
+          const id = normalizeText((row as any)?.user_id);
+          if (!id) continue;
+          actorProfileMap.set(id, {
+            display_name: normalizeText((row as any)?.display_name) || null,
+            email: null,
+          });
+        }
+      }
+    } catch (error) {
+      logServerError("handleAdminUserOverview.actorProfiles.catch", error);
+    }
+
+    const actorAuthSnapshots = await Promise.all(actorUserIds.map((id) => getAuthUserByIdSafe(service, id)));
+    actorUserIds.forEach((id, idx) => {
+      const current = actorProfileMap.get(id) || { display_name: null, email: null };
+      const auth = actorAuthSnapshots[idx];
+      actorProfileMap.set(id, {
+        display_name: current.display_name || null,
+        email: auth?.email || null,
+      });
+    });
+  }
+
+  const enrichedLedger = ledgerRows.map((entry: any) => {
+    const actorId = normalizeText(entry?.actor_user_id);
+    const actorProfile = actorId ? actorProfileMap.get(actorId) : undefined;
+    return {
+      ...entry,
+      actor_display_name: actorProfile?.display_name || null,
+      actor_email: actorProfile?.email || null,
+    };
+  });
+
   return json({
     success: true,
+    user: {
+      id: authUser?.id || userId,
+      email: authUser?.email || null,
+      created_at: authUser?.created_at || null,
+      last_sign_in_at: authUser?.last_sign_in_at || null,
+      email_confirmed_at: authUser?.email_confirmed_at || null,
+      role: normalizeText(roleRes.data?.role) || null,
+    },
     account: accountRes.data || null,
     wallet: walletRes.data || null,
-    subscription: subRes.data || null,
-    ledger: ledgerRes.data || [],
+    summary: buildWalletSummary(walletRes.data || null, accountRes.data?.plan_type),
+    subscription: reconciledSub || null,
+    ledger: enrichedLedger,
     attempts: attemptsRes.data || [],
     abuse_signals: abuseRes.data || [],
+  });
+}
+
+async function handleAdminUserLookup(req: Request, service: ReturnType<typeof createClient>) {
+  const url = new URL(req.url);
+  const email = normalizeText(url.searchParams.get("email")).toLowerCase();
+  if (!email || !email.includes("@")) {
+    return json({ success: false, error: "invalid_email" }, 400);
+  }
+
+  const authUser = await lookupAuthUserByEmailSafe(service, email);
+  if (!authUser?.id) return json({ success: false, error: "user_not_found" }, 404);
+
+  const { data: roleData, error: roleError } = await service
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", authUser.id)
+    .maybeSingle();
+  if (roleError) logServerError("handleAdminUserLookup.role", roleError);
+
+  return json({
+    success: true,
+    user_id: authUser.id,
+    email: authUser.email || null,
+    created_at: authUser.created_at || null,
+    last_sign_in_at: authUser.last_sign_in_at || null,
+    email_confirmed_at: authUser.email_confirmed_at || null,
+    role: normalizeText(roleData?.role) || null,
   });
 }
 
@@ -1180,7 +1491,7 @@ async function handleAdminCreditAdjust(req: Request, service: ReturnType<typeof 
     p_reference_id: normalizeText(body.reference_id) || null,
   });
 
-  if (error) return json({ success: false, error: error.message }, 500);
+  if (error) return internalServerError("handleAdminCreditAdjust", error);
   return json({ success: true, result: data || null });
 }
 
@@ -1206,7 +1517,7 @@ async function handleAdminAbuseReview(req: Request, service: ReturnType<typeof c
   }
 
   const { error: updateError } = await service.from("commerce_accounts").update(patch).eq("user_id", targetUserId);
-  if (updateError) return json({ success: false, error: updateError.message }, 500);
+  if (updateError) return internalServerError("handleAdminAbuseReview.updateAccount", updateError);
 
   await service.from("commerce_abuse_signals").insert({
     user_id: targetUserId,
@@ -1231,7 +1542,7 @@ async function handleAdminSuspend(req: Request, service: ReturnType<typeof creat
 
   if (suspend) {
     const { error } = await service.from("commerce_accounts").update({ access_state: "suspended" }).eq("user_id", targetUserId);
-    if (error) return json({ success: false, error: error.message }, 500);
+    if (error) return internalServerError("handleAdminSuspend.updateAccount", error);
   } else {
     await service.rpc("commerce_sync_access_state", { p_user_id: targetUserId });
   }
@@ -1348,6 +1659,12 @@ serve(async (req) => {
       return await handleWebhook(req, service);
     }
 
+    if (req.method === "GET" && route === "/admin/user-lookup") {
+      if (!user) throw new Error("unauthorized");
+      requireFinancialAdmin(user);
+      return await handleAdminUserLookup(req, service);
+    }
+
     if (req.method === "GET" && route.startsWith("/admin/user/")) {
       if (!user) throw new Error("unauthorized");
       requireFinancialAdmin(user);
@@ -1384,7 +1701,7 @@ serve(async (req) => {
     if (req.method === "POST" && route === "/internal/jobs/weekly-release") {
       requireInternalOrAdmin(req, user);
       const { data, error } = await service.rpc("commerce_weekly_release_job", { p_now: new Date().toISOString(), p_limit: 1000 });
-      if (error) return json({ success: false, error: error.message }, 500);
+      if (error) return internalServerError("internal.jobs.weeklyRelease", error);
       return json({ success: true, result: data || null });
     }
 
@@ -1393,7 +1710,7 @@ serve(async (req) => {
       const body = await readJsonBody(req);
       const limit = Math.max(1, Math.min(5000, Math.floor(Number(body.limit || 1000))));
       const { data, error } = await service.rpc("commerce_reconcile_job", { p_limit: limit });
-      if (error) return json({ success: false, error: error.message }, 500);
+      if (error) return internalServerError("internal.jobs.reconcile", error);
       return json({ success: true, result: data || null });
     }
 
@@ -1404,9 +1721,8 @@ serve(async (req) => {
       ? 401
       : message === "forbidden"
         ? 403
-        : message.includes("stripe")
-          ? 502
-          : 500;
+        : 500;
+    if (status === 500) return internalServerError("serve.root", error);
     return json({ success: false, error: message }, status);
   }
 });

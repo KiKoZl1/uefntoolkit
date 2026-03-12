@@ -12,6 +12,7 @@ import type { GeneratedOutput, ParsedWidget, WidgetKitHistoryItem } from "@/type
 import { executeCommerceTool, reverseCommerceOperation } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type UmgToolStatus = "empty" | "parsing" | "preview" | "ready" | "no_fields" | "error_format";
 
@@ -62,6 +63,7 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
 
   const [parsedWidget, setParsedWidget] = useState<ParsedWidget | null>(null);
   const [generated, setGenerated] = useState<GeneratedOutput | null>(null);
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
 
   useEffect(() => {
     if (!active || historyLoadedOnce) return;
@@ -127,6 +129,7 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
   async function handleGenerate(saveHistory: boolean) {
     if (!parsedWidget || parsedWidget.fields.length === 0) return;
     let operationId = "";
+    setInsufficientCredits(null);
     try {
       const billing = await executeCommerceTool({
         toolCode: "umg_to_verse",
@@ -173,6 +176,11 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
         } catch {
           // best effort
         }
+      }
+      const insufficient = toInsufficientCreditsDetails((error as any)?.payload || null);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
+        return;
       }
       toast({
         title: t("common.error"),
@@ -338,6 +346,7 @@ export default function UmgToVerseTool({ active }: { active: boolean }) {
                 <div className="flex justify-center">
                   <ToolCostBadge cost={creditCost} />
                 </div>
+                {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Upload a .uasset to map Verse fields and prepare generation.</p>

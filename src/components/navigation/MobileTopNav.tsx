@@ -12,6 +12,7 @@ import { PlatformBrand } from "@/components/brand/PlatformBrand";
 import { AuthGateDialog } from "@/components/navigation/AuthGateDialog";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { getToolCodeForNavItem } from "@/lib/commerce/toolCosts";
+import { CreditIcon } from "@/components/commerce/CreditIcon";
 
 interface MobileTopNavProps {
   context: TopBarContext;
@@ -90,8 +91,9 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
                                 {t(item.labelKey)}
                               </div>
                               {toolCost > 0 ? (
-                                <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-                                  {toolCost} cr
+                                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                  <CreditIcon className="h-3.5 w-3.5" glyphClassName="h-2 w-2" />
+                                  {toolCost}
                                 </span>
                               ) : null}
                             </div>
@@ -119,8 +121,9 @@ export const MobileTopNav = memo(function MobileTopNav({ context, sections, acce
                               {t(item.labelKey)}
                             </div>
                             {toolCost > 0 ? (
-                              <span className="inline-flex shrink-0 items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-                                {toolCost} cr
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                                <CreditIcon className="h-3.5 w-3.5" glyphClassName="h-2 w-2" />
+                                {toolCost}
                               </span>
                             ) : null}
                           </div>

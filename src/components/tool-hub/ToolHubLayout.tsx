@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ToolHubConfig, ToolHubToolConfig } from "@/tool-hubs/registry";
 import { cn } from "@/lib/utils";
 import { useToolCosts } from "@/hooks/useToolCosts";
+import { CreditIcon } from "@/components/commerce/CreditIcon";
 
 interface ToolHubLayoutProps {
   hub: ToolHubConfig;
@@ -46,8 +47,9 @@ export function ToolHubLayout({ hub, isAuthenticated = true, onProtectedToolClic
                   <div className="flex flex-wrap items-center gap-2">
                     <CardTitle className="text-xl font-semibold tracking-tight">{t(tool.titleKey)}</CardTitle>
                     {toolCost > 0 ? (
-                      <span className="inline-flex items-center rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-                        {toolCost} creditos
+                      <span className="inline-flex items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                        <CreditIcon className="h-3.5 w-3.5" glyphClassName="h-2 w-2" />
+                        {toolCost}
                       </span>
                     ) : null}
                   </div>

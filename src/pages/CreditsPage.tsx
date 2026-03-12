@@ -180,7 +180,10 @@ export default function CreditsPage() {
   }
 
   const wallet = credits?.wallet || {};
-  const spendableNow = Number(wallet.weekly_wallet || 0) + Number(wallet.free_monthly_remaining || 0) + Number(wallet.extra_wallet || 0);
+  const spendableNow = Number(
+    credits?.summary?.spendable_now ??
+      (Number(wallet.weekly_wallet || 0) + Number(wallet.free_monthly_remaining || 0) + Number(wallet.extra_wallet || 0)),
+  );
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -222,7 +225,7 @@ export default function CreditsPage() {
         </Card>
       </div>
 
-      <Card>
+      <Card id="credit-packs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Wallet className="h-5 w-5" />

@@ -15,6 +15,7 @@ import type { TgisGenerateResponse } from "@/types/tgis";
 import { executeCommerceTool } from "@/lib/commerce/client";
 import { useToolCosts } from "@/hooks/useToolCosts";
 import { ToolCostBadge } from "@/components/commerce/ToolCostBadge";
+import { InsufficientCreditsCallout, toInsufficientCreditsDetails } from "@/components/commerce/InsufficientCreditsCallout";
 
 type SkinSearchItem = {
   id: string;
@@ -136,6 +137,7 @@ export default function ThumbGenerator() {
 
   const [result, setResult] = useState<TgisGenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [insufficientCredits, setInsufficientCredits] = useState<ReturnType<typeof toInsufficientCreditsDetails>>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
   const [rewriteOriginalPrompt, setRewriteOriginalPrompt] = useState<string | null>(null);
@@ -264,6 +266,7 @@ export default function ThumbGenerator() {
   async function handleGenerate(ev?: FormEvent) {
     ev?.preventDefault();
     setError(null);
+    setInsufficientCredits(null);
 
     if (!prompt.trim()) {
       setError("Prompt e obrigatorio.");
@@ -308,9 +311,9 @@ export default function ThumbGenerator() {
     setLoading(false);
 
     if (error || data?.success === false) {
-      const code = String((data as any)?.error_code || "");
-      if (code === "INSUFFICIENT_CREDITS") {
-        setError("Saldo insuficiente. Compre creditos extras para continuar.");
+      const insufficient = toInsufficientCreditsDetails(data);
+      if (insufficient) {
+        setInsufficientCredits(insufficient);
       } else {
         setError(error?.message || data?.error || "Falha na geracao.");
       }
@@ -579,9 +582,8 @@ export default function ThumbGenerator() {
               </p>
             </div>
 
-            {error ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-            ) : null}
+            {insufficientCredits ? <InsufficientCreditsCallout details={insufficientCredits} onDismiss={() => setInsufficientCredits(null)} /> : null}
+            {error ? <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div> : null}
             </CardContent>
           </Card>
         </section>
