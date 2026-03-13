@@ -10,6 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useTranslation } from "react-i18next";
 import { PlatformBrand } from "@/components/brand/PlatformBrand";
+import { getAuthRedirectUrl } from "@/lib/auth/redirect";
 
 export default function Auth() {
   const { t } = useTranslation();
@@ -98,7 +99,7 @@ export default function Auth() {
                 const { error } = await supabase.auth.signInWithOAuth({
                   provider: "google",
                   options: {
-                    redirectTo: `${window.location.origin}/app`,
+                    redirectTo: getAuthRedirectUrl("/app"),
                   },
                 });
                 if (error) toast({ title: t("auth.googleError"), description: error.message, variant: "destructive" });

@@ -1,6 +1,7 @@
-﻿import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { getAuthRedirectBaseUrl } from "@/lib/auth/redirect";
 
 type AppRole = "admin" | "editor" | "client";
 
@@ -160,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: getAuthRedirectBaseUrl(),
         data: { display_name: displayName },
       },
     });
