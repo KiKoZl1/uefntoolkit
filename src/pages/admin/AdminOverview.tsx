@@ -501,6 +501,7 @@ export default function AdminOverview() {
 
   // Backfill collections
   const [backfillLoading, setBackfillLoading] = useState(false);
+  const [pendingSupportCount, setPendingSupportCount] = useState(0);
 
   const addLog = useCallback((msg: string) => {
     setLogs(p => [...p.slice(-80), { time: timeNow(), message: msg }]);
@@ -1151,6 +1152,14 @@ export default function AdminOverview() {
     if (data) setReports(data);
   }, []);
 
+  const fetchSupportPending = useCallback(async () => {
+    const { count } = await supabase
+      .from("support_tickets" as any)
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending_human");
+    setPendingSupportCount(Number(count || 0));
+  }, []);
+
   // ─── Polling ──────────────────────────────────────────────
 
   // Fast polling for metadata (15s), slower for heavy blocks (60s), only while tab is visible.
@@ -1181,6 +1190,7 @@ export default function AdminOverview() {
           fetchRalph(),
           fetchCrons(),
           fetchReports(),
+          fetchSupportPending(),
         ]);
       } finally {
         slowPollInFlightRef.current = false;
@@ -1211,7 +1221,7 @@ export default function AdminOverview() {
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
     };
-  }, [fetchOverviewBundle, fetchRalph, fetchCrons, fetchReports]);
+  }, [fetchOverviewBundle, fetchRalph, fetchCrons, fetchReports, fetchSupportPending]);
 
   // ─── Weekly pipeline (preserved logic) ────────────────────
 
@@ -1492,6 +1502,15 @@ export default function AdminOverview() {
             <div className="flex items-center gap-1.5"><HealthDot status={reportHealth} label={generating ? "Em andamento" : "Idle"} /><span className="text-muted-foreground">Report</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={monitoringStatus} label={monitoringOffline ? "Monitoramento offline" : monitoringLagging ? "Monitoramento com atraso de refresh" : `${alertBad.length} alertas ativos`} /><span className="text-muted-foreground">Alertas</span></div>
             <div className="flex items-center gap-1.5"><HealthDot status={cronHealth} label={`${cronActiveCount}/${crons.length || 0} ativos`} /><span className="text-muted-foreground">Crons</span></div>
+            <div className="flex items-center gap-1.5">
+              <HealthDot status={pendingSupportCount > 0 ? "warn" : "ok"} label={pendingSupportCount > 0 ? `${pendingSupportCount} ticket(s) aguardando resposta` : "Nenhum ticket pendente"} />
+              <span className="text-muted-foreground">Support</span>
+              {pendingSupportCount > 0 ? (
+                <Link to="/admin/support" className="text-[11px] text-yellow-500 underline">
+                  View
+                </Link>
+              ) : null}
+            </div>
           </div>
         </CardContent>
       </Card>

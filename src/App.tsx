@@ -3,14 +3,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AdminRoute } from "@/components/AdminRoute";
 import { PageState } from "@/components/ui/page-state";
 
 const SmartLayout = lazy(() => import("./components/SmartLayout"));
-const AppLayout = lazy(() => import("./components/AppLayout"));
 const AdminLayout = lazy(() => import("./components/AdminLayout"));
 
 // Public pages
@@ -22,6 +21,7 @@ const IslandPage = lazy(() => import("./pages/public/IslandPage"));
 const PublicAnalyticsToolsHub = lazy(() => import("./pages/tools/PublicAnalyticsToolsHub"));
 const PublicThumbToolsHub = lazy(() => import("./pages/tools/PublicThumbToolsHub"));
 const PublicWidgetKitHub = lazy(() => import("./pages/tools/PublicWidgetKitHub"));
+const Support = lazy(() => import("./pages/public/Support"));
 const Auth = lazy(() => import("./pages/Auth"));
 
 // Client pages
@@ -68,6 +68,8 @@ const AdminTgisCosts = lazy(() => import("./pages/admin/tgis/AdminTgisCosts"));
 const AdminTgisSafety = lazy(() => import("./pages/admin/tgis/AdminTgisSafety"));
 const AdminTgisThumbTools = lazy(() => import("./pages/admin/tgis/AdminTgisThumbTools"));
 const AdminCommerce = lazy(() => import("./pages/admin/AdminCommerce"));
+const AdminSupport = lazy(() => import("./pages/admin/support/AdminSupport"));
+const AdminSupportTicket = lazy(() => import("./pages/admin/support/AdminSupportTicket"));
 
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -108,33 +110,34 @@ const App = () => (
                 <Route path="/tools/analytics" element={<PublicAnalyticsToolsHub />} />
                 <Route path="/tools/thumb-tools" element={<PublicThumbToolsHub />} />
                 <Route path="/tools/widgetkit" element={<PublicWidgetKitHub />} />
+                <Route path="/support" element={<Support />} />
+
+                {/* Client (auth required) */}
+                <Route path="/app" element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
+                  <Route index element={<AppDashboard />} />
+                  <Route path="analytics-tools" element={<AnalyticsToolsHub />} />
+                  <Route path="projects/:id" element={<ProjectDetail />} />
+                  <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
+                  <Route path="island-lookup" element={<IslandLookup />} />
+                  <Route path="billing" element={<BillingPage />} />
+                  <Route path="credits" element={<CreditsPage />} />
+                  <Route path="thumb-generator" element={<Navigate to="/app/thumb-tools/generate" replace />} />
+                  <Route path="widgetkit" element={<WidgetKitShell />}>
+                    <Route index element={<WidgetKit />} />
+                    <Route path="psd-umg" element={<PsdToUmgPage />} />
+                    <Route path="umg-verse" element={<UmgToVersePage />} />
+                  </Route>
+                  <Route path="thumb-tools" element={<ThumbToolsShell />}>
+                    <Route index element={<ThumbToolsHub />} />
+                    <Route path="generate" element={<GenerateToolPage />} />
+                    <Route path="edit-studio" element={<EditStudioPage />} />
+                    <Route path="camera-control" element={<CameraControlPage />} />
+                    <Route path="layer-decomposition" element={<LayerDecompositionPage />} />
+                  </Route>
+                </Route>
               </Route>
 
               <Route path="/auth" element={<Auth />} />
-
-              {/* Client (auth required) */}
-              <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-                <Route index element={<AppDashboard />} />
-                <Route path="analytics-tools" element={<AnalyticsToolsHub />} />
-                <Route path="projects/:id" element={<ProjectDetail />} />
-                <Route path="projects/:id/reports/:reportId" element={<ReportDashboard />} />
-                <Route path="island-lookup" element={<IslandLookup />} />
-                <Route path="billing" element={<BillingPage />} />
-                <Route path="credits" element={<CreditsPage />} />
-                <Route path="thumb-generator" element={<Navigate to="/app/thumb-tools/generate" replace />} />
-                <Route path="widgetkit" element={<WidgetKitShell />}>
-                  <Route index element={<WidgetKit />} />
-                  <Route path="psd-umg" element={<PsdToUmgPage />} />
-                  <Route path="umg-verse" element={<UmgToVersePage />} />
-                </Route>
-                <Route path="thumb-tools" element={<ThumbToolsShell />}>
-                  <Route index element={<ThumbToolsHub />} />
-                  <Route path="generate" element={<GenerateToolPage />} />
-                  <Route path="edit-studio" element={<EditStudioPage />} />
-                  <Route path="camera-control" element={<CameraControlPage />} />
-                  <Route path="layer-decomposition" element={<LayerDecompositionPage />} />
-                </Route>
-              </Route>
 
               {/* Admin (admin/editor role required) */}
               <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
@@ -162,6 +165,8 @@ const App = () => (
                 <Route path="tgis/costs" element={<AdminTgisCosts />} />
                 <Route path="tgis/safety" element={<AdminTgisSafety />} />
                 <Route path="commerce" element={<AdminCommerce />} />
+                <Route path="support" element={<AdminSupport />} />
+                <Route path="support/tickets/:id" element={<AdminSupportTicket />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

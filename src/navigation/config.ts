@@ -33,6 +33,16 @@ const navItems = {
     icon: "reports",
     group: "analyticsTools",
   }),
+  support: navItem({
+    id: "support",
+    labelKey: "nav.support",
+    to: "/support",
+    match: "prefix",
+    contexts: ["public", "app"],
+    visibility: ["anon", "authenticated"],
+    icon: "support",
+    group: "misc",
+  }),
   analyticsToolsHub: navItem({
     id: "analyticsToolsHub",
     labelKey: "nav.analyticsTools",
@@ -217,6 +227,16 @@ const navItems = {
     icon: "admin",
     group: "admin",
   }),
+  adminSupport: navItem({
+    id: "adminSupport",
+    labelKey: "nav.adminSupport",
+    to: "/admin/support",
+    match: "prefix",
+    contexts: ["admin"],
+    visibility: ["editor", "admin"],
+    icon: "admin",
+    group: "admin",
+  }),
   toolsGenerate: navItem({
     id: "toolsGenerate",
     labelKey: "nav.toolsGenerate",
@@ -273,7 +293,7 @@ const NAV_SECTIONS: NavSection[] = [
     labelKey: "nav.sectionPlatform",
     contexts: ["public", "app"],
     visibility: ["anon", "authenticated"],
-    items: [navItems.discover, navItems.analyticsToolsHub, navItems.thumbToolsHub, navItems.widgetKitHub],
+    items: [navItems.discover, navItems.analyticsToolsHub, navItems.thumbToolsHub, navItems.widgetKitHub, navItems.support],
   },
   {
     id: "analytics",
@@ -317,14 +337,15 @@ const NAV_SECTIONS: NavSection[] = [
       navItems.adminDppi,
       navItems.adminTgis,
       navItems.adminCommerce,
+      navItems.adminSupport,
     ],
   },
 ];
 
 const PRIMARY_ITEMS_BY_CONTEXT: Record<TopBarContext, string[]> = {
-  public: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub"],
-  app: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub", "reports"],
-  admin: ["adminOverview", "adminReports", "adminIntel", "adminExposure", "adminDppi", "adminTgis", "adminCommerce"],
+  public: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub", "support"],
+  app: ["discover", "analyticsToolsHub", "thumbToolsHub", "widgetKitHub", "reports", "support"],
+  admin: ["adminOverview", "adminReports", "adminIntel", "adminExposure", "adminDppi", "adminTgis", "adminCommerce", "adminSupport"],
 };
 
 const ANALYTICS_SHORTCUT_ITEM_IDS = ["islandAnalytics", "islandLookup", "reports"] as const;

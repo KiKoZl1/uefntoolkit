@@ -1,13 +1,15 @@
-import { Outlet } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "./AppLayout";
 import PublicLayout from "./PublicLayout";
+import { SupportChatWidget } from "@/components/support/SupportChatWidget";
 
 /**
  * Uses the app shell when authenticated and the public shell when anonymous.
  */
 export default function SmartLayout() {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -17,9 +19,14 @@ export default function SmartLayout() {
     );
   }
 
-  if (user) {
-    return <AppLayout />;
-  }
+  const layout = user ? <AppLayout /> : <PublicLayout />;
+  const path = location.pathname;
+  const showWidget = Boolean(user) && !path.startsWith("/auth") && !path.startsWith("/admin");
 
-  return <PublicLayout />;
+  return (
+    <>
+      {layout}
+      {showWidget ? <SupportChatWidget /> : null}
+    </>
+  );
 }

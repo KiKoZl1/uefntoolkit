@@ -126,3 +126,6 @@ verify_jwt = false
 [functions.commerce]
 verify_jwt = false
 
+[functions.support-ai-responder]
+verify_jwt = false
+

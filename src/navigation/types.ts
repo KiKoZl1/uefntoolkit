@@ -11,6 +11,7 @@ export type NavItemIcon =
   | "analyticsTools"
   | "thumbTools"
   | "widgetKit"
+  | "support"
   | "islandAnalytics"
   | "islandLookup"
   | "reports"
