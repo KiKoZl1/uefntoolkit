@@ -22,7 +22,7 @@ export default function Auth() {
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
 
-  if (user) return <Navigate to="/app" replace />;
+  if (user) return <Navigate to="/" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,7 +99,7 @@ export default function Auth() {
                 const { error } = await supabase.auth.signInWithOAuth({
                   provider: "google",
                   options: {
-                    redirectTo: getAuthRedirectUrl("/app"),
+                    redirectTo: getAuthRedirectUrl("/"),
                   },
                 });
                 if (error) toast({ title: t("auth.googleError"), description: error.message, variant: "destructive" });
