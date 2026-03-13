@@ -1,0 +1,120 @@
+{
+    "generated_at":  "2026-03-12T23:48:30.4411933-03:00",
+    "services":  [
+                     {
+                         "name":  "frontend-webapp",
+                         "category":  "frontend",
+                         "root":  "src",
+                         "language":  "TypeScript",
+                         "framework":  "React 18 + React Router",
+                         "package_manager":  "npm",
+                         "default_port":  "5173 (vite dev default)",
+                         "env_vars":  [
+                                          "VITE_SUPABASE_URL",
+                                          "VITE_SUPABASE_PUBLISHABLE_KEY",
+                                          "VITE_BRAND_NAME",
+                                          "VITE_CANONICAL_URL"
+                                      ],
+                         "evidence":  [
+                                          "package.json",
+                                          "src/main.tsx",
+                                          "src/App.tsx",
+                                          "src/integrations/supabase/client.ts",
+                                          ".env.example"
+                                      ]
+                     },
+                     {
+                         "name":  "backend-a-edge-functions",
+                         "category":  "backend",
+                         "root":  "supabase/functions",
+                         "language":  "TypeScript (Deno)",
+                         "framework":  "Supabase Edge Functions",
+                         "package_manager":  "Supabase CLI",
+                         "default_port":  "Supabase Functions runtime (not explicitly declared in repo)",
+                         "env_vars":  [
+                                          "SUPABASE_URL",
+                                          "SUPABASE_ANON_KEY",
+                                          "SUPABASE_SERVICE_ROLE_KEY",
+                                          "DATA_SUPABASE_URL",
+                                          "DATA_SUPABASE_SERVICE_ROLE_KEY",
+                                          "INTERNAL_BRIDGE_SECRET",
+                                          "LOOKUP_DATA_TIMEOUT_MS",
+                                          "OPENAI_API_KEY",
+                                          "OPENAI_MODEL",
+                                          "OPENAI_TRANSLATION_MODEL",
+                                          "NVIDIA_API_KEY",
+                                          "NVIDIA_LOOKUP_MODEL"
+                                      ],
+                         "evidence":  [
+                                          "supabase/config.toml",
+                                          "supabase/functions/discover-data-api/index.ts",
+                                          ".env.example"
+                                      ]
+                     },
+                     {
+                         "name":  "backend-b-commerce",
+                         "category":  "backend",
+                         "root":  "supabase/functions/commerce",
+                         "language":  "TypeScript (Deno)",
+                         "framework":  "Supabase Edge Functions",
+                         "package_manager":  "Supabase CLI",
+                         "default_port":  "Supabase Functions runtime (not explicitly declared in repo)",
+                         "env_vars":  [
+                                          "STRIPE_SECRET_KEY",
+                                          "STRIPE_WEBHOOK_SECRET",
+                                          "STRIPE_PRICE_PRO_MONTHLY",
+                                          "STRIPE_PRICE_PACK_250",
+                                          "STRIPE_PRICE_PACK_650",
+                                          "STRIPE_PRICE_PACK_1400",
+                                          "COMMERCE_GATEWAY_SECRET",
+                                          "COMMERCE_GATEWAY_ENFORCE",
+                                          "COMMERCE_INTERNAL_SECRET",
+                                          "COMMERCE_RATE_LIMIT_ENABLED",
+                                          "COMMERCE_RATE_LIMIT_EXECUTE_PER_MINUTE",
+                                          "COMMERCE_RATE_LIMIT_REVERSE_PER_MINUTE",
+                                          "COMMERCE_RATE_LIMIT_SUB_CHECKOUT_PER_HOUR",
+                                          "COMMERCE_RATE_LIMIT_PACK_CHECKOUT_PER_HOUR",
+                                          "COMMERCE_RATE_LIMIT_WEBHOOK_PER_MINUTE",
+                                          "APP_BASE_URL"
+                                      ],
+                         "evidence":  [
+                                          "supabase/functions/commerce/index.ts",
+                                          ".env.example"
+                                      ]
+                     },
+                     {
+                         "name":  "database-app",
+                         "category":  "database",
+                         "root":  "supabase/migrations",
+                         "language":  "SQL (PostgreSQL)",
+                         "framework":  "Supabase Postgres",
+                         "package_manager":  "Supabase CLI migrations",
+                         "default_port":  "5432 (documented connection string format)",
+                         "env_vars":  [
+                                          "SUPABASE_DB_URL"
+                                      ],
+                         "evidence":  [
+                                          "supabase/migrations/*.sql",
+                                          ".env.example"
+                                      ]
+                     },
+                     {
+                         "name":  "database-data",
+                         "category":  "database",
+                         "root":  "external (bridge target)",
+                         "language":  "PostgreSQL via Supabase",
+                         "framework":  "Supabase Data project bridge",
+                         "package_manager":  "N/A",
+                         "default_port":  "5432 (inferred from SUPABASE_DB_URL format)",
+                         "env_vars":  [
+                                          "DATA_SUPABASE_URL",
+                                          "DATA_SUPABASE_SERVICE_ROLE_KEY",
+                                          "INTERNAL_BRIDGE_SECRET"
+                                      ],
+                         "evidence":  [
+                                          ".env.example",
+                                          "supabase/functions/_shared/dataBridge.ts"
+                                      ]
+                     }
+                 ]
+}

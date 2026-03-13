@@ -1,0 +1,979 @@
+openapi: 3.0.0
+info:
+  title: Backend A Edge Functions API
+  version: 1.0.0
+servers:
+  - url: /
+paths:
+  /functions/v1/ai-analyst:
+    post:
+      operationId: post_ai_analyst
+      summary: Invoke ai-analyst
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-collector:
+    post:
+      operationId: post_discover_collector
+      summary: Invoke discover-collector
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-island-lookup:
+    post:
+      operationId: post_discover_island_lookup
+      summary: Invoke discover-island-lookup
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-island-page:
+    post:
+      operationId: post_discover_island_page
+      summary: Invoke discover-island-page
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-report-ai:
+    post:
+      operationId: post_discover_report_ai
+      summary: Invoke discover-report-ai
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-exposure-collector:
+    post:
+      operationId: post_discover_exposure_collector
+      summary: Invoke discover-exposure-collector
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-exposure-report:
+    post:
+      operationId: post_discover_exposure_report
+      summary: Invoke discover-exposure-report
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-links-metadata-collector:
+    post:
+      operationId: post_discover_links_metadata_collector
+      summary: Invoke discover-links-metadata-collector
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-report-rebuild:
+    post:
+      operationId: post_discover_report_rebuild
+      summary: Invoke discover-report-rebuild
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-exposure-timeline:
+    post:
+      operationId: post_discover_exposure_timeline
+      summary: Invoke discover-exposure-timeline
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-enqueue-gap:
+    post:
+      operationId: post_discover_enqueue_gap
+      summary: Invoke discover-enqueue-gap
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-cron-admin:
+    post:
+      operationId: post_discover_cron_admin
+      summary: Invoke discover-cron-admin
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-data-api:
+    post:
+      operationId: post_discover_data_api
+      summary: Invoke discover-data-api
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-rails-resolver:
+    post:
+      operationId: post_discover_rails_resolver
+      summary: Invoke discover-rails-resolver
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-island-lookup-ai:
+    post:
+      operationId: post_discover_island_lookup_ai
+      summary: Invoke discover-island-lookup-ai
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-panel-timeline:
+    post:
+      operationId: post_discover_panel_timeline
+      summary: Invoke discover-panel-timeline
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-panel-intel-refresh:
+    post:
+      operationId: post_discover_panel_intel_refresh
+      summary: Invoke discover-panel-intel-refresh
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-dppi-panel:
+    post:
+      operationId: post_discover_dppi_panel
+      summary: Invoke discover-dppi-panel
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/discover-dppi-island:
+    post:
+      operationId: post_discover_dppi_island
+      summary: Invoke discover-dppi-island
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/dppi-refresh-batch:
+    post:
+      operationId: post_dppi_refresh_batch
+      summary: Invoke dppi-refresh-batch
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/dppi-train-dispatch:
+    post:
+      operationId: post_dppi_train_dispatch
+      summary: Invoke dppi-train-dispatch
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/dppi-health:
+    post:
+      operationId: post_dppi_health
+      summary: Invoke dppi-health
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/dppi-release-set:
+    post:
+      operationId: post_dppi_release_set
+      summary: Invoke dppi-release-set
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/dppi-worker-heartbeat:
+    post:
+      operationId: post_dppi_worker_heartbeat
+      summary: Invoke dppi-worker-heartbeat
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-generate:
+    post:
+      operationId: post_tgis_generate
+      summary: Invoke tgis-generate
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-health:
+    post:
+      operationId: post_tgis_health
+      summary: Invoke tgis-health
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-skins-search:
+    post:
+      operationId: post_tgis_skins_search
+      summary: Invoke tgis-skins-search
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-skins-sync:
+    post:
+      operationId: post_tgis_skins_sync
+      summary: Invoke tgis-skins-sync
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-refresh-dataset:
+    post:
+      operationId: post_tgis_admin_refresh_dataset
+      summary: Invoke tgis-admin-refresh-dataset
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-start-training:
+    post:
+      operationId: post_tgis_admin_start_training
+      summary: Invoke tgis-admin-start-training
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-training-run-action:
+    post:
+      operationId: post_tgis_admin_training_run_action
+      summary: Invoke tgis-admin-training-run-action
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-promote-model:
+    post:
+      operationId: post_tgis_admin_promote_model
+      summary: Invoke tgis-admin-promote-model
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-rollback-model:
+    post:
+      operationId: post_tgis_admin_rollback_model
+      summary: Invoke tgis-admin-rollback-model
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-delete-model:
+    post:
+      operationId: post_tgis_admin_delete_model
+      summary: Invoke tgis-admin-delete-model
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-admin-sync-manifest:
+    post:
+      operationId: post_tgis_admin_sync_manifest
+      summary: Invoke tgis-admin-sync-manifest
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-training-webhook:
+    post:
+      operationId: post_tgis_training_webhook
+      summary: Invoke tgis-training-webhook
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-edit-studio:
+    post:
+      operationId: post_tgis_edit_studio
+      summary: Invoke tgis-edit-studio
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-camera-control:
+    post:
+      operationId: post_tgis_camera_control
+      summary: Invoke tgis-camera-control
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-layer-decompose:
+    post:
+      operationId: post_tgis_layer_decompose
+      summary: Invoke tgis-layer-decompose
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-layer-download:
+    post:
+      operationId: post_tgis_layer_download
+      summary: Invoke tgis-layer-download
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /functions/v1/tgis-delete-asset:
+    post:
+      operationId: post_tgis_delete_asset
+      summary: Invoke tgis-delete-asset
+      x-doc-confidence: low
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

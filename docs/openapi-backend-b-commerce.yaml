@@ -1,0 +1,215 @@
+openapi: 3.0.0
+info:
+  title: Backend B Commerce API
+  version: 1.0.0
+servers:
+  - url: /
+paths:
+  /functions/v1/commerce/catalog/tool-costs:
+    get:
+      operationId: get_commerce_catalog_tool_costs
+      responses:
+        '200': { description: OK }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/me/credits:
+    get:
+      operationId: get_commerce_me_credits
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/me/credits/summary:
+    get:
+      operationId: get_commerce_me_credits_summary
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/me/ledger:
+    get:
+      operationId: get_commerce_me_ledger
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/me/usage-summary:
+    get:
+      operationId: get_commerce_me_usage_summary
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/tools/execute:
+    post:
+      operationId: post_commerce_tools_execute
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '422': { description: Business error }
+        '429': { description: Rate limit }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/tools/reverse:
+    post:
+      operationId: post_commerce_tools_reverse
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '429': { description: Rate limit }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/billing/subscription/checkout:
+    post:
+      operationId: post_commerce_billing_subscription_checkout
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '429': { description: Rate limit }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/billing/packs:
+    get:
+      operationId: get_commerce_billing_packs
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/billing/packs/{packCode}/checkout:
+    post:
+      operationId: post_commerce_billing_pack_checkout
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: packCode
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+        '429': { description: Rate limit }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/billing/webhooks/provider:
+    post:
+      operationId: post_commerce_billing_webhook_provider
+      security: [{ stripeSignature: [] }]
+      responses:
+        '200': { description: Processed }
+        '400': { description: Invalid signature }
+        '429': { description: Rate limit }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/user-lookup:
+    get:
+      operationId: get_commerce_admin_user_lookup
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: email
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/user/{userId}:
+    get:
+      operationId: get_commerce_admin_user_overview
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/credits/grant:
+    post:
+      operationId: post_commerce_admin_credits_grant
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/credits/debit:
+    post:
+      operationId: post_commerce_admin_credits_debit
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/user/{userId}/abuse-review:
+    post:
+      operationId: post_commerce_admin_user_abuse_review
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/admin/user/{userId}/suspend:
+    post:
+      operationId: post_commerce_admin_user_suspend
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/internal/jobs/weekly-release:
+    post:
+      operationId: post_commerce_internal_jobs_weekly_release
+      security: [{ internalSecret: [] }, { bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+  /functions/v1/commerce/internal/jobs/reconcile:
+    post:
+      operationId: post_commerce_internal_jobs_reconcile
+      security: [{ internalSecret: [] }, { bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '403': { description: Forbidden }
+        '500': { description: Internal server error }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    stripeSignature:
+      type: apiKey
+      in: header
+      name: stripe-signature
+    internalSecret:
+      type: apiKey
+      in: header
+      name: x-commerce-internal-secret
