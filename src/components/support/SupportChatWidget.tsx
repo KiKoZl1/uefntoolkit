@@ -37,7 +37,10 @@ export function SupportChatWidget() {
   const trigger = (
     <Button
       size="icon"
-      className="group relative h-12 w-12 rounded-full border border-primary/35 bg-background/95 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
+      className={cn(
+        "group relative h-12 w-12 rounded-full border border-primary/35 bg-background/95 shadow-[0_10px_30px_rgba(0,0,0,0.35)]",
+        open && "pointer-events-none opacity-0",
+      )}
       aria-label={t("support.widget.open")}
     >
       <MessageCircle className="h-5 w-5 text-primary transition-transform group-hover:scale-105" />
@@ -51,7 +54,7 @@ export function SupportChatWidget() {
   );
 
   return (
-    <div className="fixed bottom-4 right-4 z-[95] sm:bottom-6 sm:right-6">
+    <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6">
       {isMobile ? (
         <Drawer open={open} onOpenChange={setOpen}>
           <DrawerTrigger asChild>{trigger}</DrawerTrigger>
@@ -61,7 +64,7 @@ export function SupportChatWidget() {
               <DrawerDescription>{t("support.widget.description")}</DrawerDescription>
             </DrawerHeader>
             <div className="px-3 pb-3">
-              <SupportChat mode="widget" allowAnonymous={false} className="min-h-[70vh]" />
+              <SupportChat mode="widget" allowAnonymous={false} className="h-[70vh] min-h-0" />
             </div>
           </DrawerContent>
         </Drawer>
@@ -73,7 +76,7 @@ export function SupportChatWidget() {
               <SheetTitle>{t("support.widget.title")}</SheetTitle>
               <SheetDescription>{t("support.widget.description")}</SheetDescription>
             </SheetHeader>
-            <SupportChat mode="widget" allowAnonymous={false} className="min-h-[78vh]" />
+            <SupportChat mode="widget" allowAnonymous={false} className="h-[calc(100dvh-6rem)] min-h-0" />
           </SheetContent>
         </Sheet>
       )}

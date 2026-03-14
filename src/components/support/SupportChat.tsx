@@ -35,7 +35,7 @@ export function SupportChat({ mode = "widget", allowAnonymous = false, className
 
   const wrapperClass = useMemo(() => {
     if (mode === "page") return "w-full max-w-3xl rounded-xl border border-border/70 bg-card/40";
-    return "w-full rounded-xl border border-border/70 bg-card/40";
+    return "w-full rounded-xl border border-border/70 bg-card/40 h-full min-h-0";
   }, [mode]);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export function SupportChat({ mode = "widget", allowAnonymous = false, className
   }
 
   return (
-    <div className={cn(wrapperClass, "flex h-full min-h-[520px] flex-col", className)}>
+    <div className={cn(wrapperClass, "flex h-full flex-col", mode === "page" ? "min-h-[520px]" : "min-h-0", className)}>
       <div className="border-b border-border/70 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div>
