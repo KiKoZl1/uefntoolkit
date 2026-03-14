@@ -299,6 +299,27 @@ Evidence: orchestration step list. (source: ml/tgis/runtime/worker_tick.py:30)
 For complete step-by-step operator instructions use:
 
 - `docs/DEPLOYMENT_RUNBOOK.md`
+
+### 9.6 Support AI Memory Sync (Incremental)
+
+Keep support AI knowledge fresh with incremental reingest:
+
+```bash
+npm run support:memory:sync -- --paths=docs --scope=support,docs
+```
+
+Behavior:
+
+- scans documentation paths
+- hashes content chunks
+- upserts only new/changed chunks
+- skips unchanged chunks (no extra embedding cost)
+- deactivates stale chunks for files that changed chunk count
+
+Recurring job:
+
+- GitHub Actions workflow: `.github/workflows/support-memory-sync.yml`
+- runs every 6 hours and on `docs/**` updates to `main`
 - `docs/OPERATIONS_RUNBOOK.md`
 - `docs/PAYMENTS_GATEWAY.md`
 - `docs/LLM_ML_RUNBOOK.md`

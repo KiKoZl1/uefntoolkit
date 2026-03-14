@@ -19,6 +19,7 @@
     "ralph:loop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ralph_loop.ps1",
     "ralph:memory:ingest": "node scripts/ralph_memory_ingest.mjs",
     "ralph:memory:query": "node scripts/ralph_memory_query.mjs",
+    "support:memory:sync": "node scripts/support_memory_reingest.mjs",
     "migration:set-target": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/migration-set-target.ps1",
     "migration:export:tables": "node scripts/export_supabase_tables.mjs"
   },
