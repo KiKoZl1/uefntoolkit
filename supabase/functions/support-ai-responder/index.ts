@@ -143,6 +143,93 @@ function findEscalationSignal(text: string): boolean {
   return patterns.some((pattern) => value.includes(pattern));
 }
 
+function detectIssueReport(message: string, conversation: SupportConversationItem[]): boolean {
+  const full = extractAllUserText(message, conversation);
+  const issuePatterns = [
+    "erro",
+    "error",
+    "falha",
+    "failed",
+    "failure",
+    "nao funciona",
+    "nao processa",
+    "problema",
+    "bug",
+    "crash",
+    "timeout",
+    "card_declined",
+    "declined",
+    "cobrado",
+    "duplicado",
+    "invoice",
+    "fatura errada",
+    "refund",
+    "chargeback",
+    "500",
+    "404",
+  ];
+  return issuePatterns.some((p) => full.includes(p));
+}
+
+function isBillingInformationalQuery(message: string, conversation: SupportConversationItem[]): boolean {
+  const full = extractAllUserText(message, conversation);
+  const billingScope = /(credit|credito|billing|assinatura|subscription|wallet|pool|weekly|mensal|monthly|pack|pacote)/.test(full);
+  const asksHow = /(como|how|funciona|works|entender|explain|explica|coloco|adicion|comprar|buy|renova|renew)/.test(full);
+  const issue = detectIssueReport(message, conversation);
+  return billingScope && asksHow && !issue;
+}
+
+function buildBillingGuidanceReply(message: string, isPt: boolean): string {
+  const text = message.toLowerCase();
+  const asksAddCredits = /(coloco|adicion|compr|buy|pack|pacote|creditos extras|extra credit)/.test(text);
+
+  if (isPt) {
+    if (asksAddCredits) {
+      return [
+        "Voce pode adicionar creditos extras em **/app/credits** na secao de pacotes.",
+        "Para assinatura e plano, use **/app/billing**.",
+        "",
+        "Resumo rapido:",
+        "- consumo usa **weekly wallet** primeiro;",
+        "- depois usa **extra wallet**;",
+        "- o **monthly pool** e contabil do ciclo e nao e gasto direto.",
+      ].join("\n");
+    }
+
+    return [
+      "No sistema de creditos do plano Pro:",
+      "- **Monthly pool**: saldo total contabil do ciclo (ex.: 800).",
+      "- **Weekly wallet**: parte liberada para uso na semana (ex.: 200).",
+      "- **Extra wallet**: creditos comprados a parte.",
+      "",
+      "Ordem de consumo: **weekly wallet -> extra wallet**.",
+      "Se a weekly zerar, aguarde a proxima liberacao semanal ou compre pacote extra em **/app/credits**.",
+    ].join("\n");
+  }
+
+  if (asksAddCredits) {
+    return [
+      "You can add extra credits at **/app/credits** in the packs section.",
+      "For subscription and plan management, use **/app/billing**.",
+      "",
+      "Quick summary:",
+      "- usage spends **weekly wallet** first;",
+      "- then spends **extra wallet**;",
+      "- **monthly pool** is accounting cycle balance, not direct spend.",
+    ].join("\n");
+  }
+
+  return [
+    "In the Pro credits system:",
+    "- **Monthly pool**: total accounting balance for the cycle (for example, 800).",
+    "- **Weekly wallet**: the weekly released amount you can spend now (for example, 200).",
+    "- **Extra wallet**: separately purchased credits.",
+    "",
+    "Spend order: **weekly wallet -> extra wallet**.",
+    "If weekly reaches zero, wait for next weekly release or buy extra packs at **/app/credits**.",
+  ].join("\n");
+}
+
 function findUserEscalationRequest(text: string): boolean {
   const value = text.toLowerCase();
   const patterns = [
@@ -272,8 +359,12 @@ function shouldEscalate(args: {
   confidenceThreshold: number;
 }): boolean {
   const { reply, message, conversation, confidenceThreshold } = args;
+  const explicitEscalationRequest = findUserEscalationRequest(message);
 
-  if (findEscalationSignal(reply) || findUserEscalationRequest(message)) return true;
+  if (explicitEscalationRequest) return true;
+  if (findEscalationSignal(reply) && detectIssueReport(message, conversation)) return true;
+
+  if (!detectIssueReport(message, conversation)) return false;
 
   const userTurns = conversation.filter((item) => item.role === "user").length + 1;
   const normalizedThreshold = Math.min(1, Math.max(0, confidenceThreshold));
@@ -626,6 +717,15 @@ serve(async (req) => {
       confidenceThreshold: cfg.confidence_threshold,
     });
     const category = inferCategory(message, pageUrl);
+    const billingInfoQuery = isBillingInformationalQuery(message, conversation);
+
+    if (billingInfoQuery) {
+      return json({
+        reply: buildBillingGuidanceReply(message, isPt),
+        action: conversation.length === 0 ? "faq_cards" : "continue",
+        faq_cards: conversation.length === 0 ? faqCards : undefined,
+      });
+    }
 
     if (escalate && needsClarificationBeforeTicket(category, message, conversation)) {
       return json({
